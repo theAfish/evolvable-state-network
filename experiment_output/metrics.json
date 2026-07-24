@@ -1,0 +1,115 @@
+{
+  "baselines": {
+    "fixed_rnn": {
+      "metrics": {
+        "activity_diversity": {
+          "diverse": true,
+          "node_time_mean_std": 0.20460463818857588
+        },
+        "boundedness": {
+          "bounded": true,
+          "finite": true,
+          "maximum_absolute_value": 1.2751733871789668
+        },
+        "non_silence": {
+          "non_silent": true,
+          "rms": 0.3800748068560884
+        },
+        "perturbation_response": {
+          "magnitude": 0.2491930621259686,
+          "measured_events": 4,
+          "responsive": true
+        },
+        "recovery": {
+          "error": 0.2698456352310946,
+          "measured_events": 3,
+          "recovered": false
+        },
+        "saturation": {
+          "fraction": 0.06818181818181818,
+          "saturated": false
+        }
+      },
+      "trajectory_plot": "fixed_rnn_trajectory.svg"
+    },
+    "homeostatic": {
+      "metrics": {
+        "activity_diversity": {
+          "diverse": true,
+          "node_time_mean_std": 0.20374924868578284
+        },
+        "boundedness": {
+          "bounded": true,
+          "finite": true,
+          "maximum_absolute_value": 1.2668975278965033
+        },
+        "non_silence": {
+          "non_silent": true,
+          "rms": 0.3731836878214765
+        },
+        "perturbation_response": {
+          "magnitude": 0.24010967063413347,
+          "measured_events": 4,
+          "responsive": true
+        },
+        "recovery": {
+          "error": 0.2551033425817419,
+          "measured_events": 3,
+          "recovered": false
+        },
+        "saturation": {
+          "fraction": 0.06818181818181818,
+          "saturated": false
+        }
+      },
+      "trajectory_plot": "homeostatic_trajectory.svg"
+    }
+  },
+  "config": {
+    "batch_size": 1,
+    "dt": 0.05,
+    "max_abs_state": 4.0,
+    "max_delta": 0.12,
+    "record_every": 1,
+    "steps": 10
+  },
+  "graph": {
+    "edges": 12,
+    "nodes": 4,
+    "seed": 7,
+    "topology": "erdos_renyi"
+  },
+  "perturbations": [
+    {
+      "end": 4,
+      "offset": 0.35,
+      "scale": 1.35,
+      "start": 2,
+      "type": "InputDistributionShift"
+    },
+    {
+      "amount": 1.2,
+      "nodes": [
+        0
+      ],
+      "step": 5,
+      "type": "ImpulseInjection"
+    },
+    {
+      "end": 9,
+      "nodes": [
+        1
+      ],
+      "start": 7,
+      "type": "NodeLesion"
+    },
+    {
+      "end": 7,
+      "seed": 26,
+      "standard_deviation": 0.12,
+      "start": 5,
+      "type": "WeightNoise"
+    }
+  ],
+  "schema_version": 1
+}

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "evolvable-state-network"
+version = "0.1.0"
+description = "Deterministic batched message-passing dynamical systems for evolvable stability experiments."
+requires-python = ">=3.11"
+authors = [{name = "Experimental Dynamics"}]
+
+[project.scripts]
+esn-experiment = "evolvable_state_network.cli:main"
+esn-dashboard = "evolvable_state_network.server:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+evolvable_state_network = ["web/*.css", "web/*.html", "web/*.js"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
