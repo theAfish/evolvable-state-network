@@ -15,8 +15,8 @@ permutation-invariant message sum plus external input.
   hidden environment state.
 - Runtime-adaptive directed communication channels with fixed topology and unit
   base weights. Edge
-  latents take bounded `scale * tanh(local_rule(...))` increments; a smooth
-  bounded scalar gate modulates a fixed projected source message.
+  latents take bounded `scale * tanh(local_rule(...))` increments; smooth
+  bounded coordinate-wise gates modulate a fixed projected source message.
 - Reproducible directed random graphs and index-addressed input/noise streams.
 - Trajectory recording plus input-shift, impulse, node-lesion, and weight-noise
   disturbances.
@@ -46,7 +46,7 @@ Node and edge rule parameters form one joint genome by default. Runtime node
 and edge states are reset and never inherited. Online health accumulators,
 paired response probes, right-censor records, common scenario banks, multiple
 replicas, buffered CMA-ES updates, and a validated elite archive are written to
-the operating system's standard per-user application-data directory.
+the project-local `.outputs/` directory by default.
 
 Run the required short diagnostic before scheduling a larger search:
 
@@ -89,25 +89,74 @@ Install the project once into its virtual environment:
 .\.venv\Scripts\python.exe -m pip install -e .
 ```
 
-Start the FastAPI application without selecting or preparing an output folder:
+Start the FastAPI application. Generated runs are stored in `.outputs/` under
+the current directory:
 
 ```powershell
 esn-dashboard
 ```
 
-Open `http://127.0.0.1:8000/`. Interactive API documentation is available at
-`http://127.0.0.1:8000/docs`. The old `/dashboard/` URL redirects to `/`.
+The default port is `8000`, but it can be changed if another application is
+using it:
+
+```powershell
+esn-dashboard --port 8001
+```
+
+For an environment-based setting, use `$env:ESN_PORT = "8001"` before running
+`esn-dashboard`. The `--port` argument takes precedence over `ESN_PORT`.
+Without an override, use `http://127.0.0.1:8000/` and
+`http://127.0.0.1:8000/docs`; with the example override, use port `8001` for
+both URLs. The old `/dashboard/` URL redirects to `/`.
+
+To keep results in another local folder, set it once for the server process:
+
+```powershell
+esn-dashboard --data-dir .\my-results
+```
+
+Alternatively set `$env:ESN_DATA_DIR = "D:\research\state-network-results"`
+before starting the dashboard. This is a server-level storage setting, not a
+required per-run output argument.
+
+The **Survival** tab now has two distinct actions. `Run 80-tick smoke test`
+checks that the asynchronous machinery works. `Start survival training` runs a
+configured experiment and stops at either the requested completed candidate-life
+budget or the safety tick limit. A candidate life is one genome evaluated across
+the selected number of seeded replicas; CMA-ES is updated only after exact death
+or graduation outcomes form a comparable result batch. The page explains the
+learning state, stop reason, completed replica trajectories, curriculum passage,
+death causes, and every archived candidate in plain language.
+
+Every completed run also persists `elite_archive.json`. The **Live graph** tab
+lists up to the configured elite count from each survival run, including older
+runs whose elites can be reconstructed from their candidate archive. Selecting
+an elite decodes the trained joint node-and-edge genome and runs it continuously
+on a newly configured graph. Legacy `best_genome.json` exports remain available
+as explicitly labelled comparison models.
+
+The Live model chooser defaults to the best trained elite from each run. It can
+also show every survival elite or only legacy comparisons. Survival models are
+globally ordered by the same lexicographic evidence used during evolution:
+curriculum stage, demonstrated function across replicas, lifetime, lower
+worst-replica pathology burden, response, propagation, recovery, and paired-probe
+distinguishability. The detail panel exposes these values and does not collapse
+them into an arbitrary scalar score.
 
 FastAPI serves the packaged frontend and artifact files. Uvicorn runs the ASGI
-application, Pydantic validates request bodies, and Platformdirs chooses the
-correct persistent data location for Windows, macOS, or Linux. Set
-`ESN_DATA_DIR` only when an explicit storage override is useful; it is not
-required for normal use. `GET /api/health` reports the active storage path.
+application and Pydantic validates request bodies. `GET /api/health` reports
+the active storage path.
 
-The dashboard supports wall-clock
-playback, stepping, speed and loop controls, baseline/batch/coordinate choices,
-and click-to-inspect node and edge state, external input, graph connections,
-metrics, and active disturbances. The **New experiment** panel runs a fresh
+The dashboard's **Survival** archive exposes a `Replay this exact life` control
+for every completed candidate replica. It reconstructs the archived genome on
+that replica's saved graph, initial state, input stream, probes, and curriculum
+disturbances, then stops at the archived death or graduation age. It is not a
+fixed 80-step validation window. The older **Legacy comparison** view retains
+its generation-based plots but no longer supplies the interactive replay chooser.
+
+The dashboard supports wall-clock playback, stepping, speed and loop controls,
+baseline/batch/coordinate choices, and click-to-inspect node and edge state,
+external input, graph connections, metrics, and active disturbances. The **New experiment** panel runs a fresh
 parameterized simulation through this local server and loads it directly into
 the replay view. It can also load any compatible
 replay JSON through its file picker.

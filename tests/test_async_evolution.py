@@ -28,6 +28,16 @@ def state(value: float, nodes: int = 3) -> NetworkState:
     return NetworkState(node=[[(value,) for _ in range(nodes)]], edge=[[(0.0,), (0.0,)]])
 
 
+def state_with_edges(node_value: float, edge_value: float, nodes: int = 3) -> NetworkState:
+    return NetworkState(
+        node=[[(node_value,) for _ in range(nodes)]], edge=[[(edge_value,), (edge_value,)]]
+    )
+
+
+def vector_state(values: tuple[float, ...], nodes: int = 3) -> NetworkState:
+    return NetworkState(node=[[values for _ in range(nodes)]], edge=[[(0.0,), (0.0,)]])
+
+
 class AsyncEvolutionTests(unittest.TestCase):
     def test_immediate_numerical_death(self) -> None:
         monitor = HealthMonitor(PathologyConfig())
@@ -69,7 +79,10 @@ class AsyncEvolutionTests(unittest.TestCase):
     def test_delayed_one_direction_degeneration(self) -> None:
         monitor = HealthMonitor(
             PathologyConfig(
-                fatal_threshold=2, one_direction_steps=3, homogenization_variance=-1
+                fatal_threshold=2,
+                one_direction_steps=3,
+                node_growth_alert=.1,
+                homogenization_variance=-1,
             )
         )
         cause = None
@@ -78,6 +91,76 @@ class AsyncEvolutionTests(unittest.TestCase):
                 step, state(step * .1), state((step + 1) * .1), (.5,), TransitionDiagnostics()
             )
         self.assertEqual(cause, "one_direction_degeneration")
+
+    def test_opposing_coordinate_drifts_cannot_cancel_in_health_check(self) -> None:
+        monitor = HealthMonitor(
+            PathologyConfig(
+                fatal_threshold=2,
+                one_direction_steps=2,
+                node_growth_alert=.1,
+                homogenization_variance=-1,
+            )
+        )
+        cause = None
+        for step in range(1, 4):
+            cause = monitor.observe(
+                step,
+                vector_state((.1 * step, -.1 * step)),
+                vector_state((.1 * (step + 1), -.1 * (step + 1))),
+                (.5,),
+                TransitionDiagnostics(),
+            )
+        self.assertEqual(cause, "one_direction_degeneration")
+
+    def test_a_single_unresponsive_coordinate_fails_the_probe(self) -> None:
+        monitor = HealthMonitor(PathologyConfig(fatal_threshold=2, homogenization_variance=-1))
+        partial = ProbeSummary(
+            1,
+            .1,
+            .03,
+            .12,
+            True,
+            coordinate_response=(.1, 0.0),
+            coordinate_propagation=(.03, .03),
+            coordinate_distinguishability=(.12, .12),
+            coordinate_recovered=(True, True),
+        )
+        monitor.observe(1, vector_state((.1, -.1)), vector_state((.1, -.1)), (.5,), TransitionDiagnostics(), partial)
+        cause = monitor.observe(2, vector_state((.1, -.1)), vector_state((.1, -.1)), (.5,), TransitionDiagnostics(), partial)
+        self.assertEqual(cause, "input_unresponsive")
+
+    def test_never_active_edge_dynamics_die_even_when_nodes_are_healthy(self) -> None:
+        monitor = HealthMonitor(
+            PathologyConfig(
+                fatal_threshold=2,
+                homogenization_variance=-1,
+                edge_activity_grace_steps=0,
+            )
+        )
+        monitor.observe(1, state(0), state(0.1), (.5,), TransitionDiagnostics())
+        cause = monitor.observe(2, state(.1), state(.2), (.5,), TransitionDiagnostics())
+        self.assertEqual(cause, "edge_dynamics_inactive")
+
+    def test_persistently_growing_edge_latents_die_before_safety_limit(self) -> None:
+        monitor = HealthMonitor(
+            PathologyConfig(
+                fatal_threshold=2,
+                homogenization_variance=-1,
+                edge_saturation_strength=.60,
+                edge_growth_alert=.1,
+                edge_growth_steps=2,
+            )
+        )
+        cause = None
+        for step, (before, after) in enumerate(((.2, .4), (.4, .6), (.6, .8)), start=1):
+            cause = monitor.observe(
+                step,
+                state_with_edges(.1, before),
+                state_with_edges(.2, after),
+                (.7, .7),
+                TransitionDiagnostics(),
+            )
+        self.assertEqual(cause, "edge_runaway_growth")
 
     def test_common_scenario_bank_is_candidate_independent(self) -> None:
         level = CurriculumLevel(10)

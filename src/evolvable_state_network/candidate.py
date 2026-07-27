@@ -121,7 +121,7 @@ class EdgeArchitecture:
 
 
 class MLPEdgeRule(EdgeRule):
-    """Shared edge update with bounded increments and a smooth scalar gate."""
+    """Shared edge update with bounded increments and learned coordinate-wise gates."""
 
     def __init__(self, architecture: EdgeArchitecture, parameters: Sequence[float]) -> None:
         self.architecture = architecture
@@ -162,14 +162,30 @@ class MLPEdgeRule(EdgeRule):
             increments.append(edge_step_scale * tanh(raw))
         return tuple(value + increment for value, increment in zip(state, increments, strict=True))
 
+    def communication_gates(self, state: StateVector) -> StateVector:
+        """Map latent coordinates to one smooth communication gate per node coordinate.
+
+        New survival runs use matching node and edge widths.  Cycling remains
+        backward-compatible with older exports whose edge state was narrower
+        than their node vector.
+        """
+        if len(state) != self.state_width:
+            raise ValueError("edge state width does not match the configured architecture")
+        return tuple(
+            0.5 * (1.0 + tanh(state[(self.architecture.gate_index + coordinate) % self.state_width]))
+            for coordinate in range(self.architecture.node_state_width)
+        )
+
     def communication_strength(self, state: StateVector) -> float:
-        # Smoothly maps the selected unnamed coordinate to the closed-open unit interval.
-        return 0.5 * (1.0 + tanh(state[self.architecture.gate_index]))
+        # A scalar mean is retained for graph styling and health summaries.
+        gates = self.communication_gates(state)
+        return sum(gates) / len(gates)
 
     def message(self, state: StateVector, source: StateVector) -> StateVector:
         projected = tuple(sum(weight * value for weight, value in zip(row, source, strict=True)) for row in self.architecture.projection)
-        gate = self.communication_strength(state)
-        return tuple(gate * value for value in projected)
+        return tuple(
+            gate * value for gate, value in zip(self.communication_gates(state), projected, strict=True)
+        )
 
 
 class FixedEdgeRule(MLPEdgeRule):

@@ -1,8 +1,4 @@
-"""Conventional application storage paths.
-
-Interactive runs belong to application data, not to an arbitrary dashboard
-export directory supplied on every launch.
-"""
+"""Project-local storage paths for generated experiment artifacts."""
 
 from __future__ import annotations
 
@@ -10,18 +6,14 @@ import os
 from pathlib import Path
 from uuid import uuid4
 
-from platformdirs import user_data_path
-
-
 def application_data_dir() -> Path:
     override = os.environ.get("ESN_DATA_DIR")
     if override:
         return Path(override).expanduser().resolve()
-    return user_data_path(
-        "EvolvableStateNetwork",
-        appauthor="StateNetworkLab",
-        ensure_exists=False,
-    )
+    # Keep generated runs beside the working project by default.  This makes
+    # results inspectable and removable without writing into a user-profile
+    # application-data directory.
+    return (Path.cwd() / ".outputs").resolve()
 
 
 def new_run_directory(category: str, root: Path | None = None) -> Path:

@@ -93,6 +93,7 @@ class TransitionDiagnostics:
     components: int = 0
     raw_maximum_absolute_value: float = 0.0
     raw_maximum_delta: float = 0.0
+    last_state_clip: dict[str, int | float] | None = None
     clipped_components_per_step: list[int] = field(default_factory=list)
     components_per_step: list[int] = field(default_factory=list)
 
@@ -232,7 +233,11 @@ class Simulation:
                 )
                 if intervention is not None:
                     proposed = intervention.transition(state.node[batch][node], proposed)
-                node_row.append(self._bounded_transition(state.node[batch][node], proposed, config, diagnostics))
+                node_row.append(
+                    self._bounded_transition(
+                        state.node[batch][node], proposed, config, diagnostics, batch, node
+                    )
+                )
             next_nodes.append(node_row)
         next_nodes = self._apply_impulses(next_nodes, step, config, disturbances)
         next_edges = self._apply_edge_impulses(next_edges, step, disturbances)
@@ -261,12 +266,18 @@ class Simulation:
         return tuple(values)
 
     def _bounded_transition(
-        self, previous: StateVector, proposed: StateVector, config: SimulationConfig, diagnostics: TransitionDiagnostics
+        self,
+        previous: StateVector,
+        proposed: StateVector,
+        config: SimulationConfig,
+        diagnostics: TransitionDiagnostics,
+        batch: int,
+        node: int,
     ) -> StateVector:
         if len(previous) != len(proposed):
             raise ValueError("rule changed state-vector width")
         values: list[float] = []
-        for before, after in zip(previous, proposed, strict=True):
+        for coordinate, (before, after) in enumerate(zip(previous, proposed, strict=True)):
             diagnostics.components += 1
             if not isfinite(after):
                 # A failed rule cannot propagate non-finite values through a batch.
@@ -280,6 +291,15 @@ class Simulation:
             bounded_before_state = before + clip(raw_delta, config.max_delta)
             if abs(bounded_before_state) > config.max_abs_state:
                 diagnostics.state_clipped += 1
+                diagnostics.last_state_clip = {
+                    "batch": batch,
+                    "node": node,
+                    "coordinate": coordinate,
+                    "previous": before,
+                    "proposed": after,
+                    "after_delta_limit": bounded_before_state,
+                    "bound": config.max_abs_state,
+                }
             values.append(clip(before + clip(after - before, config.max_delta), config.max_abs_state))
         return tuple(values)
 

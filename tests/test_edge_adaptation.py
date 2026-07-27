@@ -55,6 +55,14 @@ class EdgeAdaptationTests(unittest.TestCase):
         self.assertTrue(values)
         self.assertTrue(all(0.0 < value < 1.0 for value in values))
 
+    def test_edge_latent_coordinates_gate_message_coordinates_independently(self) -> None:
+        architecture = EdgeArchitecture(node_state_width=2, latent_width=2, hidden_width=1)
+        rule = MLPEdgeRule(architecture, (0.0,) * architecture.parameter_count)
+        message = rule.message((0.0, 2.0), (1.0, 1.0))
+        self.assertAlmostEqual(message[0], .5)
+        self.assertGreater(message[1], .98)
+        self.assertAlmostEqual(rule.communication_strength((0.0, 2.0)), sum(message) / 2)
+
     def test_joint_codec_exports_and_restores_independent_parameter_groups(self) -> None:
         node_architecture = RuleArchitecture(state_width=1, hidden_width=2)
         codec = GenomeCodec(node_architecture, self.edge_architecture, "joint")
@@ -133,15 +141,15 @@ class EdgeAdaptationTests(unittest.TestCase):
 
     @unittest.skipUnless(cuda_available(), "CUDA Torch is unavailable")
     def test_cuda_backend_matches_mlp_reference_within_float32_tolerance(self) -> None:
-        node_architecture = RuleArchitecture(state_width=1, hidden_width=2)
-        edge_architecture = EdgeArchitecture(node_state_width=1, latent_width=2, hidden_width=2)
+        node_architecture = RuleArchitecture(state_width=2, hidden_width=2)
+        edge_architecture = EdgeArchitecture(node_state_width=2, latent_width=2, hidden_width=2)
         from evolvable_state_network.candidate import MLPUpdateRule
         node_rule = MLPUpdateRule(node_architecture, (.01,) * node_architecture.parameter_count)
         edge_rule = MLPEdgeRule(edge_architecture, (.02,) * edge_architecture.parameter_count)
         graph = generate_random_graph(4, 2, 3)
         config = SimulationConfig(steps=5, batch_size=1)
         provider = ConstantInput(.1)
-        initial_node = [[(0.0,) for _ in range(graph.n_nodes)]]
+        initial_node = [[(0.0, 0.0) for _ in range(graph.n_nodes)]]
         initial_edge = [[(0.0, 0.0) for _ in graph.edges]]
         reference = Simulation(graph, node_rule, edge_rule).run(config, provider, initial_node_state=initial_node, initial_edge_state=initial_edge)
         accelerated = TorchMLPSimulator(graph, node_rule, edge_rule, resolve_device("cuda")).run(config, provider, (), initial_node, initial_edge)

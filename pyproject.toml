@@ -16,7 +16,6 @@ dependencies = [
     "torch>=2.13",
     "fastapi>=0.116,<1",
     "uvicorn>=0.35,<1",
-    "platformdirs>=4.3,<5",
     "httpx>=0.28,<1"
 ]
 

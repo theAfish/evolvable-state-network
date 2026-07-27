@@ -141,9 +141,20 @@ class TorchMLPSimulator:
         return value
 
     def _strength(self, edge: torch.Tensor) -> torch.Tensor:
+        """Return the mean gate for scalar diagnostics and graph styling."""
         if self.edge_rule is None:
             return torch.ones(edge.shape[:2], dtype=_DTYPE, device=self.device)
-        return .5 * (1.0 + torch.tanh(edge[..., self.edge_rule.architecture.gate_index]))
+        return self._gates(edge).mean(dim=-1)
+
+    def _gates(self, edge: torch.Tensor) -> torch.Tensor:
+        """Return one learned gate for every node-state coordinate."""
+        if self.edge_rule is None:
+            return torch.ones((*edge.shape[:2], self.width), dtype=_DTYPE, device=self.device)
+        indices = (
+            self.edge_rule.architecture.gate_index
+            + torch.arange(self.width, device=self.device)
+        ) % self.edge_width
+        return .5 * (1.0 + torch.tanh(edge[..., indices]))
 
     def _step(
         self, node: torch.Tensor, edge: torch.Tensor, external: torch.Tensor, step: int,
@@ -206,4 +217,4 @@ class TorchMLPSimulator:
         if self.edge_rule is None:
             return source
         projected = torch.matmul(source, self.projection.T)
-        return projected * self._strength(edge)[..., None]
+        return projected * self._gates(edge)

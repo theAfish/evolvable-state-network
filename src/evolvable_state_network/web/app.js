@@ -3,10 +3,10 @@
   const $ = (id) => document.getElementById(id);
   const ui = {
     run: $('run-select'), batch: $('batch-select'), coordinate: $('coordinate-select'), rate: $('rate-select'), slider: $('frame-slider'), label: $('frame-label'), play: $('play'), prev: $('previous'), next: $('next'), loop: $('loop'), svg: $('network'), status: $('load-status'), file: $('file-input'), frameInfo: $('frame-info'), selection: $('selection-info'), metrics: $('metrics'), events: $('events'), form: $('experiment-form'), runStatus: $('run-status'), overview: $('overview-cards'),
-    searchForm: $('evolution-form'), searchSeed: $('search-seed'), searchSamples: $('search-samples'), searchGenerations: $('search-generations'), searchPopulation: $('search-population'), random: $('start-random'), cma: $('start-cma'), searchStatus: $('search-status'), searchProgress: $('search-progress'), searchProgressLabel: $('search-progress-label'), chart: $('fitness-chart'), searchCards: $('search-cards'), process: $('process-table'), result: $('result-summary'), outcomeStatus: $('outcome-status'), liveForm: $('live-form'), liveModel: $('live-model-select'), liveRefresh: $('refresh-live-models'), liveStatus: $('live-status'), livePlay: $('live-play'), liveStep: $('live-step'), liveRate: $('live-rate'), liveLabel: $('live-frame-label'), workspace: $('shared-workspace'), replayHost: $('replay-workspace-host'), liveHost: $('live-workspace-host'),
-    asyncForm: $('async-form'), asyncSeed: $('async-seed'), asyncRun: $('async-run'), asyncRefresh: $('async-refresh'), asyncStatus: $('async-status'), asyncProgress: $('async-progress'), asyncProgressLabel: $('async-progress-label'), asyncMetrics: $('async-metrics'), asyncSlots: $('async-slots'), asyncCauses: $('async-causes'), asyncCurriculum: $('async-curriculum'), asyncCurriculumCopy: $('async-curriculum-copy'), asyncCandidates: $('async-candidates'), asyncDetail: $('async-detail'), asyncArtifacts: $('async-artifacts')
+    searchForm: $('evolution-form'), searchSeed: $('search-seed'), searchSamples: $('search-samples'), searchGenerations: $('search-generations'), searchPopulation: $('search-population'), random: $('start-random'), cma: $('start-cma'), searchStatus: $('search-status'), searchProgress: $('search-progress'), searchProgressLabel: $('search-progress-label'), chart: $('fitness-chart'), searchCards: $('search-cards'), process: $('process-table'), result: $('result-summary'), outcomeStatus: $('outcome-status'), liveForm: $('live-form'), liveModel: $('live-model-select'), liveModelScope: $('live-model-scope'), liveModelDetail: $('live-model-detail'), liveRefresh: $('refresh-live-models'), liveStatus: $('live-status'), livePlay: $('live-play'), liveStep: $('live-step'), liveRate: $('live-rate'), liveLabel: $('live-frame-label'), workspace: $('shared-workspace'), replayHost: $('replay-workspace-host'), liveHost: $('live-workspace-host'),
+    asyncForm: $('async-form'), asyncSeed: $('async-seed'), asyncRun: $('async-run'), asyncDiagnostic: $('async-diagnostic'), asyncRefresh: $('async-refresh'), asyncStatus: $('async-status'), asyncProgress: $('async-progress'), asyncProgressLabel: $('async-progress-label'), asyncMetrics: $('async-metrics'), asyncSlots: $('async-slots'), asyncCauses: $('async-causes'), asyncCurriculum: $('async-curriculum'), asyncCurriculumCopy: $('async-curriculum-copy'), asyncCandidates: $('async-candidates'), asyncDetail: $('async-detail'), asyncArtifacts: $('async-artifacts'), asyncLearningState: $('async-learning-state'), asyncLearningCopy: $('async-learning-copy'), asyncRunFacts: $('async-run-facts'), asyncEstimate: $('async-work-estimate'), asyncCandidateBudget: $('async-candidates-budget'), asyncSlotsInput: $('async-slots-input'), asyncReplicasInput: $('async-replicas-input'), asyncBatchInput: $('async-batch-input'), asyncStateWidth: $('async-state-width'), asyncTicksInput: $('async-ticks-input')
   };
-  const state = { data: null, runName: '', frame: 0, batch: 0, coordinate: 0, selected: null, playing: false, lastTick: 0, layout: [], job: null, jobTimer: null, live: null };
+  const state = { data: null, runName: '', frame: 0, batch: 0, coordinate: 0, selected: null, playing: false, lastTick: 0, layout: [], job: null, jobTimer: null, live: null, liveModels: [] };
   const NS = 'http://www.w3.org/2000/svg';
   const element = (tag, attrs = {}) => { const node = document.createElementNS(NS, tag); Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value)); return node; };
   const number = (value) => Number.isFinite(value) ? Number(value).toFixed(5) : '—';
@@ -63,7 +63,7 @@
       const response = await fetch(`/api/live/sessions/${state.live.id}/step`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({steps:1})}), snapshot = await response.json();
       if (!response.ok) throw new Error(apiError(snapshot, 'sandbox step failed'));
       applyLiveSnapshot(snapshot);
-    } catch (error) { state.playing = false; ui.livePlay.textContent = 'Play'; ui.liveStatus.textContent = `Sandbox stopped: ${error.message}`; } finally { if (state.live) state.live.pending = false; }
+    } catch (error) { state.playing = false; ui.livePlay.textContent = 'Play'; ui.liveStatus.textContent = `Sandbox update failed: ${error.message}`; } finally { if (state.live) state.live.pending = false; }
   }
   function animate(now) {
     if (!state.playing) return;
@@ -91,27 +91,69 @@
     if (result.smoke_report) { const report = result.smoke_report; ui.outcomeStatus.textContent = report.meaningful ? 'Random-search suite is non-degenerate: CMA-ES may proceed' : 'Random-search suite is degenerate: CMA-ES remains blocked'; ui.result.replaceChildren(statCard('Suite gate', report.meaningful ? 'PASS' : 'BLOCKED'), statCard('Best sampled fitness', number(report.maximum)), statCard('Mean ± SD', `${number(report.mean)} ± ${number(report.standard_deviation)}`), statCard('Sampled range', `${number(report.minimum)} – ${number(report.maximum)}`)); return; }
     ui.outcomeStatus.textContent = 'CMA-ES complete: this genome was re-evaluated on held-out validation and test suites'; ui.result.replaceChildren(statCard('Best training fitness', number(result.best_fitness)), statCard('Validation fitness', number(result.validation_fitness)), statCard('Test fitness', number(result.test_fitness)), statCard('Train → test gap', number(result.best_fitness - result.test_fitness)));
     const links = document.createElement('p'); const report = document.createElement('a'); report.href = result.output_url; report.textContent = 'Complete experiment report'; report.target = '_blank'; const genome = document.createElement('a'); genome.href = result.best_genome_url; genome.textContent = 'Best genome'; genome.target = '_blank'; const analysis = document.createElement('a'); analysis.href = result.analysis_url; analysis.textContent = 'Analysis data'; analysis.target = '_blank'; links.append(report, document.createTextNode(' · '), genome, document.createTextNode(' · '), analysis); ui.result.append(links);
-    const previews = document.createElement('div'); previews.className = 'analysis-previews'; [['Held-out trajectory', result.trajectory_svg_url], ['Perturbation recovery', result.recovery_svg_url]].forEach(([label, url]) => { const figure = document.createElement('figure'); const caption = document.createElement('figcaption'); caption.textContent = label; const image = document.createElement('img'); image.src = url; image.alt = `${label} analysis`; figure.append(caption, image); previews.append(figure); }); ui.result.append(previews); addReplayChooser(result.replay_index_url);
+    const previews = document.createElement('div'); previews.className = 'analysis-previews'; [['Held-out trajectory', result.trajectory_svg_url], ['Perturbation recovery', result.recovery_svg_url]].forEach(([label, url]) => { const figure = document.createElement('figure'); const caption = document.createElement('figcaption'); caption.textContent = label; const image = document.createElement('img'); image.src = url; image.alt = `${label} analysis`; figure.append(caption, image); previews.append(figure); }); ui.result.append(previews);
   }
-  async function addReplayChooser(indexUrl) {
-    const chooser = document.createElement('section'); chooser.className = 'replay-chooser'; const title = document.createElement('div'); const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = 'INTERACTIVE GRAPH REPLAY'; const heading = document.createElement('h3'); heading.textContent = 'Choose an evaluated graph and watch its state evolve'; title.append(eyebrow, heading); const status = document.createElement('span'); status.textContent = 'Loading available validation and test graphs…'; chooser.append(title, status); ui.result.append(chooser);
-    try {
-      const indexResponse = await fetch(indexUrl); if (!indexResponse.ok) throw new Error('replay index is unavailable'); const index = await indexResponse.json(); const entries = index.replays || [];
-      const select = document.createElement('select'); entries.forEach((entry) => select.append(new Option(`${entry.label} · ${entry.nodes} nodes · ${entry.steps} steps · fitness ${number(entry.fitness)}`, entry.file)));
-      const open = document.createElement('button'); open.type = 'button'; open.textContent = 'Open selected graph in Replay'; const detail = document.createElement('span');
-      const showDetail = () => { const entry = entries[select.selectedIndex]; detail.textContent = entry ? `${entry.viable ? 'viable' : 'flagged'} · preserved full node state, external input, events, and graph edges` : ''; }; showDetail(); select.addEventListener('change', showDetail);
-      open.addEventListener('click', async () => { const entry = entries[select.selectedIndex]; if (!entry) return; open.disabled = true; open.textContent = 'Loading graph…'; try { const documentUrl = new URL(entry.file, new URL(indexUrl, window.location.href)); const response = await fetch(documentUrl); if (!response.ok) throw new Error('selected replay is unavailable'); load(await response.json()); activate('replay'); window.scrollTo({top:0, behavior:'smooth'}); } catch (error) { detail.textContent = `Could not load replay: ${error.message}`; } finally { open.disabled = false; open.textContent = 'Open selected graph in Replay'; } });
-      status.replaceWith(select, open, detail);
-    } catch (error) { status.textContent = `Replay choices could not be loaded: ${error.message}`; }
+  function liveModelLabel(model) {
+    if (model.source !== 'survival') return `legacy · ${model.run_id} · validation ${number(model.validation_fitness)} · test ${number(model.test_fitness)}`;
+    const functional = model.functional ? 'functional' : 'not functional';
+    return `#${model.global_rank} · run ${model.run_id.slice(0, 8)} · elite ${model.elite_rank} · stage ${model.stage} · ${model.lifetime} ticks · ${functional} · burden ${Number(model.worst_pathology_burden).toFixed(3)}`;
+  }
+
+  function renderLiveModelDetail() {
+    const model = state.liveModels.find((item) => item.id === ui.liveModel.value);
+    if (!model) { ui.liveModelDetail.innerHTML = '<p>No model matches this filter.</p>'; return; }
+    const intro = document.createElement('div'), title = document.createElement('h4'), copy = document.createElement('p');
+    title.textContent = model.source === 'survival' ? `Overall survival rank #${model.global_rank}` : 'Legacy fixed-window comparison';
+    copy.textContent = model.source === 'survival'
+      ? `Candidate ${model.candidate_id} is elite ${model.elite_rank} within run ${model.run_id.slice(0, 8)}. Ranking is lexicographic—not an invented scalar score.`
+      : `Run ${model.run_id}. Legacy fitness is not directly comparable with death-driven survival evidence.`;
+    intro.append(title, copy);
+    if (model.global_rank === 1) { const badge = document.createElement('span'); badge.className = 'recommended'; badge.textContent = 'RECOMMENDED: strongest discovered survival rank'; intro.prepend(badge); }
+    const facts = model.source === 'survival' ? [
+      ['run type', model.run_kind === 'training' ? 'configured training' : '80-tick smoke test'],
+      ['node state coordinates', model.node_state_width ?? 'unknown'],
+      ['edge state coordinates', model.edge_state_width ?? 'unknown'],
+      ['curriculum evidence', `stage ${model.stage}; survived ${model.lifetime} ticks`],
+      ['functional across replicas', model.functional ? 'yes' : 'no'],
+      ['worst pathology burden', Number(model.worst_pathology_burden).toFixed(4)],
+      ['minimum input response', Number(model.minimum_response).toExponential(3)],
+      ['minimum graph propagation', Number(model.minimum_propagation).toExponential(3)],
+      ['minimum probe separation', Number(model.minimum_distinguishability).toExponential(3)],
+      ['recovered in every replica', model.recovered_across_replicas ? 'yes' : 'no'],
+    ] : [
+      ['target', model.target], ['node state coordinates', model.node_state_width ?? 'unknown'], ['edge state coordinates', model.edge_state_width ?? 'unknown'], ['validation fitness', number(model.validation_fitness)], ['test fitness', number(model.test_fitness)],
+    ];
+    const list = document.createElement('dl'); facts.forEach(([key, value]) => { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = key; dd.textContent = value; list.append(dt, dd); });
+    ui.liveModelDetail.replaceChildren(intro, list);
+  }
+
+  function renderLiveModelOptions() {
+    const prior = ui.liveModel.value, scope = ui.liveModelScope.value;
+    let visible = state.liveModels.filter((model) => scope === 'legacy' ? model.source === 'legacy' : model.source === 'survival');
+    if (scope === 'best') {
+      visible = visible.filter((model) => model.run_kind === 'training' && model.elite_rank === 1);
+      if (!visible.length) visible = state.liveModels.filter((model) => model.source === 'survival' && model.elite_rank === 1);
+    }
+    ui.liveModel.replaceChildren(...visible.map((model) => new Option(liveModelLabel(model), model.id)));
+    if (visible.some((model) => model.id === prior)) ui.liveModel.value = prior;
+    renderLiveModelDetail();
+    return visible.length;
   }
 
   async function refreshLiveModels() {
-    ui.liveStatus.textContent = 'Finding completed parameter exports…';
+    ui.liveStatus.textContent = 'Finding trained survival elites and legacy exports…';
     try {
       const response = await fetch('/api/live/models'), data = await response.json();
       if (!response.ok) throw new Error(apiError(data, 'model list unavailable'));
-      ui.liveModel.replaceChildren(...data.models.map((model) => new Option(`${model.id} · ${model.target} · validation ${number(model.validation_fitness)} · test ${number(model.test_fitness)}`, model.id)));
-      ui.liveStatus.textContent = data.models.length ? `${data.models.length} completed export${data.models.length === 1 ? '' : 's'} available.` : 'No completed exports yet. Finish a CMA-ES run first.';
+      state.liveModels = data.models; const visible = renderLiveModelOptions();
+      const survival = data.models.filter((model) => model.source === 'survival').length, legacy = data.models.length - survival, latest = data.latest_survival;
+      if (latest?.available && Number(latest.report?.graduations || 0) === 0) {
+        const causes = (latest.candidates || []).reduce((counts, candidate) => { const cause = causeLabel(candidate.death_cause); counts[cause] = (counts[cause] || 0) + 1; return counts; }, {});
+        const leading = Object.entries(causes).sort((left, right) => right[1] - left[1]).slice(0, 2).map(([cause, count]) => `${count} ${cause}`).join(', ');
+        ui.liveStatus.textContent = `Latest run ${latest.run_id.slice(0, 8)} produced no Live model: ${latest.report.completed_candidates || 0} candidates died before graduation${leading ? ` (${leading})` : ''}. ${data.models.length ? `Showing ${visible} older eligible model${visible === 1 ? '' : 's'}.` : 'Train again after adjusting the survival guards.'}`;
+      } else {
+        ui.liveStatus.textContent = data.models.length ? `Showing ${visible} of ${survival} survival elites; ${legacy} legacy export${legacy === 1 ? '' : 's'} also available.` : (latest?.available && Number(latest.report?.graduations || 0) ? `Latest run has ${latest.report.graduations} interim graduations, but no final-stage, functional, pathology-free Live model yet.` : 'No usable model exists yet. Complete final-stage functional survival validation.');
+      }
     } catch (error) { ui.liveStatus.textContent = `Could not load exports: ${error.message}`; }
   }
 
@@ -122,6 +164,13 @@
     const trace = trajectory();
     trace.times[0] = snapshot.time; trace.steps[0] = snapshot.step; trace.node_states[0] = snapshot.node_state; trace.edge_states[0] = snapshot.edge_state; trace.effective_edge_strengths[0] = snapshot.effective_edge_strengths; trace.inputs[0] = snapshot.inputs;
     state.frame = 0; update(); ui.liveLabel.textContent = `step ${snapshot.step} · t=${Number(snapshot.time).toFixed(3)} · in-memory only`;
+    const safety = snapshot.last_safety_event, warning = snapshot.last_warning;
+    if (safety?.details) {
+      const detail = safety.details;
+      ui.liveStatus.textContent = `Observation at step ${safety.step}: node ${detail.node}, coordinate ${detail.coordinate} proposed ${Number(detail.proposed).toFixed(4)} from ${Number(detail.previous).toFixed(4)}; after the per-step delta limit it was ${Number(detail.after_delta_limit).toFixed(4)}, so the displayed state is clipped to ±${detail.bound}. Sandbox continues for inspection.${warning ? ` Latest health warning: ${causeLabel(warning.cause)}.` : ''}`;
+    } else if (warning) {
+      ui.liveStatus.textContent = `Observation at step ${warning.step}: ${causeLabel(warning.cause)}. Sandbox continues for inspection.`;
+    }
   }
   async function launchLive(event) {
     event.preventDefault();
@@ -149,6 +198,48 @@
     ];
   }
 
+  const causeLabels = {
+    one_direction_degeneration: 'persistent one-way drift',
+    trajectory_indistinguishable: 'probe trajectories became indistinguishable',
+    state_homogenization: 'node states collapsed to one value',
+    input_unresponsive: 'failed to respond to input',
+    communication_unresponsive: 'failed to propagate a probe',
+    communication_collapse: 'edge communication collapsed',
+    edge_dynamics_inactive: 'edge dynamics never became active',
+    edge_gate_saturation: 'edge gates stayed saturated',
+    edge_runaway_growth: 'edge latent state kept growing',
+    disturbance_unrecovered: 'failed to recover after disturbance',
+    boundary_saturation: 'too many states saturated at the bound',
+    absolute_safety_limit: 'crossed an absolute safety limit',
+    nonfinite: 'produced a non-finite number',
+    simulator_failure: 'simulation failed',
+  };
+  const causeLabel = (cause) => cause ? (causeLabels[cause] || cause.replaceAll('_', ' ')) : 'survival milestone reached';
+  const sourceLabel = (source) => ({cma:'CMA-ES proposal', elite:'elite mutation', exploration:'random exploration', initial:'reference genome'}[source] || source);
+
+  function renderLearningVerdict(report = {}, settings = {}, runKind = 'training') {
+    const updates = Number(report.optimizer_updates || 0), completed = Number(report.completed_candidates || 0);
+    let stateLabel = 'No optimizer update yet', copy = `${completed} candidate lives have finished, but CMA-ES has not received a complete comparable result batch.`;
+    if (updates > 0 && updates < 5) { stateLabel = 'Warm-up: very early learning'; copy = `CMA-ES updated ${updates} time${updates === 1 ? '' : 's'}. This proves the loop is learning, but it is too early to infer convergence.`; }
+    else if (updates >= 5 && updates < 20) { stateLabel = 'Training is underway'; copy = `CMA-ES has made ${updates} updates from completed survival evidence. Compare passage rates and elite changes before treating the result as stable.`; }
+    else if (updates >= 20) { stateLabel = 'Substantial optimization history'; copy = `CMA-ES has made ${updates} updates. This is enough history to inspect trends, though held-out survival validation is still required.`; }
+    if (runKind === 'diagnostic') copy += ' This run is an 80-tick smoke test, not a training budget.';
+    ui.asyncLearningState.textContent = stateLabel;
+    ui.asyncLearningCopy.textContent = copy;
+    const stop = ({candidate_budget_reached:'candidate-life budget reached', tick_limit_reached:'safety tick limit reached', running:'still running'}[report.stop_reason] || report.stop_reason || 'older run completed');
+    const origins = Object.entries(report.proposals_by_source || {}).map(([source, count]) => `${count} ${sourceLabel(source)}`).join(', ') || 'not recorded';
+    const facts = [
+      ['stop condition', stop],
+      ['ticks elapsed', `${report.ticks_elapsed ?? '—'} / ${report.tick_limit ?? settings.max_ticks ?? '—'}`],
+      ['candidate evidence', `${completed}${report.candidate_budget ? ` / ${report.candidate_budget} target` : ''}`],
+      ['replica trajectories', `${report.completed_replica_lives ?? completed * Number(settings.replicas || 0)} completed`],
+      ['outcomes', `${report.graduations ?? report.viable_survivors ?? '—'} graduated / ${report.deaths ?? '—'} died`],
+      ['per-coordinate runaway guard', settings.node_growth_alert === undefined ? 'not recorded' : `|coordinate| >= ${settings.node_growth_alert}; ${settings.one_direction_steps} growing ticks`],
+      ['proposal origins', origins],
+    ];
+    ui.asyncRunFacts.replaceChildren(...facts.flatMap(([key, value]) => { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = key; dd.textContent = value; return [dt, dd]; }));
+  }
+
   function renderAsyncSlots(slots = []) {
     if (!slots.length) {
       ui.asyncSlots.innerHTML = '<p class="empty-state">No active slot snapshot is available.</p>';
@@ -174,7 +265,7 @@
     const maximum = Math.max(...entries.map(([, count]) => count));
     ui.asyncCauses.replaceChildren(...entries.map(([cause, count]) => {
       const row = document.createElement('div'); row.className = 'cause-row';
-      const label = document.createElement('span'); label.textContent = cause.replaceAll('_', ' ');
+      const label = document.createElement('span'); label.textContent = causeLabel(cause); label.title = cause;
       const bar = document.createElement('span'); bar.className = 'cause-bar';
       const fill = document.createElement('i'); fill.style.width = `${100 * count / maximum}%`; bar.append(fill);
       const value = document.createElement('strong'); value.textContent = count;
@@ -182,14 +273,15 @@
     }));
   }
 
-  function renderAsyncCurriculum(report) {
+  function renderAsyncCurriculum(report, settings = {}) {
     const rates = report.milestone_passage_rates || {};
-    ui.asyncCurriculumCopy.textContent = `Current level ${report.curriculum_level ?? 0}; advancement requires sustained recent passage.`;
+    ui.asyncCurriculumCopy.textContent = `Current stage ${(report.curriculum_level ?? 0) + 1}; advancement requires at least 60% of the recent candidate lives to graduate.`;
     ui.asyncCurriculum.replaceChildren(...Object.entries(rates).map(([level, rate]) => {
       const item = document.createElement('div'); item.className = `curriculum-level ${Number(level) === Number(report.curriculum_level) ? 'active' : ''}`;
-      const label = document.createElement('span'); label.textContent = `level ${level}`;
+      const config = settings.levels?.[Number(level)] || {};
+      const label = document.createElement('span'); label.textContent = `stage ${Number(level) + 1}${config.lifetime ? ` · survive ${config.lifetime} ticks` : ''}`;
       const value = document.createElement('strong'); value.textContent = rate == null ? 'not reached' : `${Math.round(100 * rate)}%`;
-      const detail = document.createElement('small'); detail.textContent = rate == null ? 'No comparable completions' : 'milestone passage';
+      const detail = document.createElement('small'); detail.textContent = rate == null ? 'No completed lives at this stage' : `${config.graph_nodes || '?'}-node graphs · graduation rate`;
       item.append(label, value, detail); return item;
     }));
   }
@@ -199,14 +291,26 @@
     if (row) row.classList.add('selected');
     const title = document.createElement('h4'); title.textContent = `Candidate ${candidate.candidate_id}`;
     const list = document.createElement('dl');
-    [['outcome', candidate.status], ['age', candidate.age], ['curriculum', `level ${candidate.level}`], ['sample source', candidate.source], ['optimizer update', candidate.optimizer_update], ['death cause', candidate.death_cause || 'censored success']].forEach(([key, value]) => {
+    [['result', candidate.status === 'graduation' ? 'healthy graduation' : 'pathology death'], ['ticks lived', candidate.age], ['curriculum stage', candidate.level + 1], ['proposal origin', sourceLabel(candidate.source)], ['optimizer updates when proposed', candidate.optimizer_update], ['why it stopped', causeLabel(candidate.death_cause)]].forEach(([key, value]) => {
       const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = key; dd.textContent = value; list.append(dt, dd);
     });
     const replicas = candidate.replicas.map((replica, index) => {
       const block = document.createElement('div'); block.className = 'replica-line';
-      const heading = document.createElement('strong'); heading.textContent = `Replica ${index}`;
-      const evidence = document.createElement('span'); evidence.textContent = `age ${replica.age} · burden ${Number(replica.burden).toFixed(3)} · response ${Number(replica.responsiveness).toExponential(2)} · propagation ${Number(replica.propagation).toExponential(2)} · distinguishability ${Number(replica.distinguishability).toExponential(2)} · ${replica.recovered ? 'recovered' : 'not recovered'}`;
-      block.append(heading, evidence); return block;
+      const heading = document.createElement('strong'); heading.textContent = `Replica ${replica.index ?? index}`;
+      const open = document.createElement('button'); open.type = 'button'; open.className = 'replay-survival'; open.textContent = 'Replay this exact life';
+      open.addEventListener('click', async () => {
+        open.disabled = true; open.textContent = 'Reconstructing...';
+        try {
+          const response = await fetch(replica.replay_url), document = await response.json();
+          if (!response.ok) throw new Error(apiError(document, 'survival replay is unavailable'));
+          load(document); activate('replay'); window.scrollTo({top: 0, behavior: 'smooth'});
+        } catch (error) {
+          evidence.textContent = `Could not reconstruct this survival replay: ${error.message}`;
+        } finally { open.disabled = false; open.textContent = 'Replay this exact life'; }
+      });
+      const coordinateEvidence = replica.coordinate_responsiveness?.length ? ` · per-coordinate response [${replica.coordinate_responsiveness.map((value) => Number(value).toExponential(2)).join(', ')}] · propagation [${replica.coordinate_propagation.map((value) => Number(value).toExponential(2)).join(', ')}] · separation [${replica.coordinate_distinguishability.map((value) => Number(value).toExponential(2)).join(', ')}] · recovery [${replica.coordinate_recovered.map((value) => value ? 'ok' : 'failed').join(', ')}]` : '';
+      const evidence = document.createElement('span'); evidence.textContent = `lived ${replica.age} ticks · worst pathology burden ${Number(replica.burden).toFixed(3)} · worst-coordinate input response ${Number(replica.responsiveness).toExponential(2)} · worst-coordinate graph propagation ${Number(replica.propagation).toExponential(2)} · worst-coordinate paired-probe separation ${Number(replica.distinguishability).toExponential(2)} · ${replica.recovered ? 'recovered after probe' : 'recovery not demonstrated'}${coordinateEvidence}`;
+      block.append(heading, evidence, open); return block;
     });
     ui.asyncDetail.replaceChildren(title, list, ...replicas);
   }
@@ -217,10 +321,10 @@
       return;
     }
     const heading = document.createElement('div'); heading.className = 'candidate-row heading';
-    ['candidate', 'outcome', 'level', 'lifetime', 'first-passage cause', 'source'].forEach((label) => { const span = document.createElement('span'); span.textContent = label; heading.append(span); });
+    ['candidate', 'result', 'stage', 'ticks lived', 'why it stopped', 'origin'].forEach((label) => { const span = document.createElement('span'); span.textContent = label; heading.append(span); });
     const rows = candidates.slice().reverse().map((candidate) => {
       const row = document.createElement('button'); row.type = 'button'; row.className = 'candidate-row';
-      const values = [candidate.candidate_id, candidate.status, candidate.level, candidate.age, candidate.death_cause || 'milestone reached', candidate.source];
+      const values = [candidate.candidate_id, candidate.status === 'graduation' ? 'graduated' : 'died', candidate.level + 1, candidate.age, causeLabel(candidate.death_cause), sourceLabel(candidate.source)];
       values.forEach((value, index) => { const span = document.createElement('span'); span.textContent = value; if (index === 1) span.className = `status-${candidate.status}`; row.append(span); });
       row.addEventListener('click', () => showAsyncCandidate(candidate, row)); return row;
     });
@@ -238,22 +342,25 @@
     const report = data.report || {};
     [...ui.asyncMetrics.querySelectorAll('strong')].forEach((node, index) => { node.textContent = asyncMetricValues(report)[index]; });
     renderAsyncSlots(slotsOverride || data.slots || []);
-    renderAsyncCauses(report); renderAsyncCurriculum(report);
+    renderLearningVerdict(report, data.settings || {}, data.run_kind || 'training');
+    renderAsyncCauses(report); renderAsyncCurriculum(report, data.settings || {});
     if (data.candidates) renderAsyncCandidates(data.candidates);
     if (data.artifacts) renderAsyncArtifacts(data.artifacts);
   }
 
   async function loadLatestAsync() {
-    ui.asyncStatus.textContent = 'Loading the latest asynchronous diagnostic…';
+    ui.asyncStatus.textContent = 'Loading the latest survival run…';
     try {
       const response = await fetch('/api/async/latest'), data = await response.json();
-      if (!response.ok) throw new Error(apiError(data, 'latest diagnostic is unavailable'));
-      if (!data.available) { ui.asyncStatus.textContent = 'No asynchronous diagnostic exists yet. Run the short diagnostic first.'; return; }
-      renderAsyncData(data); ui.asyncProgress.value = ui.asyncProgress.max;
+      if (!response.ok) throw new Error(apiError(data, 'latest survival run is unavailable'));
+      if (!data.available) { ui.asyncStatus.textContent = 'No survival run exists yet. Configure training above and start it.'; return; }
+      renderAsyncData(data); ui.asyncProgress.max = data.report.candidate_budget || data.report.tick_limit || 1; ui.asyncProgress.value = data.report.candidate_budget ? data.report.completed_candidates : data.report.ticks_elapsed;
       ui.asyncProgressLabel.textContent = 'complete';
-      ui.asyncStatus.textContent = `Loaded ${data.run_id}: ${data.report.completed_candidates} completed candidates.`;
-    } catch (error) { ui.asyncStatus.textContent = `Could not load asynchronous results: ${error.message}`; }
+      ui.asyncStatus.textContent = `Loaded ${data.run_kind || 'survival'} run ${data.run_id}: ${data.report.completed_candidates} completed candidate lives.`;
+    } catch (error) { ui.asyncStatus.textContent = `Could not load survival results: ${error.message}`; }
   }
+
+  function setAsyncBusy(busy) { ui.asyncRun.disabled = busy; ui.asyncDiagnostic.disabled = busy; }
 
   async function pollAsyncJob(jobId) {
     try {
@@ -261,32 +368,56 @@
       if (!response.ok) throw new Error(job.detail || job.error || 'job status unavailable');
       if (job.status === 'running') {
         const snapshot = job.latest || {}, tick = Number(snapshot.tick || 0);
-        ui.asyncProgress.value = tick; ui.asyncProgressLabel.textContent = `${tick} / ${snapshot.max_ticks || 80} ticks`;
-        ui.asyncStatus.textContent = `Asynchronous slots are advancing · seed ${job.seed}`;
+        const report = snapshot.report || {}, budget = Number(report.candidate_budget || 0), completed = Number(report.completed_candidates || 0);
+        ui.asyncProgress.max = budget || Number(snapshot.max_ticks || 80); ui.asyncProgress.value = budget ? completed : tick;
+        ui.asyncProgressLabel.textContent = budget ? `${completed} / ${budget} candidate lives · tick ${tick}` : `${tick} / ${snapshot.max_ticks || 80} ticks`;
+        ui.asyncStatus.textContent = `${job.kind === 'async_training' ? 'Survival training' : 'Smoke test'} is running · seed ${job.seed}`;
         if (snapshot.report) renderAsyncData({report:snapshot.report}, snapshot.slots);
         window.setTimeout(() => pollAsyncJob(jobId), 300);
       } else if (job.status === 'complete') {
-        ui.asyncRun.disabled = false; ui.asyncProgress.value = ui.asyncProgress.max; ui.asyncProgressLabel.textContent = 'complete';
-        renderAsyncData(job.result); ui.asyncStatus.textContent = `Diagnostic complete · seed ${job.seed}`;
-      } else { throw new Error(job.error || 'diagnostic failed'); }
-    } catch (error) { ui.asyncRun.disabled = false; ui.asyncStatus.textContent = `Diagnostic stopped: ${error.message}`; }
+        setAsyncBusy(false); renderAsyncData(job.result); const report = job.result.report || {};
+        ui.asyncProgress.max = report.candidate_budget || report.tick_limit || 1; ui.asyncProgress.value = report.candidate_budget ? report.completed_candidates : report.ticks_elapsed;
+        ui.asyncProgressLabel.textContent = 'complete'; ui.asyncStatus.textContent = `${job.kind === 'async_training' ? 'Training' : 'Smoke test'} complete · ${report.completed_candidates} candidate lives · seed ${job.seed}`;
+      } else { throw new Error(job.error || 'survival run failed'); }
+    } catch (error) { setAsyncBusy(false); ui.asyncStatus.textContent = `Survival run stopped: ${error.message}`; }
   }
 
   async function startAsync(event) {
-    event.preventDefault(); const payload = {};
+    event.preventDefault();
+    const fields = {
+      candidate_budget:'async-candidates-budget', max_ticks:'async-ticks-input', slots:'async-slots-input', replicas:'async-replicas-input', optimizer_batch:'async-batch-input', state_width:'async-state-width',
+      stage_1_lifetime:'async-stage1-life', stage_2_lifetime:'async-stage2-life', stage_1_nodes:'async-stage1-nodes', stage_2_nodes:'async-stage2-nodes', mean_degree:'async-degree', input_scale:'async-input-scale',
+      disturbance_interval:'async-disturbance-interval', disturbance_strength:'async-disturbance-strength', fatal_threshold:'async-fatal-threshold', node_growth_alert:'async-node-growth-alert', one_direction_steps:'async-one-direction-steps', probe_interval:'async-probe-interval',
+    };
+    const payload = Object.fromEntries(Object.entries(fields).map(([key, id]) => [key, Number($(id).value)]));
     if (ui.asyncSeed.value.trim() !== '') payload.seed = Number(ui.asyncSeed.value);
-    ui.asyncRun.disabled = true; ui.asyncStatus.textContent = 'Starting asynchronous diagnostic…'; ui.asyncProgress.value = 0;
+    setAsyncBusy(true); ui.asyncStatus.textContent = 'Starting configured survival training…'; ui.asyncProgress.max = payload.candidate_budget; ui.asyncProgress.value = 0;
+    try {
+      const response = await fetch('/api/async/train', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}), data = await response.json();
+      if (!response.ok) throw new Error(apiError(data, 'could not start survival training'));
+      pollAsyncJob(data.job_id);
+    } catch (error) { setAsyncBusy(false); ui.asyncStatus.textContent = `Could not start: ${error.message}`; }
+  }
+
+  async function startAsyncDiagnostic() {
+    const payload = {}; if (ui.asyncSeed.value.trim() !== '') payload.seed = Number(ui.asyncSeed.value);
+    setAsyncBusy(true); ui.asyncStatus.textContent = 'Starting the 80-tick smoke test…'; ui.asyncProgress.max = 80; ui.asyncProgress.value = 0;
     try {
       const response = await fetch('/api/async/diagnostic', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}), data = await response.json();
-      if (!response.ok) throw new Error(apiError(data, 'could not start diagnostic'));
+      if (!response.ok) throw new Error(apiError(data, 'could not start smoke test'));
       pollAsyncJob(data.job_id);
-    } catch (error) { ui.asyncRun.disabled = false; ui.asyncStatus.textContent = `Could not start: ${error.message}`; }
+    } catch (error) { setAsyncBusy(false); ui.asyncStatus.textContent = `Could not start: ${error.message}`; }
+  }
+
+  function updateAsyncEstimate() {
+    const lives = Number(ui.asyncCandidateBudget.value || 0), replicas = Number(ui.asyncReplicasInput.value || 0), batch = Number(ui.asyncBatchInput.value || 1);
+    ui.asyncEstimate.value = `${lives} candidate lives × ${replicas} replicas = about ${lives * replicas} completed trajectories; at most about ${Math.floor(lives / batch)} CMA result batches.`;
   }
 
   document.querySelectorAll('.nav').forEach((button) => button.addEventListener('click', () => activate(button.dataset.view)));
   ui.run.addEventListener('change', () => { state.runName = ui.run.value; state.frame = state.batch = state.coordinate = 0; state.selected = null; refreshSelectors(); drawGraph(); update(); updateOverview(); }); ui.batch.addEventListener('change', () => { state.batch = Number(ui.batch.value); update(); }); ui.coordinate.addEventListener('change', () => { state.coordinate = Number(ui.coordinate.value); update(); }); ui.slider.addEventListener('input', () => { state.frame = Number(ui.slider.value); update(); }); ui.prev.addEventListener('click', () => move(-1)); ui.next.addEventListener('click', () => move(1)); ui.play.addEventListener('click', () => { state.playing = !state.playing; ui.play.textContent = state.playing ? 'Pause' : 'Play'; state.lastTick = performance.now(); if (state.playing) requestAnimationFrame(animate); });
   ui.form.addEventListener('submit', async (event) => { event.preventDefault(); const values = Object.fromEntries(new FormData(ui.form)); ['seed','nodes','steps','batch_size'].forEach((key) => { values[key] = Number(values[key]); }); ['mean_degree','dt'].forEach((key) => { values[key] = Number(values[key]); }); ui.runStatus.textContent = 'Running deterministic local experiment…'; try { const response = await fetch('/api/experiment', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(values)}), document = await response.json(); if (!response.ok) throw new Error(apiError(document, 'experiment request failed')); load(document); ui.runStatus.textContent = 'Reference simulation loaded. Open Replay for details.'; } catch (error) { ui.runStatus.textContent = `Could not start: ${error.message}`; } });
   ui.random.addEventListener('click', () => startJob('/api/evolution/random-search')); ui.cma.addEventListener('click', () => startJob('/api/evolution/search')); ui.file.addEventListener('change', async () => { const file = ui.file.files[0]; if (!file) return; try { load(JSON.parse(await file.text())); } catch (error) { ui.status.textContent = error.message; } });
-  ui.asyncForm.addEventListener('submit', startAsync); ui.asyncRefresh.addEventListener('click', loadLatestAsync); activate('survival'); loadLatestAsync();
-  ui.liveRefresh.addEventListener('click', refreshLiveModels); ui.liveForm.addEventListener('submit', launchLive); ui.livePlay.addEventListener('click', () => { if (!state.live) return; state.playing = !state.playing; ui.livePlay.textContent = state.playing ? 'Pause' : 'Play'; state.lastTick = performance.now(); if (state.playing) requestAnimationFrame(animate); }); ui.liveStep.addEventListener('click', () => advanceLive()); refreshLiveModels();
+  ui.asyncForm.addEventListener('submit', startAsync); ui.asyncDiagnostic.addEventListener('click', startAsyncDiagnostic); ui.asyncRefresh.addEventListener('click', loadLatestAsync); [ui.asyncCandidateBudget, ui.asyncReplicasInput, ui.asyncBatchInput].forEach((input) => input.addEventListener('input', updateAsyncEstimate)); updateAsyncEstimate(); activate('survival'); loadLatestAsync();
+  ui.liveRefresh.addEventListener('click', refreshLiveModels); ui.liveModel.addEventListener('change', renderLiveModelDetail); ui.liveModelScope.addEventListener('change', () => { const visible = renderLiveModelOptions(); ui.liveStatus.textContent = `${visible} model${visible === 1 ? '' : 's'} shown by the current filter.`; }); ui.liveForm.addEventListener('submit', launchLive); ui.livePlay.addEventListener('click', () => { if (!state.live) return; state.playing = !state.playing; ui.livePlay.textContent = state.playing ? 'Pause' : 'Play'; state.lastTick = performance.now(); if (state.playing) requestAnimationFrame(animate); }); ui.liveStep.addEventListener('click', () => advanceLive()); refreshLiveModels();
 })();

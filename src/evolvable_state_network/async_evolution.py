@@ -15,14 +15,21 @@ from math import isfinite
 from pathlib import Path
 from random import Random
 from statistics import fmean
-from typing import Callable, Literal, Sequence
+from typing import Callable, Literal, Mapping, Sequence
 
 from .candidate import EdgeArchitecture, RuleArchitecture
 from .cmaes import CMAES, CMAESConfig
 from .genome import EvolutionTarget, GenomeCodec
-from .graph import generate_random_graph
+from .graph import Graph, generate_random_graph
 from .inputs import GaussianInput
-from .simulation import NetworkState, Simulation, SimulationConfig, TransitionDiagnostics
+from .simulation import (
+    EventWindow,
+    NetworkState,
+    Simulation,
+    SimulationConfig,
+    Trajectory,
+    TransitionDiagnostics,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,8 +45,21 @@ class PathologyConfig:
     distinguishability_floor: float = 2e-3
     recovery_limit: float = 0.35
     one_direction_steps: int = 12
+    # A direction is only pathological once the coordinate is materially near
+    # the +/- 4 safety boundary. Ordinary transient adjustment is allowed.
+    node_growth_alert: float = 3.2
+    node_growth_delta: float = 1e-4
     absolute_node_limit: float = 4.0
     absolute_edge_limit: float = 12.0
+    # These are survival tests, not constraints on the edge rule.  Edge
+    # dynamics remain entirely encoded by the genome.
+    edge_activity_delta: float = 1e-5
+    edge_saturation_strength: float = .98
+    edge_saturation_fraction: float = .80
+    edge_growth_alert: float = 1.0
+    edge_growth_delta: float = 1e-4
+    edge_growth_steps: int = 12
+    edge_activity_grace_steps: int = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +86,7 @@ class AsyncEvolutionConfig:
     replicas: int = 3
     result_batch_size: int = 8
     max_ticks: int = 200
+    candidate_budget: int | None = None
     seed: int = 41
     target: EvolutionTarget = "joint"
     architecture: RuleArchitecture = RuleArchitecture(state_width=1, hidden_width=3)
@@ -92,6 +113,8 @@ class AsyncEvolutionConfig:
     def __post_init__(self) -> None:
         if self.slots < 1 or self.replicas < 1 or self.result_batch_size < 2:
             raise ValueError("slots, replicas, and result_batch_size must be positive")
+        if self.candidate_budget is not None and self.candidate_budget < 1:
+            raise ValueError("candidate_budget must be positive when provided")
         if not self.levels or any(level.lifetime < 1 for level in self.levels):
             raise ValueError("at least one positive curriculum lifetime is required")
         if self.target in {"edge", "joint"} and self.edge_architecture is None:
@@ -147,6 +170,10 @@ class ProbeSummary:
     propagation: float
     distinguishability: float
     recovered: bool
+    coordinate_response: tuple[float, ...] = ()
+    coordinate_propagation: tuple[float, ...] = ()
+    coordinate_distinguishability: tuple[float, ...] = ()
+    coordinate_recovered: tuple[bool, ...] = ()
 
 
 @dataclass(slots=True)
@@ -155,9 +182,11 @@ class HealthMonitor:
     burdens: dict[str, float] = field(default_factory=lambda: defaultdict(float))
     burden_history: list[dict[str, object]] = field(default_factory=list)
     probes: list[ProbeSummary] = field(default_factory=list)
-    previous_mean: float | None = None
-    one_direction_sign: int = 0
-    one_direction_run: int = 0
+    one_direction_signs: list[int] = field(default_factory=list)
+    one_direction_runs: list[int] = field(default_factory=list)
+    node_growth_runs: list[int] = field(default_factory=list)
+    edge_ever_active: bool = False
+    edge_growth_run: int = 0
     death_cause: str | None = None
     death_time: int | None = None
 
@@ -192,38 +221,137 @@ class HealthMonitor:
         ):
             return self._die("absolute_safety_limit", step)
 
-        mean = fmean(values) if values else 0.0
-        variance = fmean((value - mean) ** 2 for value in values) if values else 0.0
         prior_values = [value for row in previous.node for vector in row for value in vector]
-        prior_mean = fmean(prior_values) if prior_values else 0.0
-        delta = mean - prior_mean
-        sign = 1 if delta > 1e-7 else -1 if delta < -1e-7 else 0
-        if sign and sign == self.one_direction_sign:
-            self.one_direction_run += 1
-        else:
-            self.one_direction_sign, self.one_direction_run = sign, int(bool(sign))
+        width = len(current.node[0][0]) if current.node and current.node[0] else 0
+        coordinate_values = [values[coordinate::width] for coordinate in range(width)] if width else []
+        coordinate_prior_values = [prior_values[coordinate::width] for coordinate in range(width)] if width else []
+        coordinate_means = [fmean(items) if items else 0.0 for items in coordinate_values]
+        prior_coordinate_means = [fmean(items) if items else 0.0 for items in coordinate_prior_values]
+        coordinate_variances = [
+            fmean((value - mean) ** 2 for value in items) if items else 0.0
+            for items, mean in zip(coordinate_values, coordinate_means, strict=True)
+        ]
+        if len(self.one_direction_signs) != width:
+            self.one_direction_signs = [0] * width
+            self.one_direction_runs = [0] * width
+            self.node_growth_runs = [0] * width
+        for coordinate, (mean, prior_mean) in enumerate(
+            zip(coordinate_means, prior_coordinate_means, strict=True)
+        ):
+            delta = mean - prior_mean
+            sign = 1 if delta > 1e-7 else -1 if delta < -1e-7 else 0
+            if sign and sign == self.one_direction_signs[coordinate]:
+                self.one_direction_runs[coordinate] += 1
+            else:
+                self.one_direction_signs[coordinate] = sign
+                self.one_direction_runs[coordinate] = int(bool(sign))
+            magnitude = fmean(abs(value) for value in coordinate_values[coordinate])
+            prior_magnitude = fmean(
+                abs(value) for value in coordinate_prior_values[coordinate]
+            )
+            if magnitude - prior_magnitude > self.config.node_growth_delta:
+                self.node_growth_runs[coordinate] += 1
+            else:
+                self.node_growth_runs[coordinate] = 0
 
-        self._burden(
-            "communication_collapse",
-            not strengths or fmean(strengths) < self.config.communication_floor,
+        communication_collapsed = (
+            not strengths or fmean(strengths) < self.config.communication_floor
         )
+        self._burden("communication_collapse", communication_collapsed)
         self._burden(
             "boundary_saturation",
-            bool(values)
-            and fmean(abs(value) > .95 * self.config.absolute_node_limit for value in values)
-            >= self.config.boundary_fraction,
+            any(
+                fmean(abs(value) > .95 * self.config.absolute_node_limit for value in items)
+                >= self.config.boundary_fraction
+                for items in coordinate_values
+            ),
         )
-        self._burden("state_homogenization", variance < self.config.homogenization_variance)
-        self._burden("one_direction_degeneration", self.one_direction_run >= self.config.one_direction_steps)
+        self._burden(
+            "state_homogenization",
+            any(variance < self.config.homogenization_variance for variance in coordinate_variances),
+        )
+        self._burden(
+            "one_direction_degeneration",
+            any(
+                run >= self.config.one_direction_steps
+                and growth_run >= self.config.one_direction_steps
+                and magnitude >= self.config.node_growth_alert
+                for run, growth_run, magnitude in zip(
+                    self.one_direction_runs,
+                    self.node_growth_runs,
+                    (fmean(abs(value) for value in items) for items in coordinate_values),
+                    strict=True,
+                )
+            ),
+        )
+
+        prior_edges = [value for row in previous.edge for vector in row for value in vector]
+        edge_updates = [
+            abs(current_value - previous_value)
+            for previous_value, current_value in zip(prior_edges, edges, strict=True)
+        ]
+        edge_activity = fmean(edge_updates) if edge_updates else 0.0
+        if edge_activity > self.config.edge_activity_delta:
+            self.edge_ever_active = True
+        # An edge rule that has never moved its latent state is a fixed
+        # communication ablation, even if the node rule itself is healthy.
+        self._burden(
+            "edge_dynamics_inactive",
+            bool(edges)
+            and step > self.config.edge_activity_grace_steps
+            and not self.edge_ever_active,
+        )
+
+        edge_magnitude = fmean(abs(value) for value in edges) if edges else 0.0
+        prior_edge_magnitude = fmean(abs(value) for value in prior_edges) if prior_edges else 0.0
+        if edge_magnitude - prior_edge_magnitude > self.config.edge_growth_delta:
+            self.edge_growth_run += 1
+        else:
+            self.edge_growth_run = 0
+        saturated_edges = (
+            bool(strengths)
+            and sum(
+                strength <= 1.0 - self.config.edge_saturation_strength
+                or strength >= self.config.edge_saturation_strength
+                for strength in strengths
+            )
+            / len(strengths)
+            >= self.config.edge_saturation_fraction
+        )
+        # Saturation is a dead communication state, and continued latent
+        # growth while saturated is an earlier, directional runaway signal.
+        self._burden(
+            "edge_gate_saturation",
+            saturated_edges
+            and not communication_collapsed
+            and self.edge_growth_run < self.config.edge_growth_steps,
+        )
+        self._burden(
+            "edge_runaway_growth",
+            edge_magnitude >= self.config.edge_growth_alert
+            and self.edge_growth_run >= self.config.edge_growth_steps,
+        )
         if probe is not None:
             self.probes.append(probe)
-            self._burden("input_unresponsive", probe.response < self.config.response_floor)
-            self._burden("communication_unresponsive", probe.propagation < self.config.propagation_floor)
+            responses = probe.coordinate_response or (probe.response,)
+            propagations = probe.coordinate_propagation or (probe.propagation,)
+            distinguishabilities = (
+                probe.coordinate_distinguishability or (probe.distinguishability,)
+            )
+            recovered = probe.coordinate_recovered or (probe.recovered,)
+            self._burden(
+                "input_unresponsive",
+                any(value < self.config.response_floor for value in responses),
+            )
+            self._burden(
+                "communication_unresponsive",
+                any(value < self.config.propagation_floor for value in propagations),
+            )
             self._burden(
                 "trajectory_indistinguishable",
-                probe.distinguishability < self.config.distinguishability_floor,
+                any(value < self.config.distinguishability_floor for value in distinguishabilities),
             )
-            self._burden("disturbance_unrecovered", not probe.recovered)
+            self._burden("disturbance_unrecovered", not all(recovered))
         # Probe-derived health evidence is updated only by another probe.
         # Absence of a probe is not evidence of functional recovery.
         self.burden_history.append({"step": step, "burdens": dict(self.burdens)})
@@ -251,11 +379,12 @@ class ReplicaRuntime:
     active_probe_start: int | None = None
     probe_baseline: NetworkState | None = None
     shadow_state: NetworkState | None = None
-    probe_peak_response: float = 0.0
-    probe_peak_propagation: float = 0.0
-    probe_peak_distinguishability: float = 0.0
+    probe_peak_response: list[float] = field(default_factory=list)
+    probe_peak_propagation: list[float] = field(default_factory=list)
+    probe_peak_distinguishability: list[float] = field(default_factory=list)
     diagnostics: TransitionDiagnostics = field(default_factory=TransitionDiagnostics)
     fatal_cause: str | None = None
+    last_external: object | None = None
 
     def advance(self, level: CurriculumLevel, probe_config: ProbeConfig) -> None:
         if self.fatal_cause:
@@ -272,9 +401,10 @@ class ReplicaRuntime:
             self.active_probe_start = self.age
             self.probe_baseline = deepcopy(self.state)
             self.shadow_state = deepcopy(self.state)
-            self.probe_peak_response = 0.0
-            self.probe_peak_propagation = 0.0
-            self.probe_peak_distinguishability = 0.0
+            width = self.simulation.node_rule.state_width
+            self.probe_peak_response = [0.0] * width
+            self.probe_peak_propagation = [0.0] * width
+            self.probe_peak_distinguishability = [0.0] * width
         shadow_external = deepcopy(external)
         if (
             self.active_probe_start is not None
@@ -282,6 +412,7 @@ class ReplicaRuntime:
         ):
             external[0][0] = tuple(value + probe_config.amplitude for value in external[0][0])
             shadow_external[0][0] = tuple(value - probe_config.amplitude for value in shadow_external[0][0])
+        self.last_external = deepcopy(external)
         prior_nonfinite = self.diagnostics.nonfinite_proposals
         prior_clipped = self.diagnostics.state_clipped
         try:
@@ -330,14 +461,29 @@ class ReplicaRuntime:
         assert self.probe_baseline is not None and self.shadow_state is not None
         base = self.probe_baseline.node[0]
         live = self.state.node[0]
-        baseline_scale = fmean(abs(value) for vector in base for value in vector) if base else 0.0
-        current_scale = fmean(abs(value) for vector in live for value in vector) if live else 0.0
+        width = self.simulation.node_rule.state_width
+        baseline_scale = [
+            fmean(abs(vector[coordinate]) for vector in base) if base else 0.0
+            for coordinate in range(width)
+        ]
+        current_scale = [
+            fmean(abs(vector[coordinate]) for vector in live) if live else 0.0
+            for coordinate in range(width)
+        ]
+        recovered = tuple(
+            abs(current - baseline) <= self.monitor.config.recovery_limit
+            for baseline, current in zip(baseline_scale, current_scale, strict=True)
+        )
         return ProbeSummary(
             self.age,
-            self.probe_peak_response,
-            self.probe_peak_propagation,
-            self.probe_peak_distinguishability,
-            abs(current_scale - baseline_scale) <= self.monitor.config.recovery_limit,
+            min(self.probe_peak_response, default=0.0),
+            min(self.probe_peak_propagation, default=0.0),
+            min(self.probe_peak_distinguishability, default=0.0),
+            all(recovered),
+            tuple(self.probe_peak_response),
+            tuple(self.probe_peak_propagation),
+            tuple(self.probe_peak_distinguishability),
+            recovered,
         )
 
     def _update_probe_peaks(self) -> None:
@@ -345,27 +491,26 @@ class ReplicaRuntime:
         base = self.probe_baseline.node[0]
         live = self.state.node[0]
         shadow = self.shadow_state.node[0]
-        response = fmean(
-            abs(after - before) for before, after in zip(base[0], live[0], strict=True)
-        )
-        propagation_values = [
-            abs(after - before)
-            for base_vector, live_vector in zip(base[1:], live[1:], strict=True)
-            for before, after in zip(base_vector, live_vector, strict=True)
-        ]
-        distinguishability = fmean(
-            abs(left - right)
-            for live_vector, shadow_vector in zip(live, shadow, strict=True)
-            for left, right in zip(live_vector, shadow_vector, strict=True)
-        )
-        self.probe_peak_response = max(self.probe_peak_response, response)
-        self.probe_peak_propagation = max(
-            self.probe_peak_propagation,
-            fmean(propagation_values) if propagation_values else 0.0,
-        )
-        self.probe_peak_distinguishability = max(
-            self.probe_peak_distinguishability, distinguishability
-        )
+        for coordinate in range(self.simulation.node_rule.state_width):
+            response = abs(live[0][coordinate] - base[0][coordinate])
+            propagation_values = [
+                abs(live_vector[coordinate] - base_vector[coordinate])
+                for base_vector, live_vector in zip(base[1:], live[1:], strict=True)
+            ]
+            distinguishability = fmean(
+                abs(live_vector[coordinate] - shadow_vector[coordinate])
+                for live_vector, shadow_vector in zip(live, shadow, strict=True)
+            )
+            self.probe_peak_response[coordinate] = max(
+                self.probe_peak_response[coordinate], response
+            )
+            self.probe_peak_propagation[coordinate] = max(
+                self.probe_peak_propagation[coordinate],
+                fmean(propagation_values) if propagation_values else 0.0,
+            )
+            self.probe_peak_distinguishability[coordinate] = max(
+                self.probe_peak_distinguishability[coordinate], distinguishability
+            )
 
     def summary(self) -> dict[str, object]:
         values = [value for vector in self.state.node[0] for value in vector]
@@ -382,6 +527,10 @@ class ReplicaRuntime:
             "propagation": latest.propagation if latest else 0.0,
             "distinguishability": latest.distinguishability if latest else 0.0,
             "recovered": latest.recovered if latest else False,
+            "coordinate_responsiveness": list(latest.coordinate_response) if latest else [],
+            "coordinate_propagation": list(latest.coordinate_propagation) if latest else [],
+            "coordinate_distinguishability": list(latest.coordinate_distinguishability) if latest else [],
+            "coordinate_recovered": list(latest.coordinate_recovered) if latest else [],
             "final_node_statistics": _stats(values),
             "final_edge_statistics": _stats(edges),
             "update_cost": self.diagnostics.components / max(1, self.age),
@@ -536,6 +685,8 @@ class AsyncEvolutionRunner:
         self.next_candidate_id = 0
         self.initial = deque(config.initial_genomes)
         self.utilization_samples: list[float] = []
+        self.ticks_elapsed = 0
+        self.stop_reason = "running"
 
     def run(
         self,
@@ -563,6 +714,7 @@ class AsyncEvolutionRunner:
                 elif slot.age % self.config.censor_interval == 0 and slot.age not in slot.published_ages:
                     self._publish_censored(slot, "living")
             self._maybe_advance_curriculum()
+            self.ticks_elapsed = tick + 1
             if progress is not None:
                 progress(
                     {
@@ -586,6 +738,14 @@ class AsyncEvolutionRunner:
                         ],
                     }
                 )
+            if (
+                self.config.candidate_budget is not None
+                and len(self.archive) >= self.config.candidate_budget
+            ):
+                self.stop_reason = "candidate_budget_reached"
+                break
+        if self.stop_reason == "running":
+            self.stop_reason = "tick_limit_reached"
         for slot in self.slots:
             self._publish_censored(slot, "living_at_stop")
         report = self.report()
@@ -593,6 +753,9 @@ class AsyncEvolutionRunner:
             output.mkdir(parents=True, exist_ok=True)
             (output / "candidate_archive.json").write_text(
                 json.dumps(self.archive, indent=2, sort_keys=True), encoding="utf-8"
+            )
+            (output / "elite_archive.json").write_text(
+                json.dumps(self.elites.records, indent=2, sort_keys=True), encoding="utf-8"
             )
             (output / "living_censored.json").write_text(
                 json.dumps(self.censored, indent=2, sort_keys=True), encoding="utf-8"
@@ -680,18 +843,22 @@ class AsyncEvolutionRunner:
             "rank_key": list(slot.rank_key(kind == "milestone")),
         }
         self.censored.append(record)
-        self.optimizer.observe(
-            slot.bank.bank_id,
-            slot.proposal.sample_id,
-            slot.proposal.genome,
-            slot.rank_key(kind == "milestone"),
-        )
+        # Censor records describe incomplete evidence for survival analysis.
+        # CMA-ES receives each proposal only after its exact death or graduation;
+        # otherwise an early living snapshot would permanently hide the outcome.
 
     def _finish(self, slot: CandidateSlot, status: Literal["death", "graduation"]) -> None:
         graduated = status == "graduation"
         causes = [
             replica.fatal_cause for replica in slot.replicas if replica.fatal_cause is not None
         ]
+        rank_key = slot.rank_key(graduated)
+        replica_results = [replica.summary() for replica in slot.replicas]
+        functional = bool(rank_key[1]) if len(rank_key) > 1 else False
+        unresolved_burden = max(
+            (float(replica["normalized_pathology_burden"]) for replica in replica_results),
+            default=0.0,
+        )
         record = {
             "candidate_id": slot.candidate_id,
             "slot": slot.slot,
@@ -705,8 +872,17 @@ class AsyncEvolutionRunner:
             "death_time": slot.age if causes else None,
             "death_cause": causes[0] if causes else None,
             "milestone_history": slot.milestone_history,
-            "per_replica_results": [replica.summary() for replica in slot.replicas],
-            "rank_key": list(slot.rank_key(graduated)),
+            "per_replica_results": replica_results,
+            "rank_key": list(rank_key),
+            "functional": functional,
+            # A model is deployable only after the final curriculum test. Earlier
+            # graduations remain useful training evidence, but are not Live models.
+            "live_eligible": (
+                graduated
+                and slot.level == len(self.config.levels) - 1
+                and functional
+                and unresolved_burden <= 1e-12
+            ),
         }
         self.archive.append(record)
         self.recent_outcomes.append(graduated)
@@ -714,9 +890,9 @@ class AsyncEvolutionRunner:
             slot.bank.bank_id,
             slot.proposal.sample_id,
             slot.proposal.genome,
-            slot.rank_key(graduated),
+            rank_key,
         )
-        if graduated:
+        if graduated and functional:
             self.elites.consider(record)
 
     def _maybe_advance_curriculum(self) -> None:
@@ -760,7 +936,17 @@ class AsyncEvolutionRunner:
             "mode": "asynchronous_death_driven_joint_evolution",
             "active_slot_utilization": fmean(self.utilization_samples) if self.utilization_samples else 0.0,
             "active_slots": len(self.slots),
+            "ticks_elapsed": self.ticks_elapsed,
+            "tick_limit": self.config.max_ticks,
+            "stop_reason": self.stop_reason,
+            "candidate_budget": self.config.candidate_budget,
+            "candidates_started": self.next_candidate_id,
             "completed_candidates": len(self.archive),
+            "completed_replica_lives": len(self.archive) * self.config.replicas,
+            "active_replica_lives": len(self.slots) * self.config.replicas,
+            "deaths": len(deaths),
+            "graduations": len(graduations),
+            "proposals_by_source": dict(Counter(item["sampling"]["source"] for item in self.archive)),
             "deaths_per_cause": dict(Counter(item["death_cause"] for item in deaths)),
             "lifetime_distribution": {
                 "count": len(lifetimes),
@@ -779,7 +965,7 @@ class AsyncEvolutionRunner:
             "right_censored_candidate_count": len(self.censored),
             "currently_living_right_censored": len(self.slots),
             "optimizer_updates": self.optimizer.update_count,
-            "optimizer_update_frequency": self.optimizer.update_count / max(1, self.config.max_ticks),
+            "optimizer_update_frequency": self.optimizer.update_count / max(1, self.ticks_elapsed),
             "replica_disagreement": {
                 "mean_age_range": fmean(disagreements) if disagreements else 0.0,
                 "maximum_age_range": max(disagreements, default=0),
@@ -877,11 +1063,155 @@ def run_diagnostic_experiment(
         censor_interval=4,
         initial_genomes=diagnostic_reference_genomes(codec),
     )
+    return run_async_experiment(output, config, progress)
+
+
+def run_async_experiment(
+    output: Path,
+    config: AsyncEvolutionConfig,
+    progress: Callable[[dict[str, object]], None] | None = None,
+) -> dict[str, object]:
+    """Run and persist one configured asynchronous survival experiment."""
     report = AsyncEvolutionRunner(config).run(output, progress=progress)
     (output / "diagnostic_config.json").write_text(
         json.dumps(asdict(config), indent=2, sort_keys=True), encoding="utf-8"
     )
     return report
+
+
+def async_config_from_dict(data: Mapping[str, object]) -> AsyncEvolutionConfig:
+    """Restore a persisted asynchronous configuration for exact replay."""
+    architecture = RuleArchitecture(**dict(data["architecture"]))
+    raw_edge = data.get("edge_architecture")
+    edge_architecture = EdgeArchitecture(**dict(raw_edge)) if raw_edge is not None else None
+    return AsyncEvolutionConfig(
+        slots=int(data["slots"]),
+        replicas=int(data["replicas"]),
+        result_batch_size=int(data["result_batch_size"]),
+        max_ticks=int(data["max_ticks"]),
+        candidate_budget=(
+            int(data["candidate_budget"]) if data.get("candidate_budget") is not None else None
+        ),
+        seed=int(data["seed"]),
+        target=str(data["target"]),  # type: ignore[arg-type]
+        architecture=architecture,
+        edge_architecture=edge_architecture,
+        levels=tuple(CurriculumLevel(**dict(item)) for item in data["levels"]),
+        pathology=PathologyConfig(**dict(data["pathology"])),
+        probes=ProbeConfig(**dict(data["probes"])),
+        curriculum_window=int(data["curriculum_window"]),
+        curriculum_pass_fraction=float(data["curriculum_pass_fraction"]),
+        censor_interval=int(data["censor_interval"]),
+        elite_size=int(data["elite_size"]),
+        cma_fraction=float(data["cma_fraction"]),
+        elite_fraction=float(data["elite_fraction"]),
+        exploration_sigma=float(data["exploration_sigma"]),
+        initial_sigma=float(data["initial_sigma"]),
+        initial_genomes=tuple(tuple(float(value) for value in genome) for genome in data["initial_genomes"]),
+    )
+
+
+def replay_archived_candidate(
+    record: Mapping[str, object], config: AsyncEvolutionConfig, replica_index: int
+) -> tuple[Graph, Trajectory, SimulationConfig, dict[str, object]]:
+    """Re-run one archived candidate on its saved scenario until its exact stop age.
+
+    This intentionally does not reuse a broad evaluation horizon.  The graph,
+    initial state, input stream, probes, and curriculum disturbances all come
+    from the completed candidate record and its diagnostic configuration.
+    """
+    replica_results = list(record["per_replica_results"])
+    if replica_index < 0 or replica_index >= len(replica_results):
+        raise IndexError("replica is outside the archived candidate")
+    result = dict(replica_results[replica_index])
+    scenario = Scenario(**dict(result["scenario"]))
+    level_index = int(record["level"])
+    if level_index < 0 or level_index >= len(config.levels):
+        raise ValueError("archived curriculum level is unavailable")
+    level = config.levels[level_index]
+    codec = GenomeCodec(config.architecture, config.edge_architecture, config.target)
+    genome = tuple(float(value) for value in record["genome"])
+    node_rule, edge_rule = codec.decode_groups(genome)
+    if node_rule is None:
+        from .baselines import HomeostaticRule
+
+        node_rule = HomeostaticRule()
+    graph = generate_random_graph(scenario.nodes, scenario.mean_degree, scenario.graph_seed)
+    simulation = Simulation(graph, node_rule, edge_rule)
+    simulation_config = SimulationConfig(
+        steps=max(1, int(result["age"])),
+        batch_size=1,
+        max_abs_state=4.0,
+        record_every=1,
+    )
+    state = simulation.initial_state(1)
+    initial_rng = Random(scenario.initial_state_seed)
+    state.node = [[
+        tuple(initial_rng.gauss(0, .03) for _ in range(node_rule.state_width))
+        for _ in range(graph.n_nodes)
+    ]]
+    runtime = ReplicaRuntime(
+        scenario,
+        simulation,
+        simulation_config,
+        GaussianInput(scenario.input_seed, 0.0, scenario.input_scale),
+        state,
+        HealthMonitor(config.pathology),
+    )
+    trajectory = Trajectory()
+    initial_external = runtime.input_provider.sample(
+        0, 1, graph.n_nodes, node_rule.state_width
+    )
+    trajectory.append(
+        0,
+        0.0,
+        runtime.state.node,
+        initial_external,
+        runtime.state.edge,
+        simulation._effective_strengths(runtime.state.edge),
+    )
+    stop_age = int(result["age"])
+    expected_cause = result.get("death_cause")
+    while runtime.age < stop_age or (expected_cause is not None and runtime.fatal_cause is None):
+        prior_age = runtime.age
+        if prior_age and level.disturbance_frequency and prior_age % level.disturbance_frequency == 0:
+            trajectory.events.append(EventWindow("curriculum disturbance", prior_age, prior_age))
+        if prior_age and prior_age % config.probes.interval == 0:
+            trajectory.events.append(
+                EventWindow("paired input probe", prior_age, prior_age + config.probes.duration - 1)
+            )
+        runtime.advance(level, config.probes)
+        if runtime.age == prior_age and runtime.fatal_cause is not None:
+            break
+        if runtime.age <= prior_age or runtime.last_external is None:
+            raise RuntimeError("archived candidate could not advance during replay")
+        trajectory.append(
+            runtime.age,
+            runtime.age * simulation_config.dt,
+            runtime.state.node,
+            runtime.last_external,
+            runtime.state.edge,
+            simulation._effective_strengths(runtime.state.edge),
+        )
+    replay_summary = runtime.summary()
+    if replay_summary["age"] != stop_age:
+        raise RuntimeError("replay age differs from archived result")
+    if expected_cause != replay_summary["death_cause"]:
+        raise RuntimeError("replay death cause differs from archived result")
+    metrics = {
+        "candidate": int(record["candidate_id"]),
+        "outcome": record["status"],
+        "curriculum_level": level_index,
+        "replica": replica_index,
+        "stop_age": stop_age,
+        "death_cause": replay_summary["death_cause"] or "graduated",
+        "normalized_pathology_burden": replay_summary["normalized_pathology_burden"],
+        "responsiveness": replay_summary["responsiveness"],
+        "propagation": replay_summary["propagation"],
+        "distinguishability": replay_summary["distinguishability"],
+        "recovered": replay_summary["recovered"],
+    }
+    return graph, trajectory, simulation_config, metrics
 
 
 def _stats(values: Sequence[float]) -> dict[str, float | int | None]:

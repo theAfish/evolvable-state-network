@@ -13,7 +13,7 @@
         <button class="nav active" data-view="survival">Survival</button>
         <button class="nav" data-view="overview">Reference</button>
         <button class="nav" data-view="replay">Replay</button>
-        <button class="nav" data-view="evolution">Evolution</button>
+        <button class="nav" data-view="evolution">Legacy comparison</button>
         <button class="nav" data-view="live">Live graph</button>
       </nav>
       <div class="load-controls"><label class="file-button">Load replay data<input id="file-input" type="file" accept="application/json,.json" /></label><span id="load-status">Load a replay JSON when needed.</span></div>
@@ -24,35 +24,75 @@
         <div class="survival-hero">
           <div>
             <p class="eyebrow">ASYNCHRONOUS EVOLUTION</p>
-            <h2>Every slot runs until death or graduation.</h2>
-            <p>Joint node-and-edge genomes turn over independently. The optimizer learns from exact deaths, right-censored living candidates, and survival milestones without waiting for a generation boundary.</p>
+            <h2>Train local rules by how long they remain healthy.</h2>
+            <p>One candidate life is one node-and-edge genome tested simultaneously on several graph replicas. It ends at a pathology death threshold or a curriculum survival milestone. Edge dynamics are learned, not damped: a never-active edge state, persistent gate saturation, or continued latent growth counts as a survival pathology. Finished lives update the elite archive and, in comparable batches, CMA-ES.</p>
           </div>
-          <form id="async-form" class="async-launch">
-            <label>Seed <input id="async-seed" type="number" placeholder="random" min="0" max="4294967295" /></label>
-            <button id="async-run" type="submit">Run short diagnostic</button>
-            <button id="async-refresh" type="button">Load latest</button>
-          </form>
+          <div class="survival-actions"><button id="async-refresh" type="button">Load latest run</button><button id="async-diagnostic" type="button">Run 80-tick smoke test</button></div>
         </div>
 
+        <section class="flat-section training-section">
+          <div class="section-heading"><div><p class="eyebrow">TRAINING CONTROL</p><h3>Choose the amount of evidence</h3></div><span>The candidate-life budget is the closest equivalent to an episode count.</span></div>
+          <form id="async-form" class="training-form">
+            <label>Candidate lives <input id="async-candidates-budget" type="number" value="200" min="8" max="5000" /><small>Completed genomes targeted before stopping.</small></label>
+            <label>Parallel slots <input id="async-slots-input" type="number" value="8" min="1" max="32" /><small>Candidates alive at the same time.</small></label>
+            <label>Replicas per life <input id="async-replicas-input" type="number" value="3" min="1" max="8" /><small>Different seeded graphs; the worst replica governs.</small></label>
+            <label>CMA result batch <input id="async-batch-input" type="number" value="8" min="2" max="32" /><small>Comparable results required for one optimizer update.</small></label>
+            <label>Node state coordinates <input id="async-state-width" type="number" value="2" min="1" max="8" /><small>Each node carries this many unnamed state-vector coordinates. Larger vectors increase the search dimension.</small></label>
+            <label>Safety tick limit <input id="async-ticks-input" type="number" value="5000" min="20" max="100000" /><small>Fallback stop if lives take unexpectedly long.</small></label>
+            <label>Seed <input id="async-seed" type="number" placeholder="random" min="0" max="4294967295" /><small>Reuse a seed to reproduce a run.</small></label>
+            <details class="training-advanced">
+              <summary>Curriculum and health thresholds</summary>
+              <div class="advanced-grid">
+                <label>Stage 1 milestone <input id="async-stage1-life" type="number" value="40" min="4" max="2000" /><small>Healthy ticks required to graduate stage 1.</small></label>
+                <label>Stage 2 milestone <input id="async-stage2-life" type="number" value="100" min="8" max="5000" /><small>Harder-stage healthy lifetime.</small></label>
+                <label>Stage 1 nodes <input id="async-stage1-nodes" type="number" value="8" min="3" max="100" /></label>
+                <label>Stage 2 nodes <input id="async-stage2-nodes" type="number" value="12" min="3" max="200" /></label>
+                <label>Mean degree <input id="async-degree" type="number" value="3" min="0.5" max="20" step="0.5" /></label>
+                <label>Input scale <input id="async-input-scale" type="number" value="0.12" min="0.01" max="2" step="0.01" /></label>
+                <label>Disturbance interval <input id="async-disturbance-interval" type="number" value="10" min="2" max="1000" /></label>
+                <label>Disturbance strength <input id="async-disturbance-strength" type="number" value="0.12" min="0" max="2" step="0.01" /></label>
+                <label>Fatal burden threshold <input id="async-fatal-threshold" type="number" value="8" min="0.1" max="100" step="0.1" /><small>Higher values tolerate pathology longer.</small></label>
+                <label>Node runaway alert <input id="async-node-growth-alert" type="number" value="3.2" min="0.1" max="3.9" step="0.1" /><small>Only sustained one-way growth at or beyond this coordinate magnitude counts as runaway. The hard safety bound is 4.</small></label>
+                <label>Drift persistence <input id="async-one-direction-steps" type="number" value="12" min="2" max="1000" /><small>Consecutive growing ticks required before node runaway burden starts.</small></label>
+                <label>Probe interval <input id="async-probe-interval" type="number" value="8" min="2" max="1000" /><small>How often response and recovery are tested.</small></label>
+              </div>
+            </details>
+            <div class="training-submit"><button id="async-run" type="submit">Start survival training</button><output id="async-work-estimate">200 candidate lives × 3 replicas = about 600 completed trajectories.</output></div>
+          </form>
+        </section>
+
+        <section class="logic-strip" aria-label="Survival evolution logic">
+          <div><strong>1. Propose</strong><span>Create or mutate one joint node-and-edge genome.</span></div>
+          <div><strong>2. Live</strong><span>Run it in a slot across all seeded replicas.</span></div>
+          <div><strong>3. Judge</strong><span>Stop on first pathology death or milestone graduation.</span></div>
+          <div><strong>4. Learn</strong><span>Rank conservatively; update elites and batched CMA-ES.</span></div>
+        </section>
+
         <div class="async-status-line">
-          <span id="async-status">Checking for an asynchronous diagnostic…</span>
+          <span id="async-status">Checking for the latest survival run…</span>
           <strong id="async-progress-label">idle</strong>
         </div>
-        <progress id="async-progress" value="0" max="80"></progress>
+        <progress id="async-progress" value="0" max="5000"></progress>
+
+        <section id="async-interpretation" class="learning-verdict">
+          <div><span>LEARNING STATE</span><strong id="async-learning-state">No run loaded</strong></div>
+          <p id="async-learning-copy">Start training or load an existing run to see whether the optimizer received enough completed evidence.</p>
+          <dl id="async-run-facts"></dl>
+        </section>
 
         <section id="async-metrics" class="metric-ribbon" aria-label="Asynchronous run summary">
           <div><span>Slot utilization</span><strong>—</strong></div>
-          <div><span>Completed</span><strong>—</strong></div>
-          <div><span>Living censored</span><strong>—</strong></div>
-          <div><span>Viable graduates</span><strong>—</strong></div>
-          <div><span>Optimizer updates</span><strong>—</strong></div>
-          <div><span>Curriculum</span><strong>—</strong></div>
+          <div><span>Completed candidate lives</span><strong>—</strong></div>
+          <div><span>Currently alive</span><strong>—</strong></div>
+          <div><span>Healthy graduations</span><strong>—</strong></div>
+          <div><span>CMA learning updates</span><strong>—</strong></div>
+          <div><span>Current stage</span><strong>—</strong></div>
         </section>
 
         <div class="survival-columns">
           <section class="flat-section">
             <div class="section-heading"><div><p class="eyebrow">ACTIVE POPULATION</p><h3>Slot lanes</h3></div><span>Slots refill immediately after first-passage death or graduation.</span></div>
-            <div id="async-slots" class="slot-lanes"><p class="empty-state">Start a diagnostic to watch active candidates.</p></div>
+            <div id="async-slots" class="slot-lanes"><p class="empty-state">Start training to watch active candidate lives.</p></div>
           </section>
           <section class="flat-section">
             <div class="section-heading"><div><p class="eyebrow">FIRST-PASSAGE EVENTS</p><h3>Deaths by cause</h3></div><span>Persistent burdens can recover before crossing their fatal threshold.</span></div>
@@ -67,7 +107,7 @@
 
         <section class="flat-section archive-section">
           <div class="section-heading">
-            <div><p class="eyebrow">CANDIDATE ARCHIVE</p><h3>Deaths, censored lives, and graduates</h3></div>
+            <div><p class="eyebrow">COMPLETED CANDIDATE LIVES</p><h3>One row per evaluated genome</h3><p>Graduation means every replica remained healthy to the stage milestone. Death records the first fatal pathology.</p></div>
             <div id="async-artifacts" class="artifact-links"></div>
           </div>
           <div class="archive-layout">
@@ -105,25 +145,27 @@
       </section>
 
       <section class="view" data-view="evolution">
-        <div class="page-heading"><div><p class="eyebrow">PHASE 1A EVOLUTION</p><h2>Watch search rather than wait for it</h2><p>Random search establishes a non-degenerate viability distribution. CMA-ES then searches the same fixed rule architecture and scenario suite.</p></div></div>
+        <div class="page-heading"><div><p class="eyebrow">LEGACY WINDOWED COMPARISON</p><h2>Fixed-horizon CMA-ES, retained for comparison</h2><p>This is the earlier generation-based evaluator. Its graph replays are deliberately separate from survival candidates, which are selected and replayed from the Survival archive.</p></div></div>
         <section class="evolution-layout">
           <form id="evolution-form" class="panel form-panel evolution-form"><div><p class="eyebrow">SEARCH CONTROL</p><h3>Local background job</h3></div><label>Seed <input id="search-seed" type="number" placeholder="random" title="Leave empty for a new random seed; the actual seed is shown in the result." /></label><label>Random-search samples <input id="search-samples" type="number" min="4" max="64" value="16" /></label><label>CMA generations <input id="search-generations" type="number" min="1" max="20" value="4" /></label><label>CMA population <input id="search-population" type="number" min="2" max="32" value="8" /></label><div class="button-row"><button id="start-random" type="button">Run random-search diagnostic</button><button id="start-cma" type="button">Start CMA-ES</button></div><output id="search-status">No evolution job is running.</output></form>
           <section class="panel search-live"><div class="panel-title"><div><h3>Evolution fitness</h3><span id="chart-explanation">Left: random diagnostic or CMA generation 0. Right: distribution, then CMA convergence.</span></div><span id="search-progress-label">No samples yet</span></div><progress id="search-progress" value="0" max="1"></progress><canvas id="fitness-chart" width="900" height="340" aria-label="Evolution fitness charts"></canvas><div id="search-cards" class="summary-grid compact"><article class="stat"><span>Best fitness</span><strong>—</strong></article><article class="stat"><span>Mean fitness</span><strong>—</strong></article><article class="stat"><span>Viable fraction</span><strong>—</strong></article></div></section>
         </section>
-        <section class="panel outcome-panel"><div class="panel-title"><div><p class="eyebrow">PRIMARY RESULT</p><h3>Search outcome and held-out generalization</h3></div><span id="outcome-status">Run random search or CMA-ES to populate this result view.</span></div><div id="result-summary">Final validation, test, and artifact links appear here after CMA-ES completes.</div></section>
+        <section class="panel outcome-panel"><div class="panel-title"><div><p class="eyebrow">LEGACY RESULT</p><h3>Fixed-window search outcome</h3></div><span id="outcome-status">Run the legacy comparison only when you need it.</span></div><div id="result-summary">This legacy workflow does not supply the Survival replay chooser.</div></section>
         <section class="evolution-results"><article class="panel"><div class="panel-title"><h3>Search process</h3><span>Smoke samples and CMA generations</span></div><div id="process-table" class="process-table">Start a job to see individual samples and generation summaries.</div></article><article class="panel"><div class="panel-title"><h3>What is being assessed</h3></div><ul class="quiet-list"><li>Bounded, non-silent, non-saturated state trajectories</li><li>Local input response, perturbation propagation, and recovery</li><li>Low synchronization and low persistent safety clipping</li><li>Generalization to unseen seeds, graph sizes, strengths, and horizons</li></ul></article></section>
       </section>
 
       <section class="view" data-view="live">
-        <div class="page-heading"><div><p class="eyebrow">LIVE BEST-RULE SANDBOX</p><h2>Run an evolved rule indefinitely on a fresh graph</h2><p>Select a completed CMA-ES export, configure a new random graph, and play the current state forward. The sandbox stores only the current state; it does not create a trajectory or launch CMA-ES.</p></div></div>
+        <div class="page-heading"><div><p class="eyebrow">LIVE TRAINED-RULE SANDBOX</p><h2>Run a survival elite indefinitely on a fresh graph</h2><p>Models are ranked by the same conservative order used in training: harder stage, demonstrated function, longer life, then lower worst-replica pathology. Inspect the evidence below before launching on a fresh graph.</p></div></div>
         <form id="live-form" class="form-panel panel">
           <div><p class="eyebrow">GRAPH AND INPUT CONTROL</p><h3>Launch live trajectory</h3></div>
-          <label>Best parameter export <select id="live-model-select"></select></label><button id="refresh-live-models" type="button">Refresh exports</button>
+          <label>Models shown <select id="live-model-scope"><option value="best">Best trained elite per run</option><option value="all">All survival elites</option><option value="legacy">Legacy comparisons</option></select></label>
+          <label>Trained model <select id="live-model-select"></select></label><button id="refresh-live-models" type="button">Refresh models</button>
+          <aside id="live-model-detail" class="live-model-detail"><p>Select a model to inspect its survival evidence.</p></aside>
           <label>Graph seed <input id="live-seed" type="number" value="17" min="0" max="4294967295" /></label><label>Topology <select id="live-topology"><option value="erdos_renyi">Random directed</option><option value="ring">Ring</option></select></label>
           <label>Nodes <input id="live-nodes" type="number" value="24" min="2" max="200" /></label><label>Mean degree <input id="live-degree" type="number" value="5" min="0" step="0.5" /></label>
           <label>Batch <input id="live-batch" type="number" value="1" min="1" max="64" /></label><label>dt <input id="live-dt" type="number" value="0.05" min="0.001" max="1" step="0.001" /></label>
           <label>Input seed <input id="live-input-seed" type="number" value="118" min="0" max="4294967295" /></label><label>Input standard deviation <input id="live-input-std" type="number" value="0.28" min="0" step="0.01" /></label>
-          <button type="submit">Open sandbox</button><output id="live-status">Load a completed parameter export first.</output>
+          <button type="submit">Run on fresh graph</button><output id="live-status">Select a trained survival elite first.</output>
         </form>
         <section class="controls panel"><label>Advance rate <select id="live-rate"><option value="1">1 step/s</option><option value="4">4 step/s</option><option value="12" selected>12 step/s</option><option value="30">30 step/s</option></select></label><button id="live-play" type="button">Play</button><button id="live-step" type="button">Step</button><span id="live-frame-label">Open a sandbox to begin.</span></section>
         <div id="live-workspace-host"></div>
