@@ -1,11 +1,8 @@
-"""Export recorded experiments and bundle the dependency-free browser dashboard."""
+"""Serialize recorded experiments for the FastAPI replay interface."""
 
 from __future__ import annotations
 
-import json
-import shutil
 from dataclasses import asdict
-from pathlib import Path
 from typing import Mapping
 
 from .graph import Graph
@@ -19,31 +16,10 @@ def trajectory_to_dict(trajectory: Trajectory) -> dict[str, object]:
         "steps": trajectory.steps,
         "node_states": trajectory.node_states,
         "edge_states": trajectory.edge_states,
+        "effective_edge_strengths": trajectory.effective_edge_strengths,
         "inputs": trajectory.inputs,
         "events": [asdict(event) for event in trajectory.events],
     }
-
-
-def write_dashboard_bundle(
-    output: Path,
-    graph: Graph,
-    runs: Mapping[str, tuple[Trajectory, Mapping[str, object]]],
-    config: SimulationConfig | None = None,
-) -> Path:
-    """Write replay data and copy the static dashboard beneath ``output``."""
-    copy_dashboard_assets(output)
-    document = dashboard_document(graph, runs, config)
-    data_path = output / "dashboard_data.json"
-    data_path.write_text(json.dumps(document, indent=2), encoding="utf-8")
-    return data_path
-
-
-def copy_dashboard_assets(output: Path) -> Path:
-    """Copy the browser application without requiring an existing experiment."""
-    source = Path(__file__).parent / "web"
-    destination = output / "dashboard"
-    shutil.copytree(source, destination, dirs_exist_ok=True)
-    return destination
 
 
 def dashboard_document(
@@ -51,9 +27,9 @@ def dashboard_document(
     runs: Mapping[str, tuple[Trajectory, Mapping[str, object]]],
     config: SimulationConfig | None = None,
 ) -> dict[str, object]:
-    """Build the in-memory dashboard response used by the local UI server."""
+    """Build the replay response returned directly by FastAPI."""
     document: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "graph": {
             "nodes": graph.n_nodes,
             "edges": [asdict(edge) for edge in graph.edges],

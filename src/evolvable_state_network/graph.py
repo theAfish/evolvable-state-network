@@ -42,15 +42,16 @@ def generate_random_graph(
     mean_degree: float,
     seed: int,
     topology: str = "erdos_renyi",
-    weight_scale: float = 0.8,
 ) -> Graph:
     """Create a deterministic graph without node IDs exposed to update rules.
 
     ``erdos_renyi`` samples each permitted directed edge independently.
     ``ring`` creates a deterministic bidirectional local ring, useful for a
-    topology contrast. Edge weights are independently sampled in both cases.
+    topology contrast. Every connection has unit base weight; any per-edge
+    communication variation is represented by its separately initialized,
+    stateful channel.
     """
-    if n_nodes < 1 or mean_degree < 0 or weight_scale <= 0:
+    if n_nodes < 1 or mean_degree < 0:
         raise ValueError("invalid graph generation parameters")
     rng = Random(seed)
     pairs: list[tuple[int, int]] = []
@@ -75,5 +76,5 @@ def generate_random_graph(
         ]
     else:
         raise ValueError(f"unknown topology: {topology}")
-    edges = tuple(Edge(source, target, rng.uniform(-weight_scale, weight_scale)) for source, target in pairs)
+    edges = tuple(Edge(source, target, 1.0) for source, target in pairs)
     return Graph(n_nodes=n_nodes, edges=edges)

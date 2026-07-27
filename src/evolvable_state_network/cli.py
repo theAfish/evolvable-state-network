@@ -5,17 +5,16 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import asdict
-from pathlib import Path
 from typing import Sequence
 
-from .dashboard import write_dashboard_bundle
+from .dashboard import dashboard_document
 from .experiment import ExperimentRequest, run_experiment
 from .plotting import write_trajectory_svg
+from .storage import new_run_directory
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Compare fixed local dynamics rules under common disturbances.")
-    parser.add_argument("--output", type=Path, default=Path("experiment_output"), help="artifact directory")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--nodes", type=int, default=24)
     parser.add_argument("--mean-degree", type=float, default=5.0)
@@ -29,7 +28,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.nodes < 2:
         raise SystemExit("--nodes must be at least 2")
-    args.output.mkdir(parents=True, exist_ok=True)
+    output = new_run_directory("reference_runs")
     experiment = run_experiment(ExperimentRequest(args.seed, args.nodes, args.mean_degree, args.steps, args.batch_size, args.dt))
     graph, config, disturbances = experiment.graph, experiment.config, experiment.disturbances
     report: dict[str, object] = {
@@ -44,15 +43,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     baselines: dict[str, object] = {}
     dashboard_runs = experiment.runs
     for name, (trajectory, metric_dict) in dashboard_runs.items():
-        plot_path = args.output / f"{name}_trajectory.svg"
+        plot_path = output / f"{name}_trajectory.svg"
         write_trajectory_svg(trajectory, plot_path, f"{name}: coordinate 0, batch 0")
         baselines[name] = {"metrics": metric_dict, "trajectory_plot": plot_path.name}
     report["baselines"] = baselines
-    report_path = args.output / "metrics.json"
+    report_path = output / "metrics.json"
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
-    dashboard_path = write_dashboard_bundle(args.output, graph, dashboard_runs, config)
+    replay_path = output / "replay.json"
+    replay_path.write_text(
+        json.dumps(dashboard_document(graph, dashboard_runs, config), indent=2),
+        encoding="utf-8",
+    )
     print(f"Wrote {report_path}")
-    print(f"Wrote {dashboard_path} and dashboard/")
+    print(f"Wrote {replay_path}")
     for name, outcome in baselines.items():
         print(f"{name}: {json.dumps(outcome['metrics'], sort_keys=True)}")
     return 0

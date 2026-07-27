@@ -8,10 +8,22 @@ version = "0.1.0"
 description = "Deterministic batched message-passing dynamical systems for evolvable stability experiments."
 requires-python = ">=3.11"
 authors = [{name = "Experimental Dynamics"}]
+dependencies = [
+    "numpy>=2.0", 
+    "cma>=4.4", 
+    "matplotlib>=3.10", 
+    "plotly>=6.0",
+    "torch>=2.13",
+    "fastapi>=0.116,<1",
+    "uvicorn>=0.35,<1",
+    "platformdirs>=4.3,<5",
+    "httpx>=0.28,<1"
+]
 
 [project.scripts]
 esn-experiment = "evolvable_state_network.cli:main"
 esn-dashboard = "evolvable_state_network.server:main"
+esn-evolve = "evolvable_state_network.evolution_cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

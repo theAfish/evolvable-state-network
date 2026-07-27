@@ -14,6 +14,11 @@ class SimulationTests(unittest.TestCase):
         self.assertEqual(generate_random_graph(12, 3, 17), generate_random_graph(12, 3, 17))
         self.assertNotEqual(generate_random_graph(12, 3, 17), generate_random_graph(12, 3, 18))
 
+    def test_random_graph_uses_unit_base_edge_weights(self) -> None:
+        graph = generate_random_graph(12, 3, 17)
+        self.assertTrue(graph.edges)
+        self.assertTrue(all(edge.weight == 1.0 for edge in graph.edges))
+
     def test_impulse_and_lesion_are_bounded_and_reproducible(self) -> None:
         graph = generate_random_graph(4, 2, 3)
         config = SimulationConfig(steps=5, batch_size=2, max_abs_state=0.5)

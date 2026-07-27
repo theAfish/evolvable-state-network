@@ -9,56 +9,122 @@ permutation-invariant message sum plus external input.
 ## Current scope
 
 - Batched synchronous, bounded integration with a continuous-time step `dt`.
-- Replaceable `NodeRule` and `EdgeRule` interfaces; rules receive no node IDs,
-  global score, future signal, or hidden environment state.
+- Replaceable `NodeRule` and `EdgeRule` interfaces; edge rules see only their
+  current unnamed vector, endpoint vectors, current message, and endpoint
+  inputs. Neither rule receives node IDs, global score, future signal, or a
+  hidden environment state.
+- Runtime-adaptive directed communication channels with fixed topology and unit
+  base weights. Edge
+  latents take bounded `scale * tanh(local_rule(...))` increments; a smooth
+  bounded scalar gate modulates a fixed projected source message.
 - Reproducible directed random graphs and index-addressed input/noise streams.
 - Trajectory recording plus input-shift, impulse, node-lesion, and weight-noise
   disturbances.
 - Metrics for boundedness, non-silence, saturation, activity diversity,
   disturbance response, and recovery.
 - Two fixed references: a one-coordinate RNN and a hand-designed stabilizing
-  rule. They are comparison points, not an evolutionary system.
+  rule. They are comparison points.
+- Evolution supports node-only, edge-only, and joint parameter groups through
+  a deterministic codec; groups can be exported/restored independently. The
+  message projection, aggregation, widths, and rule architectures remain
+  experiment configuration rather than genome fields.
 
-Evolution and an ecological environment are deliberately out of scope.
+Ecological tasks, agents, rewards, biological interpretations, gradients during
+simulation, and topology evolution remain deliberately out of scope. Runtime
+edge adaptation is generic channel-state dynamics, not a biological analogy.
 
-## Run the comparison
+## Evolve shared node and edge rules asynchronously
 
-No third-party runtime dependencies are required. From the repository root:
+The rule architecture, state width, topology, unit base weight, aggregation, and timestep
+are experiment configuration—not genome fields. Training scenarios use several
+seeds and perturbations; validation and test use disjoint seeds, larger graphs,
+stronger disturbances, and longer horizons.
+
+The primary research runner keeps a fixed set of active slots and replaces each
+candidate immediately on first-passage death or survival-milestone graduation.
+Node and edge rule parameters form one joint genome by default. Runtime node
+and edge states are reset and never inherited. Online health accumulators,
+paired response probes, right-censor records, common scenario banks, multiple
+replicas, buffered CMA-ES updates, and a validated elite archive are written to
+the operating system's standard per-user application-data directory.
+
+Run the required short diagnostic before scheduling a larger search:
 
 ```powershell
-$env:PYTHONPATH = 'src'
-.\.venv\Scripts\python.exe -m evolvable_state_network.cli --output experiment_output
+esn-evolve --diagnostic
 ```
 
-The output directory contains `metrics.json`, one SVG trajectory plot per
-baseline, `dashboard_data.json`, and a dependency-free browser dashboard.
-
-To use the interactive replay, serve the output directory and open the shown
-URL (the dashboard automatically loads the adjacent experiment data):
+Then, if the diagnostic is satisfactory, start a bounded asynchronous run:
 
 ```powershell
-$env:PYTHONPATH = 'src'
-.\.venv\Scripts\python.exe -m evolvable_state_network.server --output experiment_output
+esn-evolve --ticks 500 --slots 16 --replicas 3
 ```
 
-Do not use `python -m http.server` when you need **New experiment**: it can
-serve replay files but does not provide the local experiment API.
+The CLI evolves node and edge rule parameters jointly by default. Use
+`--evolve node`, `--evolve edge`, or `--evolve joint` to select a parameter
+group explicitly. Newly exported replay data shows each edge's unit base
+weight, its current smooth communication strength, and their effective product.
 
-Then open `http://localhost:8000/dashboard/`. The dashboard supports wall-clock
+The older fixed-horizon generation runner is retained only for comparison via
+`--legacy-generational`. It uses the tensorized Torch backend for the standard MLP
+node/edge rules, selecting CUDA when it is available. The generic Python
+simulator remains only for custom-rule and intervention experiments.
+
+Every legacy generational run first writes `random_search_smoke.json`. CMA-ES refuses to start
+unless the sampled fitness values are non-degenerate. The output also includes
+`checkpoint.json`, `best_genome.json`, `evolution_report.json`,
+and `analysis/` with trajectory, recovery, state-distribution, correlation,
+update-magnitude, train-validation-gap, scale, and long-horizon summaries.
+
+The dashboard's **Phase 1A viability** panel can run the same deterministic
+random-search smoke test through the local server. It reports sample count,
+fitness range, mean, variability, and viable-scenario fraction; it does not
+launch long-running optimization from the browser.
+
+## Run the application
+
+Install the project once into its virtual environment:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e .
+```
+
+Start the FastAPI application without selecting or preparing an output folder:
+
+```powershell
+esn-dashboard
+```
+
+Open `http://127.0.0.1:8000/`. Interactive API documentation is available at
+`http://127.0.0.1:8000/docs`. The old `/dashboard/` URL redirects to `/`.
+
+FastAPI serves the packaged frontend and artifact files. Uvicorn runs the ASGI
+application, Pydantic validates request bodies, and Platformdirs chooses the
+correct persistent data location for Windows, macOS, or Linux. Set
+`ESN_DATA_DIR` only when an explicit storage override is useful; it is not
+required for normal use. `GET /api/health` reports the active storage path.
+
+The dashboard supports wall-clock
 playback, stepping, speed and loop controls, baseline/batch/coordinate choices,
 and click-to-inspect node and edge state, external input, graph connections,
 metrics, and active disturbances. The **New experiment** panel runs a fresh
 parameterized simulation through this local server and loads it directly into
 the replay view. It can also load any compatible
-`dashboard_data.json` through its file picker, which is useful when opening the
-HTML directly rather than running a local server.
+replay JSON through its file picker.
+
+To generate a fixed-rule comparison from the command line, run `esn-experiment`.
+It also stores its metrics, plots, and replay JSON in application data without
+requiring an output argument.
 
 ## Extending the substrate
 
-Implement `NodeRule` and optionally `EdgeRule` from `rules.py`. Keep the rule
-local: it gets its own vector, aggregate, external vector, `dt`, and the update
-bound only. The simulator independently enforces per-coordinate delta and
-absolute-state bounds as a numerical safety layer.
+Implement `NodeRule` and optionally `EdgeRule` from `rules.py`. Keep each rule
+local. Node states use the simulator's numerical safety bound. Edge latent
+increments are bounded by the edge rule itself, while the effective channel
+strength is smooth-bounded; trajectories expose both so growth is detectable.
+`CandidateEvaluator(..., edge_architecture=..., target="node" | "edge" |
+"joint")` selects which parameter group evolves. `evaluate_ablations` reports
+the four fixed/adaptive node-edge combinations on matched scenario suites.
 
 The metrics currently use coordinate zero as a documented observation
 convention. It is not a semantic claim; later experiments may add registered

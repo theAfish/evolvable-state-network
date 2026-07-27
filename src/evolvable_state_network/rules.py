@@ -27,7 +27,7 @@ class NodeRule(Protocol):
 
 
 class EdgeRule(Protocol):
-    """Optional shared connection-state transition and local message interface."""
+    """Shared local transition for a generic stateful communication channel."""
 
     state_width: int
 
@@ -39,17 +39,22 @@ class EdgeRule(Protocol):
         state: StateVector,
         source: StateVector,
         target: StateVector,
-        dt: float,
-        max_delta: float,
+        message: StateVector,
+        source_external: StateVector,
+        target_external: StateVector,
+        edge_step_scale: float,
     ) -> StateVector:
-        """Update only from the endpoint states and its own state."""
+        """Update from strictly local, current quantities only."""
 
     def message(self, state: StateVector, source: StateVector) -> StateVector:
         """Emit a vector whose width equals the node-state width."""
 
+    def communication_strength(self, state: StateVector) -> float:
+        """Return the bounded scalar used to inspect effective communication."""
+
 
 class StatelessEdgeRule:
-    """A default identity connection rule with zero-dimensional edge state."""
+    """A fixed identity channel used where runtime adaptation is disabled."""
 
     state_width = 0
 
@@ -57,9 +62,13 @@ class StatelessEdgeRule:
         return ()
 
     def update(
-        self, state: StateVector, source: StateVector, target: StateVector, dt: float, max_delta: float
+        self, state: StateVector, source: StateVector, target: StateVector, message: StateVector,
+        source_external: StateVector, target_external: StateVector, edge_step_scale: float,
     ) -> StateVector:
         return state
 
     def message(self, state: StateVector, source: StateVector) -> StateVector:
         return source
+
+    def communication_strength(self, state: StateVector) -> float:
+        return 1.0
