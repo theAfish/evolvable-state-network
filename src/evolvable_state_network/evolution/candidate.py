@@ -89,7 +89,7 @@ class EdgeArchitecture:
 
     node_state_width: int = 4
     latent_width: int = 3
-    hidden_width: int = 8
+    hidden_width: int = 12
     gate_index: int = 0
     message_projection: tuple[tuple[float, ...], ...] | None = None
 

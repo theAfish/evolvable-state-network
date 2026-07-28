@@ -4,7 +4,7 @@
   const ui = {
     run: $('run-select'), batch: $('batch-select'), coordinate: $('coordinate-select'), rate: $('rate-select'), slider: $('frame-slider'), label: $('frame-label'), play: $('play'), prev: $('previous'), next: $('next'), loop: $('loop'), svg: $('network'), status: $('load-status'), file: $('file-input'), frameInfo: $('frame-info'), selection: $('selection-info'), metrics: $('metrics'), events: $('events'), form: $('experiment-form'), runStatus: $('run-status'), overview: $('overview-cards'),
     searchForm: $('evolution-form'), searchSeed: $('search-seed'), searchSamples: $('search-samples'), searchGenerations: $('search-generations'), searchPopulation: $('search-population'), random: $('start-random'), cma: $('start-cma'), searchStatus: $('search-status'), searchProgress: $('search-progress'), searchProgressLabel: $('search-progress-label'), chart: $('fitness-chart'), searchCards: $('search-cards'), process: $('process-table'), result: $('result-summary'), outcomeStatus: $('outcome-status'), liveForm: $('live-form'), liveModel: $('live-model-select'), liveModelScope: $('live-model-scope'), liveModelDetail: $('live-model-detail'), liveRefresh: $('refresh-live-models'), liveStatus: $('live-status'), livePlay: $('live-play'), liveStep: $('live-step'), liveRate: $('live-rate'), liveLabel: $('live-frame-label'), workspace: $('shared-workspace'), replayHost: $('replay-workspace-host'), liveHost: $('live-workspace-host'),
-    asyncForm: $('async-form'), asyncSeed: $('async-seed'), asyncRun: $('async-run'), asyncDiagnostic: $('async-diagnostic'), asyncRefresh: $('async-refresh'), asyncStatus: $('async-status'), asyncProgress: $('async-progress'), asyncProgressLabel: $('async-progress-label'), asyncMetrics: $('async-metrics'), asyncSlots: $('async-slots'), asyncCauses: $('async-causes'), asyncCurriculum: $('async-curriculum'), asyncCurriculumCopy: $('async-curriculum-copy'), asyncCandidates: $('async-candidates'), asyncDetail: $('async-detail'), asyncArtifacts: $('async-artifacts'), asyncLearningState: $('async-learning-state'), asyncLearningCopy: $('async-learning-copy'), asyncRunFacts: $('async-run-facts'), asyncEstimate: $('async-work-estimate'), asyncCandidateBudget: $('async-candidates-budget'), asyncSlotsInput: $('async-slots-input'), asyncReplicasInput: $('async-replicas-input'), asyncBatchInput: $('async-batch-input'), asyncStateWidth: $('async-state-width'), asyncTicksInput: $('async-ticks-input')
+    asyncForm: $('async-form'), asyncSeed: $('async-seed'), asyncRun: $('async-run'), asyncDiagnostic: $('async-diagnostic'), asyncRefresh: $('async-refresh'), asyncStatus: $('async-status'), asyncProgress: $('async-progress'), asyncProgressLabel: $('async-progress-label'), asyncMetrics: $('async-metrics'), asyncSlots: $('async-slots'), asyncCauses: $('async-causes'), asyncCurriculum: $('async-curriculum'), asyncCurriculumCopy: $('async-curriculum-copy'), asyncCandidates: $('async-candidates'), asyncDetail: $('async-detail'), asyncArtifacts: $('async-artifacts'), asyncLearningState: $('async-learning-state'), asyncLearningCopy: $('async-learning-copy'), asyncRunFacts: $('async-run-facts'), asyncEstimate: $('async-work-estimate'), asyncCandidateBudget: $('async-candidates-budget'), asyncSlotsInput: $('async-slots-input'), asyncReplicasInput: $('async-replicas-input'), asyncStablePopulation: $('async-stable-population'), asyncBatchInput: $('async-batch-input'), asyncStateWidth: $('async-state-width'), asyncTicksInput: $('async-ticks-input')
   };
   const state = { data: null, runName: '', frame: 0, batch: 0, coordinate: 0, selected: null, playing: false, lastTick: 0, layout: [], job: null, jobTimer: null, live: null, liveModels: [] };
   const NS = 'http://www.w3.org/2000/svg';
@@ -215,24 +215,29 @@
     simulator_failure: 'simulation failed',
   };
   const causeLabel = (cause) => cause ? (causeLabels[cause] || cause.replaceAll('_', ' ')) : 'survival milestone reached';
-  const sourceLabel = (source) => ({cma:'CMA-ES proposal', elite:'elite mutation', exploration:'random exploration', initial:'reference genome'}[source] || source);
+  const sourceLabel = (source) => ({cma:'CMA-ES proposal', initial:'reference genome'}[source] || source);
 
   function renderLearningVerdict(report = {}, settings = {}, runKind = 'training') {
-    const updates = Number(report.optimizer_updates || 0), completed = Number(report.completed_candidates || 0);
-    let stateLabel = 'No optimizer update yet', copy = `${completed} candidate lives have finished, but CMA-ES has not received a complete comparable result batch.`;
+    const updates = Number(report.optimizer_updates || 0), completed = Number(report.completed_candidates || 0), cohort = report.optimizer_batch_progress || {};
+    const cohortDetail = cohort.batch_size ? ` Cohort: ${cohort.completed || 0}/${cohort.batch_size} finished, ${cohort.inflight || 0} still evaluating.` : '';
+    let stateLabel = 'No optimizer update yet', copy = `${completed} candidate lives have finished, but CMA-ES has not received a complete comparable result batch.${cohortDetail}`;
     if (updates > 0 && updates < 5) { stateLabel = 'Warm-up: very early learning'; copy = `CMA-ES updated ${updates} time${updates === 1 ? '' : 's'}. This proves the loop is learning, but it is too early to infer convergence.`; }
     else if (updates >= 5 && updates < 20) { stateLabel = 'Training is underway'; copy = `CMA-ES has made ${updates} updates from completed survival evidence. Compare passage rates and elite changes before treating the result as stable.`; }
     else if (updates >= 20) { stateLabel = 'Substantial optimization history'; copy = `CMA-ES has made ${updates} updates. This is enough history to inspect trends, though held-out survival validation is still required.`; }
     if (runKind === 'diagnostic') copy += ' This run is an 80-tick smoke test, not a training budget.';
     ui.asyncLearningState.textContent = stateLabel;
     ui.asyncLearningCopy.textContent = copy;
-    const stop = ({candidate_budget_reached:'candidate-life budget reached', tick_limit_reached:'safety tick limit reached', running:'still running'}[report.stop_reason] || report.stop_reason || 'older run completed');
+    const stop = ({final_stage_population_established:'final-stage stable population established', stage_not_passed_tick_limit:'safety tick limit reached before this stage became stable', running:'still evolving'}[report.stop_reason] || report.stop_reason || 'older run completed');
     const origins = Object.entries(report.proposals_by_source || {}).map(([source, count]) => `${count} ${sourceLabel(source)}`).join(', ') || 'not recorded';
+    const tickLimit = report.tick_limit ?? settings.max_ticks;
     const facts = [
       ['stop condition', stop],
-      ['ticks elapsed', `${report.ticks_elapsed ?? '—'} / ${report.tick_limit ?? settings.max_ticks ?? '—'}`],
-      ['candidate evidence', `${completed}${report.candidate_budget ? ` / ${report.candidate_budget} target` : ''}`],
-      ['replica trajectories', `${report.completed_replica_lives ?? completed * Number(settings.replicas || 0)} completed`],
+      ['ticks elapsed', tickLimit == null ? `${report.ticks_elapsed ?? '—'} (no cap)` : `${report.ticks_elapsed ?? '—'} / ${tickLimit}`],
+      ['candidate evidence', `${completed}${report.candidate_budget ? ` / ${report.candidate_budget} checkpoint` : ''}`],
+      ['replica lives', `${report.completed_replica_lives ?? completed * Number(settings.replicas || 0)} completed`],
+      ['stable survivors', `${report.stable_survivor_count ?? 0} / ${report.stable_population_size ?? settings.stable_population_size ?? '?'}`],
+      ['functional survivor archive', `${report.survivor_archive_size ?? '—'}`],
+      ['CMA cohort', cohort.batch_size ? `${cohort.completed || 0}/${cohort.batch_size} complete, ${cohort.inflight || 0} active` : 'not recorded'],
       ['outcomes', `${report.graduations ?? report.viable_survivors ?? '—'} graduated / ${report.deaths ?? '—'} died`],
       ['per-coordinate runaway guard', settings.node_growth_alert === undefined ? 'not recorded' : `|coordinate| >= ${settings.node_growth_alert}; ${settings.one_direction_steps} growing ticks`],
       ['proposal origins', origins],
@@ -275,7 +280,7 @@
 
   function renderAsyncCurriculum(report, settings = {}) {
     const rates = report.milestone_passage_rates || {};
-    ui.asyncCurriculumCopy.textContent = `Current stage ${(report.curriculum_level ?? 0) + 1}; advancement requires at least 60% of the recent candidate lives to graduate.`;
+    ui.asyncCurriculumCopy.textContent = `Current stage ${(report.curriculum_level ?? 0) + 1}; it continues until ${report.stable_population_size ?? settings.stable_population_size ?? '?'} healthy survivors establish a stable population.`;
     ui.asyncCurriculum.replaceChildren(...Object.entries(rates).map(([level, rate]) => {
       const item = document.createElement('div'); item.className = `curriculum-level ${Number(level) === Number(report.curriculum_level) ? 'active' : ''}`;
       const config = settings.levels?.[Number(level)] || {};
@@ -297,16 +302,16 @@
     const replicas = candidate.replicas.map((replica, index) => {
       const block = document.createElement('div'); block.className = 'replica-line';
       const heading = document.createElement('strong'); heading.textContent = `Replica ${replica.index ?? index}`;
-      const open = document.createElement('button'); open.type = 'button'; open.className = 'replay-survival'; open.textContent = 'Replay this exact life';
+      const open = document.createElement('button'); open.type = 'button'; open.className = 'replay-survival'; open.textContent = 'Debug: reconstruct this life';
       open.addEventListener('click', async () => {
         open.disabled = true; open.textContent = 'Reconstructing...';
         try {
-          const response = await fetch(replica.replay_url), document = await response.json();
+          const response = await fetch(replica.debug_replay_url), document = await response.json();
           if (!response.ok) throw new Error(apiError(document, 'survival replay is unavailable'));
           load(document); activate('replay'); window.scrollTo({top: 0, behavior: 'smooth'});
         } catch (error) {
           evidence.textContent = `Could not reconstruct this survival replay: ${error.message}`;
-        } finally { open.disabled = false; open.textContent = 'Replay this exact life'; }
+        } finally { open.disabled = false; open.textContent = 'Debug: reconstruct this life'; }
       });
       const coordinateEvidence = replica.coordinate_responsiveness?.length ? ` · per-coordinate response [${replica.coordinate_responsiveness.map((value) => Number(value).toExponential(2)).join(', ')}] · propagation [${replica.coordinate_propagation.map((value) => Number(value).toExponential(2)).join(', ')}] · separation [${replica.coordinate_distinguishability.map((value) => Number(value).toExponential(2)).join(', ')}] · recovery [${replica.coordinate_recovered.map((value) => value ? 'ok' : 'failed').join(', ')}]` : '';
       const evidence = document.createElement('span'); evidence.textContent = `lived ${replica.age} ticks · worst pathology burden ${Number(replica.burden).toFixed(3)} · worst-coordinate input response ${Number(replica.responsiveness).toExponential(2)} · worst-coordinate graph propagation ${Number(replica.propagation).toExponential(2)} · worst-coordinate paired-probe separation ${Number(replica.distinguishability).toExponential(2)} · ${replica.recovered ? 'recovered after probe' : 'recovery not demonstrated'}${coordinateEvidence}`;
@@ -354,7 +359,7 @@
       const response = await fetch('/api/async/latest'), data = await response.json();
       if (!response.ok) throw new Error(apiError(data, 'latest survival run is unavailable'));
       if (!data.available) { ui.asyncStatus.textContent = 'No survival run exists yet. Configure training above and start it.'; return; }
-      renderAsyncData(data); ui.asyncProgress.max = data.report.candidate_budget || data.report.tick_limit || 1; ui.asyncProgress.value = data.report.candidate_budget ? data.report.completed_candidates : data.report.ticks_elapsed;
+      renderAsyncData(data); ui.asyncProgress.max = data.report.tick_limit || Math.max(1, data.report.ticks_elapsed || 1); ui.asyncProgress.value = data.report.ticks_elapsed || 0;
       ui.asyncProgressLabel.textContent = 'complete';
       ui.asyncStatus.textContent = `Loaded ${data.run_kind || 'survival'} run ${data.run_id}: ${data.report.completed_candidates} completed candidate lives.`;
     } catch (error) { ui.asyncStatus.textContent = `Could not load survival results: ${error.message}`; }
@@ -368,16 +373,19 @@
       if (!response.ok) throw new Error(job.detail || job.error || 'job status unavailable');
       if (job.status === 'running') {
         const snapshot = job.latest || {}, tick = Number(snapshot.tick || 0);
-        const report = snapshot.report || {}, budget = Number(report.candidate_budget || 0), completed = Number(report.completed_candidates || 0);
-        ui.asyncProgress.max = budget || Number(snapshot.max_ticks || 80); ui.asyncProgress.value = budget ? completed : tick;
-        ui.asyncProgressLabel.textContent = budget ? `${completed} / ${budget} candidate lives · tick ${tick}` : `${tick} / ${snapshot.max_ticks || 80} ticks`;
+        const report = snapshot.report || {}, checkpoint = Number(report.candidate_budget || 0), completed = Number(report.completed_candidates || 0);
+        const tickLimit = snapshot.max_ticks ?? report.tick_limit;
+        ui.asyncProgress.max = Number(tickLimit || 1); ui.asyncProgress.value = tickLimit ? tick : 0;
+        ui.asyncProgressLabel.textContent = tickLimit == null
+          ? `${tick} ticks · no cap · ${completed}${checkpoint ? ` / ${checkpoint} evidence checkpoint` : ''}`
+          : `${tick} / ${tickLimit} ticks · ${completed}${checkpoint ? ` / ${checkpoint} evidence checkpoint` : ''}`;
         ui.asyncStatus.textContent = `${job.kind === 'async_training' ? 'Survival training' : 'Smoke test'} is running · seed ${job.seed}`;
         if (snapshot.report) renderAsyncData({report:snapshot.report}, snapshot.slots);
         window.setTimeout(() => pollAsyncJob(jobId), 300);
       } else if (job.status === 'complete') {
         setAsyncBusy(false); renderAsyncData(job.result); const report = job.result.report || {};
-        ui.asyncProgress.max = report.candidate_budget || report.tick_limit || 1; ui.asyncProgress.value = report.candidate_budget ? report.completed_candidates : report.ticks_elapsed;
-        ui.asyncProgressLabel.textContent = 'complete'; ui.asyncStatus.textContent = `${job.kind === 'async_training' ? 'Training' : 'Smoke test'} complete · ${report.completed_candidates} candidate lives · seed ${job.seed}`;
+        ui.asyncProgress.max = report.tick_limit || Math.max(1, report.ticks_elapsed || 1); ui.asyncProgress.value = report.ticks_elapsed || 0;
+        ui.asyncProgressLabel.textContent = report.stop_reason === 'final_stage_population_established' ? 'stable population established' : 'explicit tick cap reached before stage completion'; ui.asyncStatus.textContent = `${job.kind === 'async_training' ? 'Training stopped' : 'Smoke test complete'} · ${report.completed_candidates} candidate lives · seed ${job.seed}`;
       } else { throw new Error(job.error || 'survival run failed'); }
     } catch (error) { setAsyncBusy(false); ui.asyncStatus.textContent = `Survival run stopped: ${error.message}`; }
   }
@@ -385,13 +393,14 @@
   async function startAsync(event) {
     event.preventDefault();
     const fields = {
-      candidate_budget:'async-candidates-budget', max_ticks:'async-ticks-input', slots:'async-slots-input', replicas:'async-replicas-input', optimizer_batch:'async-batch-input', state_width:'async-state-width',
+      candidate_budget:'async-candidates-budget', slots:'async-slots-input', replicas:'async-replicas-input', stable_population_size:'async-stable-population', optimizer_batch:'async-batch-input', state_width:'async-state-width',
       stage_1_lifetime:'async-stage1-life', stage_2_lifetime:'async-stage2-life', stage_1_nodes:'async-stage1-nodes', stage_2_nodes:'async-stage2-nodes', mean_degree:'async-degree', input_scale:'async-input-scale',
       disturbance_interval:'async-disturbance-interval', disturbance_strength:'async-disturbance-strength', fatal_threshold:'async-fatal-threshold', node_growth_alert:'async-node-growth-alert', one_direction_steps:'async-one-direction-steps', probe_interval:'async-probe-interval',
     };
     const payload = Object.fromEntries(Object.entries(fields).map(([key, id]) => [key, Number($(id).value)]));
+    if (ui.asyncTicksInput.value.trim() !== '') payload.max_ticks = Number(ui.asyncTicksInput.value);
     if (ui.asyncSeed.value.trim() !== '') payload.seed = Number(ui.asyncSeed.value);
-    setAsyncBusy(true); ui.asyncStatus.textContent = 'Starting configured survival training…'; ui.asyncProgress.max = payload.candidate_budget; ui.asyncProgress.value = 0;
+    setAsyncBusy(true); ui.asyncStatus.textContent = 'Starting configured survival training…'; ui.asyncProgress.max = payload.max_ticks || 1; ui.asyncProgress.value = 0;
     try {
       const response = await fetch('/api/async/train', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}), data = await response.json();
       if (!response.ok) throw new Error(apiError(data, 'could not start survival training'));
@@ -410,14 +419,14 @@
   }
 
   function updateAsyncEstimate() {
-    const lives = Number(ui.asyncCandidateBudget.value || 0), replicas = Number(ui.asyncReplicasInput.value || 0), batch = Number(ui.asyncBatchInput.value || 1);
-    ui.asyncEstimate.value = `${lives} candidate lives × ${replicas} replicas = about ${lives * replicas} completed trajectories; at most about ${Math.floor(lives / batch)} CMA result batches.`;
+    const checkpoint = Number(ui.asyncCandidateBudget.value || 0), replicas = Number(ui.asyncReplicasInput.value || 0), survivors = Number(ui.asyncStablePopulation.value || 0);
+    ui.asyncEstimate.value = `Evidence checkpoint: ${checkpoint} completed lives across ${replicas} replicas. The stage advances only after ${survivors} healthy survivors; no trajectory is stored by default.`;
   }
 
   document.querySelectorAll('.nav').forEach((button) => button.addEventListener('click', () => activate(button.dataset.view)));
   ui.run.addEventListener('change', () => { state.runName = ui.run.value; state.frame = state.batch = state.coordinate = 0; state.selected = null; refreshSelectors(); drawGraph(); update(); updateOverview(); }); ui.batch.addEventListener('change', () => { state.batch = Number(ui.batch.value); update(); }); ui.coordinate.addEventListener('change', () => { state.coordinate = Number(ui.coordinate.value); update(); }); ui.slider.addEventListener('input', () => { state.frame = Number(ui.slider.value); update(); }); ui.prev.addEventListener('click', () => move(-1)); ui.next.addEventListener('click', () => move(1)); ui.play.addEventListener('click', () => { state.playing = !state.playing; ui.play.textContent = state.playing ? 'Pause' : 'Play'; state.lastTick = performance.now(); if (state.playing) requestAnimationFrame(animate); });
   ui.form.addEventListener('submit', async (event) => { event.preventDefault(); const values = Object.fromEntries(new FormData(ui.form)); ['seed','nodes','steps','batch_size'].forEach((key) => { values[key] = Number(values[key]); }); ['mean_degree','dt'].forEach((key) => { values[key] = Number(values[key]); }); ui.runStatus.textContent = 'Running deterministic local experiment…'; try { const response = await fetch('/api/experiment', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(values)}), document = await response.json(); if (!response.ok) throw new Error(apiError(document, 'experiment request failed')); load(document); ui.runStatus.textContent = 'Reference simulation loaded. Open Replay for details.'; } catch (error) { ui.runStatus.textContent = `Could not start: ${error.message}`; } });
   ui.random.addEventListener('click', () => startJob('/api/evolution/random-search')); ui.cma.addEventListener('click', () => startJob('/api/evolution/search')); ui.file.addEventListener('change', async () => { const file = ui.file.files[0]; if (!file) return; try { load(JSON.parse(await file.text())); } catch (error) { ui.status.textContent = error.message; } });
-  ui.asyncForm.addEventListener('submit', startAsync); ui.asyncDiagnostic.addEventListener('click', startAsyncDiagnostic); ui.asyncRefresh.addEventListener('click', loadLatestAsync); [ui.asyncCandidateBudget, ui.asyncReplicasInput, ui.asyncBatchInput].forEach((input) => input.addEventListener('input', updateAsyncEstimate)); updateAsyncEstimate(); activate('survival'); loadLatestAsync();
+  ui.asyncForm.addEventListener('submit', startAsync); ui.asyncDiagnostic.addEventListener('click', startAsyncDiagnostic); ui.asyncRefresh.addEventListener('click', loadLatestAsync); [ui.asyncCandidateBudget, ui.asyncReplicasInput, ui.asyncStablePopulation].forEach((input) => input.addEventListener('input', updateAsyncEstimate)); updateAsyncEstimate(); activate('survival'); loadLatestAsync();
   ui.liveRefresh.addEventListener('click', refreshLiveModels); ui.liveModel.addEventListener('change', renderLiveModelDetail); ui.liveModelScope.addEventListener('change', () => { const visible = renderLiveModelOptions(); ui.liveStatus.textContent = `${visible} model${visible === 1 ? '' : 's'} shown by the current filter.`; }); ui.liveForm.addEventListener('submit', launchLive); ui.livePlay.addEventListener('click', () => { if (!state.live) return; state.playing = !state.playing; ui.livePlay.textContent = state.playing ? 'Pause' : 'Play'; state.lastTick = performance.now(); if (state.playing) requestAnimationFrame(animate); }); ui.liveStep.addEventListener('click', () => advanceLive()); refreshLiveModels();
 })();

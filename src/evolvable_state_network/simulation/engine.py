@@ -29,13 +29,25 @@ class SimulationConfig:
     max_delta: float = 0.12
     max_abs_state: float = 4.0
     edge_step_scale: float = 0.06
-    edge_latent_alert: float = 12.0
+    # This is a viability alert, not a bound imposed on the latent state.  A
+    # state may settle above it; only sustained movement away is unhealthy.
+    edge_latent_alert: float = 1.0
+    edge_growth_delta: float = 1e-4
+    edge_growth_steps: int = 12
     record_every: int = 1
 
     def __post_init__(self) -> None:
         if self.steps < 1 or self.batch_size < 1 or self.record_every < 1:
             raise ValueError("steps, batch_size, and record_every must be positive")
-        if self.dt <= 0 or self.max_delta <= 0 or self.max_abs_state <= 0 or self.edge_step_scale <= 0 or self.edge_latent_alert <= 0:
+        if (
+            self.dt <= 0
+            or self.max_delta <= 0
+            or self.max_abs_state <= 0
+            or self.edge_step_scale <= 0
+            or self.edge_latent_alert <= 0
+            or self.edge_growth_delta < 0
+            or self.edge_growth_steps < 1
+        ):
             raise ValueError("dt and bounds must be positive")
 
 

@@ -85,13 +85,18 @@ class AsyncEvolutionConfig:
     slots: int = 8
     replicas: int = 3
     result_batch_size: int = 8
-    max_ticks: int = 200
+    # Normal survival training has no tick cap: completion is exclusively the
+    # final-stage stable-population gate.  A finite cap is retained only for
+    # diagnostics, tests, or an explicit caller-requested interruption.
+    max_ticks: int | None = None
+    # A reporting checkpoint, not a completion criterion.  Training remains in
+    # its current curriculum stage until a stable survivor population exists.
     candidate_budget: int | None = None
     seed: int = 41
     target: EvolutionTarget = "joint"
-    architecture: RuleArchitecture = RuleArchitecture(state_width=1, hidden_width=3)
+    architecture: RuleArchitecture = RuleArchitecture(state_width=1, hidden_width=8)
     edge_architecture: EdgeArchitecture | None = EdgeArchitecture(
-        node_state_width=1, latent_width=2, hidden_width=3
+        node_state_width=1, latent_width=2, hidden_width=12
     )
     levels: tuple[CurriculumLevel, ...] = (
         CurriculumLevel(20),
@@ -102,29 +107,31 @@ class AsyncEvolutionConfig:
     probes: ProbeConfig = ProbeConfig()
     curriculum_window: int = 20
     curriculum_pass_fraction: float = .60
+    stable_population_size: int = 4
     censor_interval: int = 5
     elite_size: int = 4
-    cma_fraction: float = .70
-    elite_fraction: float = .20
-    exploration_sigma: float = 1.0
+    # CMA-ES is the sole proposal mechanism.  The archive records survival
+    # evidence and deployment candidates; it never breeds a hand-mutated
+    # offspring population.
     initial_sigma: float = .35
     initial_genomes: tuple[tuple[float, ...], ...] = ()
 
     def __post_init__(self) -> None:
-        if self.slots < 1 or self.replicas < 1 or self.result_batch_size < 2:
-            raise ValueError("slots, replicas, and result_batch_size must be positive")
+        if (
+            self.slots < 1
+            or self.replicas < 1
+            or self.result_batch_size < 2
+            or self.stable_population_size < 1
+        ):
+            raise ValueError("slot, replica, optimizer, and population counts must be positive")
         if self.candidate_budget is not None and self.candidate_budget < 1:
             raise ValueError("candidate_budget must be positive when provided")
+        if self.max_ticks is not None and self.max_ticks < 1:
+            raise ValueError("max_ticks must be positive when provided")
         if not self.levels or any(level.lifetime < 1 for level in self.levels):
             raise ValueError("at least one positive curriculum lifetime is required")
         if self.target in {"edge", "joint"} and self.edge_architecture is None:
             raise ValueError("edge architecture is required for edge or joint evolution")
-        if (
-            not 0 <= self.cma_fraction <= 1
-            or not 0 <= self.elite_fraction <= 1
-            or self.cma_fraction + self.elite_fraction > 1.0
-        ):
-            raise ValueError("replacement mixture fractions cannot exceed one")
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,23 +187,31 @@ class ProbeSummary:
 class HealthMonitor:
     config: PathologyConfig
     burdens: dict[str, float] = field(default_factory=lambda: defaultdict(float))
-    burden_history: list[dict[str, object]] = field(default_factory=list)
-    probes: list[ProbeSummary] = field(default_factory=list)
+    peak_burdens: dict[str, float] = field(default_factory=lambda: defaultdict(float))
+    violation_counts: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    probe_count: int = 0
+    minimum_response: float | None = None
+    minimum_propagation: float | None = None
+    minimum_distinguishability: float | None = None
+    all_probes_recovered: bool = True
     one_direction_signs: list[int] = field(default_factory=list)
     one_direction_runs: list[int] = field(default_factory=list)
     node_growth_runs: list[int] = field(default_factory=list)
     edge_ever_active: bool = False
-    edge_growth_run: int = 0
+    edge_growth_runs: list[int] = field(default_factory=list)
     death_cause: str | None = None
     death_time: int | None = None
 
     def _burden(self, name: str, violation: bool, amount: float = 1.0) -> None:
         current = self.burdens[name]
+        if violation:
+            self.violation_counts[name] += 1
         self.burdens[name] = (
             current + self.config.increase * amount
             if violation
             else max(0.0, current - self.config.recovery)
         )
+        self.peak_burdens[name] = max(self.peak_burdens[name], self.burdens[name])
 
     def observe(
         self,
@@ -207,6 +222,7 @@ class HealthMonitor:
         diagnostics: TransitionDiagnostics,
         probe: ProbeSummary | None = None,
         simulator_failed: bool = False,
+        edge_gates: Sequence[Sequence[float]] | None = None,
     ) -> str | None:
         values = [value for row in current.node for vector in row for value in vector]
         edges = [value for row in current.edge for vector in row for value in vector]
@@ -302,21 +318,43 @@ class HealthMonitor:
             and not self.edge_ever_active,
         )
 
-        edge_magnitude = fmean(abs(value) for value in edges) if edges else 0.0
-        prior_edge_magnitude = fmean(abs(value) for value in prior_edges) if prior_edges else 0.0
-        if edge_magnitude - prior_edge_magnitude > self.config.edge_growth_delta:
-            self.edge_growth_run += 1
-        else:
-            self.edge_growth_run = 0
-        saturated_edges = (
-            bool(strengths)
-            and sum(
-                strength <= 1.0 - self.config.edge_saturation_strength
-                or strength >= self.config.edge_saturation_strength
-                for strength in strengths
+        edge_width = len(current.edge[0][0]) if current.edge and current.edge[0] else 0
+        coordinate_edges = [edges[coordinate::edge_width] for coordinate in range(edge_width)]
+        prior_coordinate_edges = [
+            prior_edges[coordinate::edge_width] for coordinate in range(edge_width)
+        ]
+        if len(self.edge_growth_runs) != edge_width:
+            self.edge_growth_runs = [0] * edge_width
+        edge_magnitudes = [
+            fmean(abs(value) for value in coordinate_values) if coordinate_values else 0.0
+            for coordinate_values in coordinate_edges
+        ]
+        prior_edge_magnitudes = [
+            fmean(abs(value) for value in coordinate_values) if coordinate_values else 0.0
+            for coordinate_values in prior_coordinate_edges
+        ]
+        for coordinate, (magnitude, prior_magnitude) in enumerate(
+            zip(edge_magnitudes, prior_edge_magnitudes, strict=True)
+        ):
+            self.edge_growth_runs[coordinate] = (
+                self.edge_growth_runs[coordinate] + 1
+                if magnitude - prior_magnitude > self.config.edge_growth_delta
+                else 0
             )
-            / len(strengths)
+        # ``strengths`` is a scalar visual summary.  Safety must instead
+        # inspect every communication coordinate, so one saturated gate cannot
+        # be hidden by another coordinate's healthy average.
+        gate_vectors = edge_gates if edge_gates is not None else tuple((value,) for value in strengths)
+        gate_width = len(gate_vectors[0]) if gate_vectors else 0
+        saturated_edges = any(
+            sum(
+                value <= 1.0 - self.config.edge_saturation_strength
+                or value >= self.config.edge_saturation_strength
+                for value in (vector[coordinate] for vector in gate_vectors)
+            )
+            / len(gate_vectors)
             >= self.config.edge_saturation_fraction
+            for coordinate in range(gate_width)
         )
         # Saturation is a dead communication state, and continued latent
         # growth while saturated is an earlier, directional runaway signal.
@@ -324,15 +362,34 @@ class HealthMonitor:
             "edge_gate_saturation",
             saturated_edges
             and not communication_collapsed
-            and self.edge_growth_run < self.config.edge_growth_steps,
+            and not any(run >= self.config.edge_growth_steps for run in self.edge_growth_runs),
         )
         self._burden(
             "edge_runaway_growth",
-            edge_magnitude >= self.config.edge_growth_alert
-            and self.edge_growth_run >= self.config.edge_growth_steps,
+            any(
+                magnitude >= self.config.edge_growth_alert
+                and run >= self.config.edge_growth_steps
+                for magnitude, run in zip(edge_magnitudes, self.edge_growth_runs, strict=True)
+            ),
         )
         if probe is not None:
-            self.probes.append(probe)
+            self.probe_count += 1
+            self.minimum_response = (
+                probe.response
+                if self.minimum_response is None
+                else min(self.minimum_response, probe.response)
+            )
+            self.minimum_propagation = (
+                probe.propagation
+                if self.minimum_propagation is None
+                else min(self.minimum_propagation, probe.propagation)
+            )
+            self.minimum_distinguishability = (
+                probe.distinguishability
+                if self.minimum_distinguishability is None
+                else min(self.minimum_distinguishability, probe.distinguishability)
+            )
+            self.all_probes_recovered = self.all_probes_recovered and probe.recovered
             responses = probe.coordinate_response or (probe.response,)
             propagations = probe.coordinate_propagation or (probe.propagation,)
             distinguishabilities = (
@@ -353,8 +410,9 @@ class HealthMonitor:
             )
             self._burden("disturbance_unrecovered", not all(recovered))
         # Probe-derived health evidence is updated only by another probe.
-        # Absence of a probe is not evidence of functional recovery.
-        self.burden_history.append({"step": step, "burdens": dict(self.burdens)})
+        # Absence of a probe is not evidence of functional recovery.  The
+        # monitor deliberately keeps aggregates only; no training trajectory is
+        # retained unless a user later requests a debug reconstruction.
         fatal = [(value, name) for name, value in self.burdens.items() if value >= self.config.fatal_threshold]
         return self._die(max(fatal)[1], step) if fatal else None
 
@@ -453,8 +511,18 @@ class ReplicaRuntime:
             for row in self.state.edge
             for vector in row
         ]
+        edge_gates = (
+            [
+                self.simulation.edge_rule.communication_gates(vector)
+                for row in self.state.edge
+                for vector in row
+            ]
+            if self.simulation.edge_rule.state_width
+            else ()
+        )
         self.fatal_cause = self.monitor.observe(
-            self.age, previous, self.state, strengths, step_diagnostics, probe
+            self.age, previous, self.state, strengths, step_diagnostics, probe,
+            edge_gates=edge_gates,
         )
 
     def _probe_summary(self) -> ProbeSummary:
@@ -515,22 +583,19 @@ class ReplicaRuntime:
     def summary(self) -> dict[str, object]:
         values = [value for vector in self.state.node[0] for value in vector]
         edges = [value for vector in self.state.edge[0] for value in vector]
-        latest = self.monitor.probes[-1] if self.monitor.probes else None
         return {
             "scenario": asdict(self.scenario),
             "age": self.age,
             "death_cause": self.fatal_cause,
             "normalized_pathology_burden": self.monitor.normalized_burden,
-            "pathology_trajectories": self.monitor.burden_history,
-            "response_probes": [asdict(item) for item in self.monitor.probes],
-            "responsiveness": latest.response if latest else 0.0,
-            "propagation": latest.propagation if latest else 0.0,
-            "distinguishability": latest.distinguishability if latest else 0.0,
-            "recovered": latest.recovered if latest else False,
-            "coordinate_responsiveness": list(latest.coordinate_response) if latest else [],
-            "coordinate_propagation": list(latest.coordinate_propagation) if latest else [],
-            "coordinate_distinguishability": list(latest.coordinate_distinguishability) if latest else [],
-            "coordinate_recovered": list(latest.coordinate_recovered) if latest else [],
+            "current_pathology_burdens": dict(self.monitor.burdens),
+            "peak_pathology_burdens": dict(self.monitor.peak_burdens),
+            "pathology_violation_counts": dict(self.monitor.violation_counts),
+            "probe_count": self.monitor.probe_count,
+            "responsiveness": self.monitor.minimum_response or 0.0,
+            "propagation": self.monitor.minimum_propagation or 0.0,
+            "distinguishability": self.monitor.minimum_distinguishability or 0.0,
+            "recovered": self.monitor.probe_count > 0 and self.monitor.all_probes_recovered,
             "final_node_statistics": _stats(values),
             "final_edge_statistics": _stats(edges),
             "update_cost": self.diagnostics.components / max(1, self.age),
@@ -540,10 +605,11 @@ class ReplicaRuntime:
 @dataclass(frozen=True, slots=True)
 class CandidateProposal:
     genome: tuple[float, ...]
-    source: Literal["cma", "elite", "exploration", "initial"]
+    source: Literal["cma", "parent", "exploration", "initial"]
     sample_id: int | None
     optimizer_update: int
     parent_candidate_id: int | None = None
+    lineage_id: int | None = None
 
 
 @dataclass(slots=True)
@@ -596,16 +662,25 @@ class CandidateSlot:
 
 
 class SteadyStateCMA:
-    """Buffered adapter that never blocks slot replacement on a generation."""
+    """One comparable CMA-ES cohort at a time.
+
+    Candidates can finish at different times, but ``tell`` is deliberately
+    delayed until the entire population was evaluated on one scenario bank.
+    A curriculum transition cancels an incomplete cohort and starts a fresh,
+    comparable one for the new stage.
+    """
 
     def __init__(self, dimension: int, batch_size: int, sigma: float, seed: int) -> None:
         self.optimizer = CMAES(CMAESConfig(dimension, batch_size, sigma, seed))
         self.batch_size = batch_size
         self.pending: deque[tuple[int, tuple[float, ...]]] = deque()
-        self.results: dict[str, list[tuple[int, tuple[float, ...], tuple[float, ...]]]] = defaultdict(list)
+        self.results: list[tuple[int, tuple[float, ...], tuple[float, ...]]] = []
+        self.inflight: set[int] = set()
+        self.bank_id: str | None = None
         self.next_sample_id = 0
         self.update_count = 0
         self.observed_samples: set[int] = set()
+        self.cancelled_samples = 0
         self._refill()
 
     def _refill(self) -> None:
@@ -614,22 +689,53 @@ class SteadyStateCMA:
             self.next_sample_id += 1
 
     def ask(self) -> tuple[int, tuple[float, ...]] | None:
-        return self.pending.popleft() if self.pending else None
+        if not self.pending:
+            return None
+        sample_id, genome = self.pending.popleft()
+        self.inflight.add(sample_id)
+        return sample_id, genome
+
+    def begin_stage(self, bank_id: str) -> None:
+        """Discard incomparable unfinished evidence and issue a fresh cohort."""
+        if self.bank_id == bank_id:
+            return
+        self.cancelled_samples += len(self.inflight) + len(self.results)
+        self.pending.clear()
+        self.inflight.clear()
+        self.results.clear()
+        self.bank_id = bank_id
+        self._refill()
+
+    @property
+    def waiting_for_results(self) -> bool:
+        return bool(self.inflight or self.results)
+
+    def progress(self) -> dict[str, int | str | None]:
+        return {
+            "bank_id": self.bank_id,
+            "batch_size": self.batch_size,
+            "completed": len(self.results),
+            "inflight": len(self.inflight),
+            "unissued": len(self.pending),
+            "cancelled": self.cancelled_samples,
+        }
 
     def observe(
         self, bank_id: str, sample_id: int | None, genome: tuple[float, ...], rank: tuple[float, ...]
     ) -> bool:
-        if sample_id is None:
+        if sample_id is None or sample_id in self.observed_samples:
             return False
-        if sample_id in self.observed_samples:
+        if self.bank_id is None:
+            self.bank_id = bank_id
+        if self.bank_id != bank_id or sample_id not in self.inflight:
             return False
         self.observed_samples.add(sample_id)
-        bucket = self.results[bank_id]
-        bucket.append((sample_id, genome, rank))
-        if len(bucket) < self.batch_size:
+        self.inflight.remove(sample_id)
+        self.results.append((sample_id, genome, rank))
+        if len(self.results) < self.batch_size:
             return False
-        records = bucket[: self.batch_size]
-        del bucket[: self.batch_size]
+        records = self.results
+        self.results = []
         ordered = sorted(records, key=lambda item: item[2])
         scalar_by_id = {sample: float(index) for index, (sample, _, _) in enumerate(ordered)}
         population = [genome_value for sample, genome_value, _ in records]
@@ -664,6 +770,22 @@ class EliteArchive:
         return changed
 
 
+class SurvivorArchive(EliteArchive):
+    """One shared functional-survivor archive across curriculum levels.
+
+    A functional graduate at a harder level has a strictly higher primary
+    rank.  Its arrival removes lower-rank earlier-stage records immediately,
+    rather than retaining them as permanent evidence leaders.
+    """
+
+    def consider(self, record: dict[str, object]) -> bool:
+        primary_rank = float(record["rank_key"][0])
+        self.records = [
+            item for item in self.records if float(item["rank_key"][0]) >= primary_rank
+        ]
+        return super().consider(record)
+
+
 class AsyncEvolutionRunner:
     def __init__(self, config: AsyncEvolutionConfig) -> None:
         self.config = config
@@ -673,6 +795,7 @@ class AsyncEvolutionRunner:
             self.codec.dimension, config.result_batch_size, config.initial_sigma, config.seed
         )
         self.elites = EliteArchive(config.elite_size)
+        self.survivors = SurvivorArchive(config.elite_size)
         self.level = 0
         self.banks = [
             ScenarioBank.create(config.seed, index, config.replicas, level)
@@ -681,39 +804,54 @@ class AsyncEvolutionRunner:
         self.slots: list[CandidateSlot] = []
         self.archive: list[dict[str, object]] = []
         self.censored: list[dict[str, object]] = []
-        self.recent_outcomes: deque[bool] = deque(maxlen=config.curriculum_window)
+        self.stage_survivors: dict[int, list[dict[str, object]]] = defaultdict(list)
         self.next_candidate_id = 0
         self.initial = deque(config.initial_genomes)
         self.utilization_samples: list[float] = []
         self.ticks_elapsed = 0
         self.stop_reason = "running"
+        self.optimizer.begin_stage(self.banks[self.level].bank_id)
+        self.stage_optimizer_updates_at_entry = self.optimizer.update_count
 
     def run(
         self,
         output: Path | None = None,
         progress: Callable[[dict[str, object]], None] | None = None,
     ) -> dict[str, object]:
-        while len(self.slots) < self.config.slots:
-            self.slots.append(self._new_slot(len(self.slots)))
-        for tick in range(self.config.max_ticks):
+        self._fill_slots()
+        tick = 0
+        while self.config.max_ticks is None or tick < self.config.max_ticks:
             self.utilization_samples.append(len(self.slots) / self.config.slots)
+            finished: list[CandidateSlot] = []
             for slot in list(self.slots):
                 level = self.config.levels[slot.level]
                 for replica in slot.replicas:
                     replica.advance(level, self.config.probes)
                 if slot.dead:
                     self._finish(slot, "death")
-                    self._replace(slot)
+                    finished.append(slot)
                 elif slot.age >= level.lifetime:
                     slot.milestone_history.append(
                         {"level": slot.level, "time": slot.age, "kind": "graduation"}
                     )
-                    self._publish_censored(slot, "milestone")
                     self._finish(slot, "graduation")
-                    self._replace(slot)
-                elif slot.age % self.config.censor_interval == 0 and slot.age not in slot.published_ages:
-                    self._publish_censored(slot, "living")
-            self._maybe_advance_curriculum()
+                    finished.append(slot)
+            self.slots = [slot for slot in self.slots if slot not in finished]
+            level_before_transition = self.level
+            completed = self._maybe_advance_curriculum()
+            if completed:
+                self.ticks_elapsed = tick + 1
+                break
+            if self.level != level_before_transition:
+                # The previous stage has supplied one full CMA cohort.  Any
+                # remaining non-CMA references are now censored rather than
+                # silently carried into an incomparable L2 evaluation.
+                for slot in self.slots:
+                    self._publish_censored(slot, "stage_transition")
+                self.slots = []
+                self.optimizer.begin_stage(self.banks[self.level].bank_id)
+                self.stage_optimizer_updates_at_entry = self.optimizer.update_count
+            self._fill_slots()
             self.ticks_elapsed = tick + 1
             if progress is not None:
                 progress(
@@ -738,16 +876,11 @@ class AsyncEvolutionRunner:
                         ],
                     }
                 )
-            if (
-                self.config.candidate_budget is not None
-                and len(self.archive) >= self.config.candidate_budget
-            ):
-                self.stop_reason = "candidate_budget_reached"
-                break
+            tick += 1
         if self.stop_reason == "running":
-            self.stop_reason = "tick_limit_reached"
+            self.stop_reason = "stage_not_passed_tick_limit"
         for slot in self.slots:
-            self._publish_censored(slot, "living_at_stop")
+            self._publish_censored(slot, "run_stop")
         report = self.report()
         if output is not None:
             output.mkdir(parents=True, exist_ok=True)
@@ -765,30 +898,33 @@ class AsyncEvolutionRunner:
             )
         return report
 
-    def _proposal(self) -> CandidateProposal:
+    def _proposal(self) -> CandidateProposal | None:
+        # Deterministic diagnostic references are evidence only.  Normal
+        # training has no such queue, so every candidate is CMA-generated.
         if self.initial:
             return CandidateProposal(tuple(self.initial.popleft()), "initial", None, self.optimizer.update_count)
-        draw = self.rng.random()
-        if draw < self.config.cma_fraction:
-            asked = self.optimizer.ask()
-            if asked is not None:
-                sample, genome = asked
-                return CandidateProposal(genome, "cma", sample, self.optimizer.update_count)
-        if draw < self.config.cma_fraction + self.config.elite_fraction and self.elites.records:
-            parent = self.rng.choice(self.elites.records)
-            genome = tuple(float(value) + self.rng.gauss(0, .08) for value in parent["genome"])
-            return CandidateProposal(
-                genome,
-                "elite",
-                None,
-                self.optimizer.update_count,
-                int(parent["candidate_id"]),
-            )
-        genome = tuple(self.rng.gauss(0, self.config.exploration_sigma) for _ in range(self.codec.dimension))
-        return CandidateProposal(genome, "exploration", None, self.optimizer.update_count)
+        asked = self.optimizer.ask()
+        if asked is None:
+            return None
+        sample, genome = asked
+        return CandidateProposal(genome, "cma", sample, self.optimizer.update_count)
 
-    def _new_slot(self, slot_index: int) -> CandidateSlot:
-        proposal = self._proposal()
+    def _fill_slots(self) -> None:
+        occupied = {slot.slot for slot in self.slots}
+        for slot_index in range(self.config.slots):
+            if slot_index in occupied:
+                continue
+            proposal = self._proposal()
+            if proposal is None:
+                return
+            self.slots.append(self._new_slot(slot_index, proposal))
+
+    def _new_slot(self, slot_index: int, proposal: CandidateProposal | None = None) -> CandidateSlot:
+        proposal = proposal or self._proposal()
+        if proposal is None:
+            raise RuntimeError("CMA cohort is awaiting comparable results")
+        if proposal.lineage_id is None:
+            proposal = replace(proposal, lineage_id=self.next_candidate_id)
         node_rule, edge_rule = self.codec.decode_groups(proposal.genome)
         if node_rule is None:
             from .baselines import HomeostaticRule
@@ -825,13 +961,12 @@ class AsyncEvolutionRunner:
         self.next_candidate_id += 1
         return candidate
 
-    def _replace(self, old: CandidateSlot) -> None:
-        self.slots[old.slot] = self._new_slot(old.slot)
-
-    def _publish_censored(self, slot: CandidateSlot, kind: str) -> None:
-        slot.published_ages.add(slot.age)
+    def _publish_censored(
+        self, slot: CandidateSlot, kind: Literal["run_stop", "stage_transition"]
+    ) -> None:
         record = {
             "candidate_id": slot.candidate_id,
+            "lineage_id": slot.proposal.lineage_id,
             "slot": slot.slot,
             "kind": kind,
             "right_censored": True,
@@ -840,21 +975,21 @@ class AsyncEvolutionRunner:
             "bank_id": slot.bank.bank_id,
             "source": slot.proposal.source,
             "milestone": self.config.levels[slot.level].lifetime,
-            "rank_key": list(slot.rank_key(kind == "milestone")),
+            "rank_key": list(slot.rank_key()),
         }
         self.censored.append(record)
-        # Censor records describe incomplete evidence for survival analysis.
-        # CMA-ES receives each proposal only after its exact death or graduation;
-        # otherwise an early living snapshot would permanently hide the outcome.
+        # Only lives still alive when the run stops are right-censored.  Periodic
+        # health checks and stage graduation are observations, not censoring.
 
-    def _finish(self, slot: CandidateSlot, status: Literal["death", "graduation"]) -> None:
+    def _finish(self, slot: CandidateSlot, status: Literal["death", "graduation"]) -> bool:
         graduated = status == "graduation"
         causes = [
             replica.fatal_cause for replica in slot.replicas if replica.fatal_cause is not None
         ]
         rank_key = slot.rank_key(graduated)
         replica_results = [replica.summary() for replica in slot.replicas]
-        functional = bool(rank_key[1]) if len(rank_key) > 1 else False
+        functional_at_last_probe = bool(rank_key[1]) if len(rank_key) > 1 else False
+        functional = graduated and functional_at_last_probe
         unresolved_burden = max(
             (float(replica["normalized_pathology_burden"]) for replica in replica_results),
             default=0.0,
@@ -863,6 +998,7 @@ class AsyncEvolutionRunner:
             "candidate_id": slot.candidate_id,
             "slot": slot.slot,
             "status": status,
+            "lineage_id": slot.proposal.lineage_id,
             "genome": list(slot.proposal.genome),
             "parameter_groups": self.codec.export_groups(slot.proposal.genome),
             "sampling": asdict(slot.proposal),
@@ -875,6 +1011,7 @@ class AsyncEvolutionRunner:
             "per_replica_results": replica_results,
             "rank_key": list(rank_key),
             "functional": functional,
+            "functional_at_last_probe": functional_at_last_probe,
             # A model is deployable only after the final curriculum test. Earlier
             # graduations remain useful training evidence, but are not Live models.
             "live_eligible": (
@@ -885,25 +1022,34 @@ class AsyncEvolutionRunner:
             ),
         }
         self.archive.append(record)
-        self.recent_outcomes.append(graduated)
-        self.optimizer.observe(
+        updated = self.optimizer.observe(
             slot.bank.bank_id,
             slot.proposal.sample_id,
             slot.proposal.genome,
             rank_key,
         )
         if graduated and functional:
+            self.stage_survivors[slot.level].append(record)
+            self.survivors.consider(record)
             self.elites.consider(record)
+        return updated
 
-    def _maybe_advance_curriculum(self) -> None:
+    def _stable_records(self, level: int) -> list[dict[str, object]]:
+        records = list(self.stage_survivors[level])
+        records.sort(key=lambda item: tuple(item["rank_key"]), reverse=True)
+        return records[: self.config.stable_population_size]
+
+    def _maybe_advance_curriculum(self) -> bool:
+        """Advance only after stable survivors and one complete CMA cohort."""
+        if len(self._stable_records(self.level)) < self.config.stable_population_size:
+            return False
+        if self.optimizer.update_count <= self.stage_optimizer_updates_at_entry:
+            return False
         if self.level + 1 >= len(self.config.levels):
-            return
-        if (
-            len(self.recent_outcomes) == self.recent_outcomes.maxlen
-            and fmean(self.recent_outcomes) >= self.config.curriculum_pass_fraction
-        ):
-            self.level += 1
-            self.recent_outcomes.clear()
+            self.stop_reason = "final_stage_population_established"
+            return True
+        self.level += 1
+        return False
 
     def report(self) -> dict[str, object]:
         deaths = [item for item in self.archive if item["status"] == "death"]
@@ -940,6 +1086,10 @@ class AsyncEvolutionRunner:
             "tick_limit": self.config.max_ticks,
             "stop_reason": self.stop_reason,
             "candidate_budget": self.config.candidate_budget,
+            "candidate_evidence_checkpoint_reached": (
+                self.config.candidate_budget is not None
+                and len(self.archive) >= self.config.candidate_budget
+            ),
             "candidates_started": self.next_candidate_id,
             "completed_candidates": len(self.archive),
             "completed_replica_lives": len(self.archive) * self.config.replicas,
@@ -966,6 +1116,7 @@ class AsyncEvolutionRunner:
             "currently_living_right_censored": len(self.slots),
             "optimizer_updates": self.optimizer.update_count,
             "optimizer_update_frequency": self.optimizer.update_count / max(1, self.ticks_elapsed),
+            "optimizer_batch_progress": self.optimizer.progress(),
             "replica_disagreement": {
                 "mean_age_range": fmean(disagreements) if disagreements else 0.0,
                 "maximum_age_range": max(disagreements, default=0),
@@ -981,6 +1132,13 @@ class AsyncEvolutionRunner:
             "elite_archive_changes": self.elites.changes,
             "elite_archive_size": len(self.elites.records),
             "curriculum_level": self.level,
+            "stable_population_size": self.config.stable_population_size,
+            "survivor_archive_size": len(self.survivors.records),
+            "stable_survivor_count": len(self._stable_records(self.level)),
+            "stage_survivor_counts": {
+                str(level): len(self._stable_records(level))
+                for level in range(len(self.config.levels))
+            },
         }
 
     @classmethod
@@ -1041,8 +1199,8 @@ def run_diagnostic_experiment(
     seed: int = 41,
     progress: Callable[[dict[str, object]], None] | None = None,
 ) -> dict[str, object]:
-    architecture = RuleArchitecture(state_width=1, hidden_width=3)
-    edge_architecture = EdgeArchitecture(node_state_width=1, latent_width=2, hidden_width=3)
+    architecture = RuleArchitecture(state_width=1, hidden_width=8)
+    edge_architecture = EdgeArchitecture(node_state_width=1, latent_width=2, hidden_width=12)
     codec = GenomeCodec(architecture, edge_architecture, "joint")
     config = AsyncEvolutionConfig(
         slots=6,
@@ -1088,7 +1246,7 @@ def async_config_from_dict(data: Mapping[str, object]) -> AsyncEvolutionConfig:
         slots=int(data["slots"]),
         replicas=int(data["replicas"]),
         result_batch_size=int(data["result_batch_size"]),
-        max_ticks=int(data["max_ticks"]),
+        max_ticks=(int(data["max_ticks"]) if data.get("max_ticks") is not None else None),
         candidate_budget=(
             int(data["candidate_budget"]) if data.get("candidate_budget") is not None else None
         ),
@@ -1101,11 +1259,9 @@ def async_config_from_dict(data: Mapping[str, object]) -> AsyncEvolutionConfig:
         probes=ProbeConfig(**dict(data["probes"])),
         curriculum_window=int(data["curriculum_window"]),
         curriculum_pass_fraction=float(data["curriculum_pass_fraction"]),
+        stable_population_size=int(data.get("stable_population_size", 4)),
         censor_interval=int(data["censor_interval"]),
         elite_size=int(data["elite_size"]),
-        cma_fraction=float(data["cma_fraction"]),
-        elite_fraction=float(data["elite_fraction"]),
-        exploration_sigma=float(data["exploration_sigma"]),
         initial_sigma=float(data["initial_sigma"]),
         initial_genomes=tuple(tuple(float(value) for value in genome) for genome in data["initial_genomes"]),
     )

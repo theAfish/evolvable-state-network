@@ -42,10 +42,16 @@ class AsyncDiagnosticPayload(StrictModel):
 
 class AsyncTrainingPayload(StrictModel):
     seed: int | None = Field(None, ge=0, lt=2**32)
-    candidate_budget: int = Field(200, ge=8, le=5000)
-    max_ticks: int = Field(5000, ge=20, le=100_000)
+    candidate_budget: int = Field(200, ge=1, le=5000, description="Evidence checkpoint; does not stop stage evolution")
+    max_ticks: int | None = Field(
+        None,
+        ge=20,
+        le=100_000,
+        description="Optional explicit interruption cap; normal training ends only with a stable final-stage population.",
+    )
     slots: int = Field(8, ge=1, le=32)
     replicas: int = Field(3, ge=1, le=8)
+    stable_population_size: int = Field(3, ge=1, le=32)
     optimizer_batch: int = Field(8, ge=2, le=32)
     state_width: int = Field(2, ge=1, le=8)
     stage_1_lifetime: int = Field(40, ge=4, le=2000)
@@ -67,8 +73,8 @@ class AsyncTrainingPayload(StrictModel):
             raise ValueError("stage 2 lifetime must exceed stage 1 lifetime")
         if self.mean_degree > min(self.stage_1_nodes, self.stage_2_nodes) - 1:
             raise ValueError("mean_degree must fit both curriculum graph sizes")
-        if self.optimizer_batch > self.candidate_budget:
-            raise ValueError("optimizer_batch cannot exceed candidate_budget")
+        if self.stable_population_size > self.slots:
+            raise ValueError("stable_population_size cannot exceed slots")
         return self
 
 

@@ -14,6 +14,9 @@ from evolvable_state_network.application.models import (
 
 
 class ApiConfigurationTests(unittest.TestCase):
+    def test_training_default_has_no_tick_cap(self) -> None:
+        self.assertIsNone(AsyncTrainingPayload().max_ticks)
+
     def test_training_payload_is_translated_without_transport_dependencies(self) -> None:
         payload = AsyncTrainingPayload(
             seed=19,
@@ -44,6 +47,8 @@ class ApiConfigurationTests(unittest.TestCase):
         self.assertEqual(config.result_batch_size, 6)
         self.assertEqual(config.architecture.state_width, 3)
         self.assertEqual(config.edge_architecture.latent_width, 3)
+        self.assertEqual(config.architecture.hidden_width, 8)
+        self.assertEqual(config.edge_architecture.hidden_width, 12)
         self.assertEqual(tuple(level.lifetime for level in config.levels), (20, 60))
         self.assertEqual(config.levels[1].disturbance_frequency, 9)
         self.assertAlmostEqual(config.levels[1].input_scale, .3)

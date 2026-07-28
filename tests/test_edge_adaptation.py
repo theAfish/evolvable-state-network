@@ -16,6 +16,7 @@ from evolvable_state_network.evolution.evaluation import (
     CandidateEvaluator,
     ScenarioConfig,
     ScenarioSuite,
+    _edge_pathologies,
     _failure_report,
 )
 from evolvable_state_network.evolution import EvolutionConfig, EvolutionRunner
@@ -151,6 +152,42 @@ class EdgeAdaptationTests(unittest.TestCase):
             0.0, SimulationConfig(steps=8), trajectory,
         )
         self.assertTrue(report.persistent_state_bias)
+
+    def test_only_sustained_edge_drift_is_runaway(self) -> None:
+        drifting = Trajectory()
+        settled = Trajectory()
+        for step in range(60):
+            node = [[(.1,), (.2,)]]
+            drifting.append(
+                step, float(step), node, node,
+                [[(.06 * step,), (.06 * step,)]], [[.5, .5]],
+            )
+            settled.append(
+                step, float(step), node, node,
+                [[(1.5,), (1.5,)]], [[.95, .95]],
+            )
+        config = SimulationConfig(steps=60, edge_latent_alert=1.0, edge_growth_steps=12)
+        self.assertTrue(_edge_pathologies(drifting, config, evaluate_metrics(drifting))["growth"])
+        self.assertFalse(_edge_pathologies(settled, config, evaluate_metrics(settled))["growth"])
+
+    def test_second_edge_coordinate_is_checked_for_runaway_and_gate_saturation(self) -> None:
+        architecture = EdgeArchitecture(node_state_width=2, latent_width=2, hidden_width=2)
+        rule = MLPEdgeRule(architecture, (0.0,) * architecture.parameter_count)
+        drifting = Trajectory()
+        saturated = Trajectory()
+        for step in range(60):
+            node = [[(.1, .1), (.2, .2)]]
+            drifting.append(
+                step, float(step), node, node,
+                [[(0.0, .06 * step), (0.0, .06 * step)]], [[.5, .5]],
+            )
+            saturated.append(
+                step, float(step), node, node,
+                [[(0.0, 2.1), (0.0, 2.1)]], [[.5, .5]],
+            )
+        config = SimulationConfig(steps=60, edge_latent_alert=1.0, edge_growth_steps=12)
+        self.assertTrue(_edge_pathologies(drifting, config, evaluate_metrics(drifting), rule)["growth"])
+        self.assertTrue(_edge_pathologies(saturated, config, evaluate_metrics(saturated), rule)["saturation"])
 
     @unittest.skipUnless(cuda_available(), "CUDA Torch is unavailable")
     def test_cuda_backend_matches_mlp_reference_within_float32_tolerance(self) -> None:

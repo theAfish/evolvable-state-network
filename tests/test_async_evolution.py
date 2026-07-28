@@ -12,6 +12,7 @@ from evolvable_state_network.evolution.asynchronous import (
     CandidateSlot,
     CurriculumLevel,
     EliteArchive,
+    SurvivorArchive,
     HealthMonitor,
     PathologyConfig,
     ProbeSummary,
@@ -34,11 +35,20 @@ def state_with_edges(node_value: float, edge_value: float, nodes: int = 3) -> Ne
     )
 
 
+def state_with_edge_vector(node_value: float, edge_values: tuple[float, ...], nodes: int = 3) -> NetworkState:
+    return NetworkState(
+        node=[[(node_value,) for _ in range(nodes)]], edge=[[edge_values, edge_values]]
+    )
+
+
 def vector_state(values: tuple[float, ...], nodes: int = 3) -> NetworkState:
     return NetworkState(node=[[values for _ in range(nodes)]], edge=[[(0.0,), (0.0,)]])
 
 
 class AsyncEvolutionTests(unittest.TestCase):
+    def test_training_defaults_to_no_tick_cap(self) -> None:
+        self.assertIsNone(AsyncEvolutionConfig().max_ticks)
+
     def test_immediate_numerical_death(self) -> None:
         monitor = HealthMonitor(PathologyConfig())
         cause = monitor.observe(
@@ -162,6 +172,83 @@ class AsyncEvolutionTests(unittest.TestCase):
             )
         self.assertEqual(cause, "edge_runaway_growth")
 
+    def test_second_edge_coordinate_runaway_cannot_be_hidden_by_the_first(self) -> None:
+        monitor = HealthMonitor(
+            PathologyConfig(
+                fatal_threshold=2,
+                homogenization_variance=-1,
+                edge_saturation_strength=.99,
+                edge_growth_alert=.1,
+                edge_growth_steps=2,
+            )
+        )
+        cause = None
+        for step, (before, after) in enumerate(
+            (((.0, .0), (.0, .2)), ((.0, .0), (.0, .4)), ((.0, .0), (.0, .6))),
+            start=1,
+        ):
+            cause = monitor.observe(
+                step,
+                state_with_edge_vector(.1, before),
+                state_with_edge_vector(.2, after),
+                (.5, .5),
+                TransitionDiagnostics(),
+                edge_gates=((.5, .5), (.5, .5)),
+            )
+        self.assertEqual(cause, "edge_runaway_growth")
+
+    def test_second_gate_coordinate_saturation_cannot_be_hidden_by_mean_strength(self) -> None:
+        monitor = HealthMonitor(
+            PathologyConfig(
+                fatal_threshold=2,
+                homogenization_variance=-1,
+                edge_saturation_strength=.60,
+                edge_saturation_fraction=.80,
+                edge_growth_steps=12,
+            )
+        )
+        cause = None
+        for step in range(1, 3):
+            cause = monitor.observe(
+                step,
+                state_with_edge_vector(.1, (.0, .1)),
+                state_with_edge_vector(.2, (.0, .1)),
+                # The scalar diagnostic average is healthy; coordinate 1 is not.
+                (.5, .5),
+                TransitionDiagnostics(),
+                edge_gates=((.5, .7), (.5, .7)),
+            )
+        self.assertEqual(cause, "edge_gate_saturation")
+
+    def test_persistent_node_boundary_residence_is_not_viable(self) -> None:
+        monitor = HealthMonitor(
+            PathologyConfig(
+                fatal_threshold=2,
+                homogenization_variance=-1,
+                boundary_fraction=.5,
+            )
+        )
+        cause = None
+        for step in range(1, 3):
+            cause = monitor.observe(
+                step, state(3.9), state(3.9), (.5,), TransitionDiagnostics()
+            )
+        self.assertEqual(cause, "boundary_saturation")
+
+    def test_training_proposals_are_cma_samples(self) -> None:
+        config = AsyncEvolutionConfig(
+            slots=1,
+            replicas=1,
+            result_batch_size=2,
+            max_ticks=1,
+            seed=17,
+        )
+        runner = AsyncEvolutionRunner(config)
+        proposal = runner._proposal()
+        assert proposal is not None
+        self.assertEqual(proposal.source, "cma")
+        self.assertIsNotNone(proposal.sample_id)
+
     def test_common_scenario_bank_is_candidate_independent(self) -> None:
         level = CurriculumLevel(10)
         first = ScenarioBank.create(7, 0, 3, level)
@@ -193,6 +280,14 @@ class AsyncEvolutionTests(unittest.TestCase):
         archive.consider(worse)
         self.assertEqual([item["candidate_id"] for item in archive.records], [1, 2])
 
+    def test_harder_stage_functional_parent_replaces_lower_stage_parent(self) -> None:
+        archive = SurvivorArchive(12)
+        stage_one = {"candidate_id": 1, "genome": [1.0], "rank_key": [1, 1, 40]}
+        stage_two = {"candidate_id": 2, "genome": [2.0], "rank_key": [2, 1, 100]}
+        archive.consider(stage_one)
+        archive.consider(stage_two)
+        self.assertEqual([item["candidate_id"] for item in archive.records], [2])
+
     def test_async_completion_censoring_graduation_replacement_replica_aggregation_and_replay(self) -> None:
         architecture = RuleArchitecture(state_width=1, hidden_width=3)
         edge = EdgeArchitecture(node_state_width=1, latent_width=2, hidden_width=3)
@@ -214,10 +309,11 @@ class AsyncEvolutionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             runner = AsyncEvolutionRunner(config)
             runner.run(Path(directory))
-            self.assertEqual(len(runner.slots), 3)
+            self.assertLessEqual(len(runner.slots), 3)
+            self.assertGreater(len(runner.slots), 0)
             self.assertGreater(len(runner.archive), 0)
             self.assertTrue(runner.censored)
-            self.assertTrue(any(item["kind"] == "milestone" for item in runner.censored))
+            self.assertTrue(all(item["kind"] == "run_stop" for item in runner.censored))
             self.assertTrue(any(item["status"] == "graduation" for item in runner.archive))
             self.assertGreater(max(slot.candidate_id for slot in runner.slots), 2)
             record = runner.archive[0]
@@ -228,6 +324,91 @@ class AsyncEvolutionTests(unittest.TestCase):
             self.assertEqual(replay["age"], record["age"])
             self.assertEqual(replay["death_cause"], record["death_cause"])
             self.assertEqual(replay["per_replica_results"], record["per_replica_results"])
+
+    def test_stage_keeps_evolving_past_evidence_checkpoint_until_survivors_are_stable(self) -> None:
+        architecture = RuleArchitecture(state_width=1, hidden_width=3)
+        edge = EdgeArchitecture(node_state_width=1, latent_width=2, hidden_width=3)
+        codec = GenomeCodec(architecture, edge, "joint")
+        config = AsyncEvolutionConfig(
+            slots=3,
+            replicas=1,
+            result_batch_size=2,
+            candidate_budget=1,
+            max_ticks=20,
+            seed=3,
+            architecture=architecture,
+            edge_architecture=edge,
+            levels=(CurriculumLevel(100, input_scale=.1, graph_nodes=5),),
+            pathology=PathologyConfig(fatal_threshold=2),
+            initial_genomes=diagnostic_reference_genomes(codec),
+        )
+        runner = AsyncEvolutionRunner(config)
+        report = runner.run()
+        self.assertEqual(report["stop_reason"], "stage_not_passed_tick_limit")
+        self.assertGreater(report["completed_candidates"], config.candidate_budget)
+        self.assertTrue(report["candidate_evidence_checkpoint_reached"])
+
+    def test_archived_lives_keep_health_aggregates_but_not_trajectories(self) -> None:
+        architecture = RuleArchitecture(state_width=1, hidden_width=3)
+        edge = EdgeArchitecture(node_state_width=1, latent_width=2, hidden_width=3)
+        config = AsyncEvolutionConfig(
+            slots=2,
+            replicas=1,
+            result_batch_size=2,
+            max_ticks=20,
+            seed=7,
+            architecture=architecture,
+            edge_architecture=edge,
+            levels=(CurriculumLevel(100, input_scale=.1, graph_nodes=5),),
+            pathology=PathologyConfig(fatal_threshold=2),
+        )
+        runner = AsyncEvolutionRunner(config)
+        runner.run()
+        replica = runner.archive[0]["per_replica_results"][0]
+        self.assertIn("current_pathology_burdens", replica)
+        self.assertIn("pathology_violation_counts", replica)
+        self.assertNotIn("pathology_trajectories", replica)
+        self.assertNotIn("response_probes", replica)
+
+    def test_stage_change_discards_partial_batch_and_starts_a_fresh_comparable_cohort(self) -> None:
+        adapter = SteadyStateCMA(3, 2, .2, 9)
+        adapter.begin_stage("stage-1")
+        asked = adapter.ask()
+        assert asked is not None
+        sample_id, genome = asked
+        self.assertFalse(adapter.observe("stage-1", sample_id, genome, (1, 0)))
+        adapter.begin_stage("stage-2")
+        samples = [adapter.ask() for _ in range(2)]
+        for index, asked in enumerate(samples):
+            assert asked is not None
+            sample_id, genome = asked
+            self.assertEqual(
+                adapter.observe("stage-2", sample_id, genome, (2, index)), index == 1
+            )
+        self.assertEqual(adapter.update_count, 1)
+        self.assertGreater(adapter.cancelled_samples, 0)
+
+    def test_stage_requires_a_completed_cma_cohort_before_advancing(self) -> None:
+        architecture = RuleArchitecture(state_width=1, hidden_width=3)
+        edge = EdgeArchitecture(node_state_width=1, latent_width=2, hidden_width=3)
+        runner = AsyncEvolutionRunner(
+            AsyncEvolutionConfig(
+                slots=2,
+                replicas=1,
+                result_batch_size=2,
+                max_ticks=20,
+                seed=13,
+                architecture=architecture,
+                edge_architecture=edge,
+                levels=(CurriculumLevel(100, graph_nodes=5),),
+                stable_population_size=1,
+            )
+        )
+        record = {"candidate_id": 1, "genome": [1.0], "rank_key": [1, 1, 100]}
+        runner.stage_survivors[0].append(record)
+        self.assertFalse(runner._maybe_advance_curriculum())
+        runner.optimizer.update_count = 1
+        self.assertTrue(runner._maybe_advance_curriculum())
 
 
 if __name__ == "__main__":

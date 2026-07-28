@@ -95,7 +95,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     ) -> dict[str, str]:
         runtime.ensure_root()
         seed = _seed(payload.seed)
-        job_id = runtime.new_job("async_training", seed, payload.candidate_budget)
+        job_id = runtime.new_job("async_training", seed, payload.max_ticks)
         run_directory = runtime.root / "async_runs" / job_id
         config = build_async_training_config(payload, seed)
 

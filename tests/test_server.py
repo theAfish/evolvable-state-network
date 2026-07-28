@@ -56,7 +56,7 @@ class FastAPIServerTests(unittest.TestCase):
                 docs = client.get("/docs")
         self.assertEqual(root.status_code, 200)
         self.assertIn("Train local rules by how long they remain healthy", root.text)
-        self.assertIn("Candidate lives", root.text)
+        self.assertIn("Evidence checkpoint", root.text)
         self.assertEqual(redirect.status_code, 307)
         self.assertEqual(redirect.headers["location"], "/")
         self.assertEqual(health.json()["status"], "ok")
@@ -103,12 +103,13 @@ class FastAPIServerTests(unittest.TestCase):
                 report = client.get(latest["artifacts"]["report"])
                 candidate = latest["candidates"][0]
                 replica = candidate["replicas"][0]
-                replay = client.get(replica["replay_url"])
+                replay = client.get(replica["debug_replay_url"])
         self.assertEqual(job["status"], "complete")
         self.assertTrue(latest["available"])
         self.assertEqual(latest["report"]["mode"], "asynchronous_death_driven_joint_evolution")
         self.assertTrue(latest["candidates"])
-        self.assertTrue(latest["slots"])
+        self.assertEqual(latest["report"]["stop_reason"], "stage_not_passed_tick_limit")
+        self.assertGreater(latest["report"]["optimizer_updates"], 0)
         self.assertEqual(report.status_code, 200)
         self.assertEqual(report.json()["mode"], "asynchronous_death_driven_joint_evolution")
         self.assertEqual(replay.status_code, 200)
@@ -116,7 +117,7 @@ class FastAPIServerTests(unittest.TestCase):
         self.assertEqual(replay_run["trajectory"]["steps"][-1], replica["age"])
         self.assertEqual(replay.json()["graph"]["nodes"], 7)
 
-    def test_configurable_survival_training_reports_episode_budget_and_stop_reason(self) -> None:
+    def test_configurable_survival_training_uses_budget_as_evidence_checkpoint(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             with TestClient(create_app(Path(directory))) as client:
                 invalid = client.post(
@@ -127,14 +128,15 @@ class FastAPIServerTests(unittest.TestCase):
                     "/api/async/train",
                     json={
                         "seed": 12,
-                        "candidate_budget": 8,
+                        "candidate_budget": 1,
                         "max_ticks": 40,
                         "slots": 2,
                         "replicas": 1,
+                        "stable_population_size": 2,
                         "optimizer_batch": 2,
                         "state_width": 3,
-                        "stage_1_lifetime": 4,
-                        "stage_2_lifetime": 8,
+                        "stage_1_lifetime": 100,
+                        "stage_2_lifetime": 200,
                         "stage_1_nodes": 4,
                         "stage_2_nodes": 5,
                         "mean_degree": 2,
@@ -147,9 +149,10 @@ class FastAPIServerTests(unittest.TestCase):
         self.assertEqual(job["kind"], "async_training")
         self.assertEqual(job["result"]["run_kind"], "training")
         report = job["result"]["report"]
-        self.assertGreaterEqual(report["completed_candidates"], 8)
-        self.assertEqual(report["candidate_budget"], 8)
-        self.assertEqual(report["stop_reason"], "candidate_budget_reached")
+        self.assertGreaterEqual(report["completed_candidates"], 1)
+        self.assertEqual(report["candidate_budget"], 1)
+        self.assertTrue(report["candidate_evidence_checkpoint_reached"])
+        self.assertEqual(report["stop_reason"], "stage_not_passed_tick_limit")
         self.assertEqual(report["completed_replica_lives"], report["completed_candidates"])
         # This deliberately short run can only graduate candidates from the
         # first curriculum level.  Those records remain inspectable training

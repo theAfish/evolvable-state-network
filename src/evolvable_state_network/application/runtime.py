@@ -96,7 +96,9 @@ class ApplicationRuntime:
                 if source is not None
             },
         )
-        living = [item for item in censored if item.get("kind") == "living_at_stop"]
+        # These are the only true right-censored records: lives still running
+        # when the external run limit interrupted a stage.
+        living = [item for item in censored if item.get("kind") == "run_stop"]
         candidates = [
             {
                 "candidate_id": item["candidate_id"],
@@ -123,7 +125,7 @@ class ApplicationRuntime:
                         "coordinate_propagation": replica.get("coordinate_propagation", []),
                         "coordinate_distinguishability": replica.get("coordinate_distinguishability", []),
                         "coordinate_recovered": replica.get("coordinate_recovered", []),
-                        "replay_url": (
+                        "debug_replay_url": (
                             f"/api/async/replays/{run_directory.name}/{item['candidate_id']}/{index}"
                         ),
                     }
@@ -141,6 +143,7 @@ class ApplicationRuntime:
                 "slots": config.get("slots"),
                 "replicas": config.get("replicas"),
                 "optimizer_batch": config.get("result_batch_size"),
+                "stable_population_size": config.get("stable_population_size"),
                 "node_state_width": config.get("architecture", {}).get("state_width"),
                 "levels": config.get("levels", []),
                 "fatal_threshold": config.get("pathology", {}).get("fatal_threshold"),
@@ -174,7 +177,7 @@ class ApplicationRuntime:
                     if (run_directory / "elite_archive.json").is_file()
                     else {}
                 ),
-                "censored": self.artifact_url(censored_path),
+                "right_censored": self.artifact_url(censored_path),
                 "config": self.artifact_url(config_path),
             },
         }
@@ -511,7 +514,7 @@ class ApplicationRuntime:
                     session["last_warning"] = {"step": step + 1, "cause": cause}
             return self.live_snapshot(session)
 
-    def new_job(self, kind: str, seed: int, total: int) -> str:
+    def new_job(self, kind: str, seed: int, total: int | None) -> str:
         job_id = uuid4().hex
         with self.jobs_lock:
             self.jobs[job_id] = {

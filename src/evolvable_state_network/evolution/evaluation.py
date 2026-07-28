@@ -229,7 +229,9 @@ class CandidateEvaluator:
             )
         metrics = evaluate_metrics(result.trajectory, safety_bound=config.max_abs_state)
         correlation = _mean_abs_node_correlation(result.trajectory)
-        failures = _failure_report(metrics, result.diagnostics, correlation, config, result.trajectory)
+        failures = _failure_report(
+            metrics, result.diagnostics, correlation, config, result.trajectory, edge_rule
+        )
         score = _scenario_score(metrics, failures)
         return ScenarioResult(scenario, metrics, result.diagnostics, failures, score, correlation, result.trajectory if retain else None)
 
@@ -299,6 +301,7 @@ def _scenario_perturbations(scenario: ScenarioConfig) -> tuple[Perturbation, ...
 def _failure_report(
     metrics: MetricReport, diagnostics: TransitionDiagnostics, correlation: float, config: SimulationConfig,
     trajectory: Trajectory | None = None,
+    edge_rule: MLPEdgeRule | FixedEdgeRule | None = None,
 ) -> FailureReport:
     clipping = (diagnostics.delta_clipped + diagnostics.state_clipped) / max(1, diagnostics.components)
     tail_silent = not metrics.non_silence.non_silent
@@ -322,7 +325,7 @@ def _failure_report(
         tail_clips = diagnostics.clipped_components_per_step[start:]
         tail_components = diagnostics.components_per_step[start:]
         clipping = sum(tail_clips) / max(1, sum(tail_components))
-    edge = _edge_pathologies(trajectory, config, metrics)
+    edge = _edge_pathologies(trajectory, config, metrics, edge_rule)
     return FailureReport(
         nonfinite=diagnostics.nonfinite_proposals > 0 or not metrics.boundedness.finite,
         numerical_explosion=diagnostics.raw_maximum_absolute_value > config.max_abs_state * 4 or diagnostics.raw_maximum_delta > config.max_delta * 20,
@@ -343,7 +346,12 @@ def _failure_report(
     )
 
 
-def _edge_pathologies(trajectory: Trajectory | None, config: SimulationConfig, metrics: MetricReport) -> dict[str, bool]:
+def _edge_pathologies(
+    trajectory: Trajectory | None,
+    config: SimulationConfig,
+    metrics: MetricReport,
+    edge_rule: MLPEdgeRule | FixedEdgeRule | None = None,
+) -> dict[str, bool]:
     absent = {name: False for name in ("collapse", "saturation", "maximum_updates", "growth", "identical", "elimination_stability", "costly_oscillation")}
     if trajectory is None or not trajectory.edge_states or not trajectory.edge_states[0] or not trajectory.edge_states[0][0] or not trajectory.edge_states[0][0][0]:
         return absent
@@ -351,10 +359,48 @@ def _edge_pathologies(trajectory: Trajectory | None, config: SimulationConfig, m
     strengths = [value for frame in trajectory.effective_edge_strengths[tail:] for batch in frame for value in batch]
     latent = [abs(value) for frame in trajectory.edge_states[tail:] for batch in frame for vector in batch for value in vector]
     updates = [abs(current - previous) for before, after in zip(trajectory.edge_states[tail:], trajectory.edge_states[tail + 1:]) for row_before, row_after in zip(before, after, strict=True) for vector_before, vector_after in zip(row_before, row_after, strict=True) for previous, current in zip(vector_before, vector_after, strict=True)]
-    collapse = bool(strengths) and max(strengths) <= .02
-    saturation = bool(strengths) and sum(value <= .02 or value >= .98 for value in strengths) / len(strengths) >= .98
+    if edge_rule is None:
+        gate_coordinates = [strengths]
+    else:
+        gate_coordinates = [
+            [
+                edge_rule.communication_gates(vector)[coordinate]
+                for frame in trajectory.edge_states[tail:]
+                for batch in frame
+                for vector in batch
+            ]
+            for coordinate in range(edge_rule.architecture.node_state_width)
+        ]
+    # A scalar mean gate is sufficient for graph styling but not viability:
+    # every communication coordinate must independently remain usable.
+    collapse = any(values and max(values) <= .02 for values in gate_coordinates)
+    saturation = any(
+        values and sum(value <= .02 or value >= .98 for value in values) / len(values) >= .98
+        for values in gate_coordinates
+    )
     maximum_updates = bool(updates) and sum(value >= .98 * config.edge_step_scale for value in updates) / len(updates) >= .9
-    growth = bool(latent) and max(latent) > config.edge_latent_alert
+    # Mirror first-passage survival: a non-zero latent is acceptable when it
+    # has settled.  It is pathological only when it remains above the alert
+    # regime and keeps moving away from it for a sustained interval.
+    growth = False
+    for coordinate in range(len(trajectory.edge_states[0][0][0])):
+        latent_magnitudes = [
+            fmean(abs(vector[coordinate]) for batch in frame for vector in batch)
+            for frame in trajectory.edge_states[tail:]
+        ]
+        growth_run = 0
+        maximum_growth_run = 0
+        for previous, current in zip(latent_magnitudes, latent_magnitudes[1:]):
+            if current - previous > config.edge_growth_delta:
+                growth_run += 1
+                maximum_growth_run = max(maximum_growth_run, growth_run)
+            else:
+                growth_run = 0
+        growth = growth or (
+            bool(latent_magnitudes)
+            and max(latent_magnitudes) >= config.edge_latent_alert
+            and maximum_growth_run >= config.edge_growth_steps
+        )
     # Compare channels at every retained frame; one channel cannot be diverse.
     frame_spreads = [
         max(max(vector[coordinate] for vector in batch) - min(vector[coordinate] for vector in batch) for coordinate in range(len(batch[0])))

@@ -17,11 +17,11 @@ def build_async_training_config(
 ) -> AsyncEvolutionConfig:
     """Build the survival-evolution configuration represented by a request."""
 
-    architecture = RuleArchitecture(state_width=payload.state_width, hidden_width=3)
+    architecture = RuleArchitecture(state_width=payload.state_width, hidden_width=8)
     edge_architecture = EdgeArchitecture(
         node_state_width=payload.state_width,
         latent_width=payload.state_width,
-        hidden_width=3,
+        hidden_width=12,
     )
     return AsyncEvolutionConfig(
         slots=payload.slots,
@@ -33,6 +33,7 @@ def build_async_training_config(
         architecture=architecture,
         edge_architecture=edge_architecture,
         target="joint",
+        stable_population_size=payload.stable_population_size,
         levels=(
             CurriculumLevel(
                 payload.stage_1_lifetime,

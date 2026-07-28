@@ -25,20 +25,21 @@
           <div>
             <p class="eyebrow">ASYNCHRONOUS EVOLUTION</p>
             <h2>Train local rules by how long they remain healthy.</h2>
-            <p>One candidate life is one node-and-edge genome tested simultaneously on several graph replicas. It ends at a pathology death threshold or a curriculum survival milestone. Edge dynamics are learned, not damped: a never-active edge state, persistent gate saturation, or continued latent growth counts as a survival pathology. Finished lives update the elite archive and, in comparable batches, CMA-ES.</p>
+            <p>One candidate life is one CMA-ES-generated node-and-edge genome tested simultaneously on several graph replicas. A stage evaluates one comparable CMA cohort before updating its search distribution, then continues until a stable survivor population reaches its milestone. Edge dynamics are learned, not damped. Training stores health aggregates only; a replay is reconstructed only when you explicitly request debugging.</p>
           </div>
           <div class="survival-actions"><button id="async-refresh" type="button">Load latest run</button><button id="async-diagnostic" type="button">Run 80-tick smoke test</button></div>
         </div>
 
         <section class="flat-section training-section">
-          <div class="section-heading"><div><p class="eyebrow">TRAINING CONTROL</p><h3>Choose the amount of evidence</h3></div><span>The candidate-life budget is the closest equivalent to an episode count.</span></div>
+          <div class="section-heading"><div><p class="eyebrow">TRAINING CONTROL</p><h3>Choose survival evidence and stage gates</h3></div><span>The evidence checkpoint reports progress; it is not a completion condition.</span></div>
           <form id="async-form" class="training-form">
-            <label>Candidate lives <input id="async-candidates-budget" type="number" value="200" min="8" max="5000" /><small>Completed genomes targeted before stopping.</small></label>
-            <label>Parallel slots <input id="async-slots-input" type="number" value="8" min="1" max="32" /><small>Candidates alive at the same time.</small></label>
+            <label>Evidence checkpoint <input id="async-candidates-budget" type="number" value="200" min="1" max="5000" /><small>Progress marker only; it never ends stage evolution.</small></label>
+            <label>Parallel slots <input id="async-slots-input" type="number" value="8" min="1" max="32" /><small>At most this many cohort candidates evaluate concurrently.</small></label>
             <label>Replicas per life <input id="async-replicas-input" type="number" value="3" min="1" max="8" /><small>Different seeded graphs; the worst replica governs.</small></label>
-            <label>CMA result batch <input id="async-batch-input" type="number" value="8" min="2" max="32" /><small>Comparable results required for one optimizer update.</small></label>
-            <label>Node state coordinates <input id="async-state-width" type="number" value="2" min="1" max="8" /><small>Each node carries this many unnamed state-vector coordinates. Larger vectors increase the search dimension.</small></label>
-            <label>Safety tick limit <input id="async-ticks-input" type="number" value="5000" min="20" max="100000" /><small>Fallback stop if lives take unexpectedly long.</small></label>
+            <label>Stable survivors required <input id="async-stable-population" type="number" value="4" min="1" max="32" /><small>Healthy graduates required before a stage may advance.</small></label>
+            <label>CMA cohort size <input id="async-batch-input" type="number" value="8" min="2" max="32" /><small>Each member must finish under this stage's common scenarios before one optimizer update.</small></label>
+            <label>Node state coordinates <input id="async-state-width" type="number" value="2" min="1" max="8" /><small>Each node carries this many unnamed state-vector coordinates. Shared update MLPs use 8 Node and 12 Edge hidden units.</small></label>
+            <label>Optional tick cap <input id="async-ticks-input" type="number" placeholder="no cap" min="20" max="100000" /><small>Leave empty: training continues until the final-stage stable population is established.</small></label>
             <label>Seed <input id="async-seed" type="number" placeholder="random" min="0" max="4294967295" /><small>Reuse a seed to reproduce a run.</small></label>
             <details class="training-advanced">
               <summary>Curriculum and health thresholds</summary>
@@ -57,15 +58,15 @@
                 <label>Probe interval <input id="async-probe-interval" type="number" value="8" min="2" max="1000" /><small>How often response and recovery are tested.</small></label>
               </div>
             </details>
-            <div class="training-submit"><button id="async-run" type="submit">Start survival training</button><output id="async-work-estimate">200 candidate lives × 3 replicas = about 600 completed trajectories.</output></div>
+            <div class="training-submit"><button id="async-run" type="submit">Start survival training</button><output id="async-work-estimate">Health aggregates are retained online; training ends only after the final-stage stable population is established.</output></div>
           </form>
         </section>
 
         <section class="logic-strip" aria-label="Survival evolution logic">
-          <div><strong>1. Propose</strong><span>Create or mutate one joint node-and-edge genome.</span></div>
+          <div><strong>1. Propose</strong><span>CMA-ES samples one joint node-and-edge cohort.</span></div>
           <div><strong>2. Live</strong><span>Run it in a slot across all seeded replicas.</span></div>
           <div><strong>3. Judge</strong><span>Stop on first pathology death or milestone graduation.</span></div>
-          <div><strong>4. Learn</strong><span>Rank conservatively; update elites and batched CMA-ES.</span></div>
+          <div><strong>4. Update</strong><span>Rank the complete comparable cohort, update CMA-ES, then sample the next cohort.</span></div>
         </section>
 
         <div class="async-status-line">
@@ -91,7 +92,7 @@
 
         <div class="survival-columns">
           <section class="flat-section">
-            <div class="section-heading"><div><p class="eyebrow">ACTIVE POPULATION</p><h3>Slot lanes</h3></div><span>Slots refill immediately after first-passage death or graduation.</span></div>
+            <div class="section-heading"><div><p class="eyebrow">ACTIVE CMA COHORT</p><h3>Slot lanes</h3></div><span>Finished members wait for the remaining comparable cohort evidence before CMA-ES updates.</span></div>
             <div id="async-slots" class="slot-lanes"><p class="empty-state">Start training to watch active candidate lives.</p></div>
           </section>
           <section class="flat-section">
