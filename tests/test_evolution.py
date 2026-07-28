@@ -5,11 +5,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from evolvable_state_network.candidate import RuleArchitecture
-from evolvable_state_network.cmaes import CMAES, CMAESConfig
-from evolvable_state_network.evaluation import CandidateEvaluator, ScenarioConfig, ScenarioSuite, _failure_report
+from evolvable_state_network.evolution.candidate import RuleArchitecture
+from evolvable_state_network.evolution.cmaes import CMAES, CMAESConfig
+from evolvable_state_network.evolution.evaluation import (
+    CandidateEvaluator,
+    ScenarioConfig,
+    ScenarioSuite,
+    _failure_report,
+)
 from evolvable_state_network.evolution import EvolutionConfig, EvolutionRunner
-from evolvable_state_network.genome import GenomeCodec
+from evolvable_state_network.evolution.genome import GenomeCodec
 from evolvable_state_network.graph import generate_random_graph
 from evolvable_state_network.inputs import ConstantInput
 from evolvable_state_network.metrics import evaluate_metrics

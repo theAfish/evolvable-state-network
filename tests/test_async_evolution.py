@@ -5,7 +5,7 @@ import unittest
 from copy import deepcopy
 from pathlib import Path
 
-from evolvable_state_network.async_evolution import (
+from evolvable_state_network.evolution.asynchronous import (
     AsyncEvolutionConfig,
     AsyncEvolutionRunner,
     CandidateProposal,
@@ -19,8 +19,8 @@ from evolvable_state_network.async_evolution import (
     SteadyStateCMA,
     diagnostic_reference_genomes,
 )
-from evolvable_state_network.candidate import EdgeArchitecture, RuleArchitecture
-from evolvable_state_network.genome import GenomeCodec
+from evolvable_state_network.evolution.candidate import EdgeArchitecture, RuleArchitecture
+from evolvable_state_network.evolution.genome import GenomeCodec
 from evolvable_state_network.simulation import NetworkState, TransitionDiagnostics
 
 

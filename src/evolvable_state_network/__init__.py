@@ -4,10 +4,19 @@ from .baselines import FixedRNNRule, HomeostaticRule
 from .graph import Graph, generate_random_graph
 from .metrics import MetricReport, evaluate_metrics
 from .simulation import Simulation, SimulationConfig, SimulationResult
-from .candidate import EdgeArchitecture, MLPEdgeRule, MLPUpdateRule, RuleArchitecture
-from .evaluation import CandidateEvaluator, EvaluationResult, ScenarioConfig, ScenarioSuite
-from .genome import GenomeCodec
-from .async_evolution import AsyncEvolutionConfig, AsyncEvolutionRunner
+from .evolution import (
+    AsyncEvolutionConfig,
+    AsyncEvolutionRunner,
+    CandidateEvaluator,
+    EdgeArchitecture,
+    EvaluationResult,
+    GenomeCodec,
+    MLPEdgeRule,
+    MLPUpdateRule,
+    RuleArchitecture,
+    ScenarioConfig,
+    ScenarioSuite,
+)
 
 __all__ = [
     "FixedRNNRule",

@@ -17,7 +17,7 @@ warnings.filterwarnings(
 from fastapi.testclient import TestClient
 
 from evolvable_state_network.api import create_app
-from evolvable_state_network.candidate import RuleArchitecture
+from evolvable_state_network.evolution.candidate import RuleArchitecture
 from evolvable_state_network.server import main as server_main
 from evolvable_state_network.storage import application_data_dir
 

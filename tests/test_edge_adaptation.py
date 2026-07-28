@@ -7,16 +7,29 @@ from pathlib import Path
 
 from evolvable_state_network.analysis import edge_activity_summary, edge_perturbation_recovery_curve
 from evolvable_state_network.baselines import FixedRNNRule
-from evolvable_state_network.candidate import EdgeArchitecture, MLPEdgeRule, RuleArchitecture
-from evolvable_state_network.evaluation import CandidateEvaluator, ScenarioConfig, ScenarioSuite, _failure_report
+from evolvable_state_network.evolution.candidate import (
+    EdgeArchitecture,
+    MLPEdgeRule,
+    RuleArchitecture,
+)
+from evolvable_state_network.evolution.evaluation import (
+    CandidateEvaluator,
+    ScenarioConfig,
+    ScenarioSuite,
+    _failure_report,
+)
 from evolvable_state_network.evolution import EvolutionConfig, EvolutionRunner
-from evolvable_state_network.genome import GenomeCodec
+from evolvable_state_network.evolution.genome import GenomeCodec
 from evolvable_state_network.graph import generate_random_graph
 from evolvable_state_network.inputs import ConstantInput
 from evolvable_state_network.metrics import evaluate_metrics
 from evolvable_state_network.perturbations import EdgeStateImpulse
 from evolvable_state_network.simulation import Simulation, SimulationConfig, Trajectory
-from evolvable_state_network.torch_backend import TorchMLPSimulator, cuda_available, resolve_device
+from evolvable_state_network.simulation.torch_backend import (
+    TorchMLPSimulator,
+    cuda_available,
+    resolve_device,
+)
 
 
 class RelaxingEdgeRule:
@@ -143,7 +156,7 @@ class EdgeAdaptationTests(unittest.TestCase):
     def test_cuda_backend_matches_mlp_reference_within_float32_tolerance(self) -> None:
         node_architecture = RuleArchitecture(state_width=2, hidden_width=2)
         edge_architecture = EdgeArchitecture(node_state_width=2, latent_width=2, hidden_width=2)
-        from evolvable_state_network.candidate import MLPUpdateRule
+        from evolvable_state_network.evolution.candidate import MLPUpdateRule
         node_rule = MLPUpdateRule(node_architecture, (.01,) * node_architecture.parameter_count)
         edge_rule = MLPEdgeRule(edge_architecture, (.02,) * edge_architecture.parameter_count)
         graph = generate_random_graph(4, 2, 3)

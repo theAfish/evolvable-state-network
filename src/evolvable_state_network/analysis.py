@@ -9,7 +9,7 @@ from pathlib import Path
 from statistics import fmean
 from typing import Callable, Iterable, Sequence
 
-from .evaluation import EvaluationResult, ScenarioResult
+from .evolution.evaluation import EvaluationResult, ScenarioResult
 from .simulation import Trajectory
 
 

@@ -1,0 +1,79 @@
+{
+  "architecture": {
+    "hidden_width": 3,
+    "increment_fraction": 0.8,
+    "state_width": 3
+  },
+  "candidate_budget": 500,
+  "censor_interval": 16,
+  "cma_fraction": 0.7,
+  "curriculum_pass_fraction": 0.6,
+  "curriculum_window": 10,
+  "edge_architecture": {
+    "gate_index": 0,
+    "hidden_width": 3,
+    "latent_width": 3,
+    "message_projection": null,
+    "node_state_width": 3
+  },
+  "elite_fraction": 0.2,
+  "elite_size": 4,
+  "exploration_sigma": 1.0,
+  "initial_genomes": [],
+  "initial_sigma": 0.35,
+  "levels": [
+    {
+      "compound_disturbances": false,
+      "disturbance_frequency": 0,
+      "disturbance_strength": 0.0,
+      "graph_nodes": 12,
+      "input_scale": 0.12,
+      "lifetime": 80,
+      "mean_degree": 3.0
+    },
+    {
+      "compound_disturbances": true,
+      "disturbance_frequency": 10,
+      "disturbance_strength": 0.12,
+      "graph_nodes": 36,
+      "input_scale": 0.18,
+      "lifetime": 200,
+      "mean_degree": 3.0
+    }
+  ],
+  "max_ticks": 10000,
+  "pathology": {
+    "absolute_edge_limit": 12.0,
+    "absolute_node_limit": 4.0,
+    "boundary_fraction": 0.8,
+    "communication_floor": 0.04,
+    "distinguishability_floor": 0.002,
+    "edge_activity_delta": 1e-05,
+    "edge_activity_grace_steps": 8,
+    "edge_growth_alert": 1.0,
+    "edge_growth_delta": 0.0001,
+    "edge_growth_steps": 12,
+    "edge_saturation_fraction": 0.8,
+    "edge_saturation_strength": 0.98,
+    "fatal_threshold": 8.0,
+    "homogenization_variance": 1e-06,
+    "increase": 1.0,
+    "node_growth_alert": 3.2,
+    "node_growth_delta": 0.0001,
+    "one_direction_steps": 12,
+    "propagation_floor": 0.0005,
+    "recovery": 0.65,
+    "recovery_limit": 0.35,
+    "response_floor": 0.002
+  },
+  "probes": {
+    "amplitude": 0.1,
+    "duration": 2,
+    "interval": 8
+  },
+  "replicas": 7,
+  "result_batch_size": 10,
+  "seed": 3700983104,
+  "slots": 12,
+  "target": "joint"
+}

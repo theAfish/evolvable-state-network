@@ -1,0 +1,51 @@
+{
+  "active_replica_lives": 84,
+  "active_slot_utilization": 1.0,
+  "active_slots": 12,
+  "candidate_budget": 500,
+  "candidates_started": 512,
+  "completed_candidates": 500,
+  "completed_replica_lives": 3500,
+  "currently_living_right_censored": 12,
+  "curriculum_level": 0,
+  "deaths": 500,
+  "deaths_per_cause": {
+    "absolute_safety_limit": 16,
+    "edge_runaway_growth": 375,
+    "one_direction_degeneration": 97,
+    "trajectory_indistinguishable": 12
+  },
+  "elite_archive_changes": 0,
+  "elite_archive_size": 0,
+  "graduations": 0,
+  "lifetime_distribution": {
+    "count": 500,
+    "maximum": 76,
+    "mean": 39.442,
+    "minimum": 24
+  },
+  "milestone_passage_rates": {
+    "0": 0.0,
+    "1": null
+  },
+  "mode": "asynchronous_death_driven_joint_evolution",
+  "nonresponsive_survivors": 0,
+  "optimizer_update_frequency": 0.0102843315184513,
+  "optimizer_updates": 17,
+  "proposals_by_source": {
+    "cma": 170,
+    "exploration": 330
+  },
+  "replica_disagreement": {
+    "maximum_age_range": 0,
+    "mean_age_range": 0.0,
+    "mean_pathology_burden_range": 0.09525,
+    "outcome_disagreement_fraction": 0.548
+  },
+  "right_censored_candidate_count": 960,
+  "schema_version": 1,
+  "stop_reason": "candidate_budget_reached",
+  "tick_limit": 10000,
+  "ticks_elapsed": 1653,
+  "viable_survivors": 0
+}

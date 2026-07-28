@@ -179,6 +179,25 @@ The metrics currently use coordinate zero as a documented observation
 convention. It is not a semantic claim; later experiments may add registered
 readouts while keeping rule and simulator interfaces unchanged.
 
+## Development map
+
+The backend is organized by responsibility:
+
+```text
+evolvable_state_network/
+├── application/       request models, configuration mapping, runtime services
+├── evolution/         candidates, genomes, evaluation, CMA-ES, search runners
+├── simulation/        reference engine and optimized Torch backend
+├── api.py             HTTP route composition
+├── experiment.py      fixed-rule experiment use case
+└── web/               packaged browser assets
+```
+
+New request fields belong in `application/models.py`; their mapping to research
+configuration belongs in `application/configuration.py`. New search behavior
+belongs under `evolution/`, and numerical stepping belongs under `simulation/`.
+Each should receive direct unit tests before it is exposed through the API.
+
 ## Verify
 
 ```powershell

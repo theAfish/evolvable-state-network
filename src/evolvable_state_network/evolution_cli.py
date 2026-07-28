@@ -5,9 +5,15 @@ from __future__ import annotations
 import argparse
 from typing import Sequence
 
-from .candidate import EdgeArchitecture, RuleArchitecture
-from .async_evolution import AsyncEvolutionConfig, AsyncEvolutionRunner, run_diagnostic_experiment
-from .evolution import EvolutionConfig, EvolutionRunner
+from .evolution import (
+    AsyncEvolutionConfig,
+    AsyncEvolutionRunner,
+    EdgeArchitecture,
+    EvolutionConfig,
+    EvolutionRunner,
+    RuleArchitecture,
+    run_diagnostic_experiment,
+)
 from .storage import new_run_directory
 
 
