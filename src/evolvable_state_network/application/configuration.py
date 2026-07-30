@@ -33,22 +33,20 @@ def build_async_training_config(
         architecture=architecture,
         edge_architecture=edge_architecture,
         target="joint",
+        initial_state_scale=payload.initial_state_scale,
         stable_population_size=payload.stable_population_size,
         levels=(
             CurriculumLevel(
                 payload.stage_1_lifetime,
-                input_scale=payload.input_scale,
                 graph_nodes=payload.stage_1_nodes,
                 mean_degree=payload.mean_degree,
             ),
             CurriculumLevel(
                 payload.stage_2_lifetime,
-                payload.disturbance_interval,
-                payload.disturbance_strength,
-                True,
-                payload.input_scale * 1.5,
-                payload.stage_2_nodes,
-                payload.mean_degree,
+                disturbance_frequency=payload.disturbance_interval,
+                disturbance_strength=payload.disturbance_strength,
+                graph_nodes=payload.stage_2_nodes,
+                mean_degree=payload.mean_degree,
             ),
         ),
         pathology=PathologyConfig(

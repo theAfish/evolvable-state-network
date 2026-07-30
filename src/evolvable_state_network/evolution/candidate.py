@@ -24,8 +24,8 @@ class RuleArchitecture:
 
     @property
     def input_width(self) -> int:
-        # current local state, mean incoming message, external vector, bias
-        return 3 * self.state_width + 1
+        # current local state, mean incoming message, bias
+        return 2 * self.state_width + 1
 
     @property
     def parameter_count(self) -> int:
@@ -56,11 +56,11 @@ class MLPUpdateRule(NodeRule):
         return (0.0,) * self.state_width
 
     def update(
-        self, state: StateVector, aggregate: StateVector, external: StateVector, dt: float, max_delta: float
+        self, state: StateVector, aggregate: StateVector, dt: float, max_delta: float
     ) -> StateVector:
-        if len(state) != self.state_width or len(aggregate) != self.state_width or len(external) != self.state_width:
+        if len(state) != self.state_width or len(aggregate) != self.state_width:
             raise ValueError("MLP update inputs must match configured state width")
-        features = state + aggregate + external + (1.0,)
+        features = state + aggregate + (1.0,)
         hidden = []
         for row in range(self.architecture.hidden_width):
             offset = row * self.architecture.input_width
@@ -68,7 +68,9 @@ class MLPUpdateRule(NodeRule):
                 self._input_weights[offset + column] * value for column, value in enumerate(features)
             )
             hidden.append(tanh(total))
-        increment_limit = max_delta * self.architecture.increment_fraction
+        # Keep the established update magnitude at dt=.05, while making the
+        # integration step meaningful for all other caller-selected values.
+        increment_limit = max_delta * self.architecture.increment_fraction * (dt / .05)
         result = []
         for row in range(self.state_width):
             offset = row * self.architecture.hidden_width
@@ -106,8 +108,8 @@ class EdgeArchitecture:
 
     @property
     def input_width(self) -> int:
-        # edge vector, source/target vectors, current message, endpoint input, bias
-        return self.latent_width + 5 * self.node_state_width + 1
+        # edge vector, source/target vectors, current message, bias
+        return self.latent_width + 3 * self.node_state_width + 1
 
     @property
     def parameter_count(self) -> int:
@@ -145,12 +147,12 @@ class MLPEdgeRule(EdgeRule):
 
     def update(
         self, state: StateVector, source: StateVector, target: StateVector, message: StateVector,
-        source_external: StateVector, target_external: StateVector, edge_step_scale: float,
+        edge_step_scale: float,
     ) -> StateVector:
         width = self.architecture.node_state_width
-        if (len(state) != self.state_width or any(len(vector) != width for vector in (source, target, message, source_external, target_external))):
+        if (len(state) != self.state_width or any(len(vector) != width for vector in (source, target, message))):
             raise ValueError("edge update inputs must match the configured architecture")
-        features = state + source + target + message + source_external + target_external + (1.0,)
+        features = state + source + target + message + (1.0,)
         hidden = []
         for row in range(self.architecture.hidden_width):
             offset = row * self.architecture.input_width
@@ -196,6 +198,6 @@ class FixedEdgeRule(MLPEdgeRule):
 
     def update(
         self, state: StateVector, source: StateVector, target: StateVector, message: StateVector,
-        source_external: StateVector, target_external: StateVector, edge_step_scale: float,
+        edge_step_scale: float,
     ) -> StateVector:
         return state

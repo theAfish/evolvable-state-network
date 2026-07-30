@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 from pathlib import Path
+from random import Random
 from threading import Lock
 from uuid import uuid4
 
@@ -28,7 +29,6 @@ from ..evolution.candidate import (
 from ..evolution.genome import GenomeCodec
 from ..dashboard import dashboard_document
 from ..graph import generate_random_graph
-from ..inputs import GaussianInput
 from ..simulation import Simulation, SimulationConfig, TransitionDiagnostics
 from .models import LiveSessionPayload
 
@@ -105,6 +105,7 @@ class ApplicationRuntime:
                 "status": item["status"],
                 "level": item["level"],
                 "age": item["age"],
+                "cma_lifetime": item.get("cma_lifetime", item["age"]),
                 "death_cause": item["death_cause"],
                 "source": item["sampling"]["source"],
                 "optimizer_update": item["sampling"]["optimizer_update"],
@@ -145,11 +146,18 @@ class ApplicationRuntime:
                 "optimizer_batch": config.get("result_batch_size"),
                 "stable_population_size": config.get("stable_population_size"),
                 "node_state_width": config.get("architecture", {}).get("state_width"),
+                "initial_state_scale": config.get("initial_state_scale", .12),
                 "levels": config.get("levels", []),
                 "fatal_threshold": config.get("pathology", {}).get("fatal_threshold"),
                 "node_growth_alert": config.get("pathology", {}).get("node_growth_alert"),
                 "one_direction_steps": config.get("pathology", {}).get("one_direction_steps"),
                 "probe_interval": config.get("probes", {}).get("interval"),
+                "deployment_validation": {
+                    "replicas": config.get("deployment_validation_replicas", 3),
+                    "nodes": config.get("deployment_validation_nodes", 24),
+                    "mean_degree": config.get("deployment_validation_mean_degree", 5.0),
+                    "autonomous_steps": config.get("deployment_autonomous_steps", 200),
+                },
             },
             "report": report,
             "candidates": candidates,
@@ -228,6 +236,17 @@ class ApplicationRuntime:
         )
         final_level = len(config.get("levels", ())) - 1
         def deployable(item: dict[str, object]) -> bool:
+            # No compatibility path for records produced before the fresh-graph
+            # viability screen existed: those candidates may have converged on
+            # their small training graph and must not be offered to Live.
+            validation = item.get("deployment_validation")
+            if (
+                not isinstance(validation, dict)
+                or not bool(validation.get("passed"))
+                or not isinstance(validation.get("autonomous"), list)
+                or not isinstance(validation.get("perturbed"), list)
+            ):
+                return False
             if "live_eligible" in item:
                 return bool(item["live_eligible"])
             rank_key = list(item.get("rank_key", ()))
@@ -257,35 +276,6 @@ class ApplicationRuntime:
 
     def available_live_models(self) -> list[dict[str, object]]:
         models: list[dict[str, object]] = []
-        legacy_root = self.root / "evolution_runs"
-        if legacy_root.is_dir():
-            for path in legacy_root.iterdir():
-                genome_path = path / "best_genome.json"
-                if not path.is_dir() or not genome_path.is_file():
-                    continue
-                try:
-                    document = json.loads(genome_path.read_text(encoding="utf-8"))
-                    edge_document = document.get("edge_architecture") or {}
-                    models.append(
-                        {
-                            "id": f"legacy:{path.name}",
-                            "source": "legacy",
-                            "run_id": path.name,
-                            "target": document.get("target", "node"),
-                            "node_state_width": int(
-                                document.get("architecture", {}).get("state_width", 1)
-                            ),
-                            "edge_state_width": int(
-                                edge_document.get("latent_width", 0)
-                            ),
-                            "parameters": len(document.get("genome", ())),
-                            "validation_fitness": document.get("validation", {}).get("fitness"),
-                            "test_fitness": document.get("test", {}).get("fitness"),
-                            "modified": genome_path.stat().st_mtime,
-                        }
-                    )
-                except (OSError, ValueError, TypeError):
-                    continue
         async_root = self.root / "async_runs"
         if async_root.is_dir():
             for path in async_root.iterdir():
@@ -337,9 +327,7 @@ class ApplicationRuntime:
                         )
                 except (OSError, ValueError, TypeError, KeyError):
                     continue
-        survival_models = [item for item in models if item["source"] == "survival"]
-        legacy_models = [item for item in models if item["source"] == "legacy"]
-        survival_models.sort(
+        models.sort(
             key=lambda item: (
                 item["run_kind"] == "training",
                 tuple(item["_selection_key"]),
@@ -347,10 +335,8 @@ class ApplicationRuntime:
             ),
             reverse=True,
         )
-        legacy_models.sort(key=lambda item: float(item["modified"]), reverse=True)
-        for global_rank, model in enumerate(survival_models, start=1):
+        for global_rank, model in enumerate(models, start=1):
             model["global_rank"] = global_rank
-        models = survival_models + legacy_models
         for model in models:
             model.pop("modified", None)
             model.pop("_selection_key", None)
@@ -381,11 +367,7 @@ class ApplicationRuntime:
                 "genome": record["genome"],
                 "pathology": config.get("pathology", {}),
             }
-        legacy_id = model_id.removeprefix("legacy:")
-        model_path = self.root / "evolution_runs" / legacy_id / "best_genome.json"
-        if not legacy_id or not model_path.is_file() or model_path.parent.name != legacy_id:
-            raise ValueError("select a trained survival elite or legacy parameter export")
-        return json.loads(model_path.read_text(encoding="utf-8"))
+        raise ValueError("select a trained survival elite")
 
     def create_live_session(self, payload: LiveSessionPayload) -> dict[str, object]:
         document = self._load_live_model(payload.model_id)
@@ -403,18 +385,32 @@ class ApplicationRuntime:
         graph = generate_random_graph(payload.nodes, payload.mean_degree, payload.seed, payload.topology)
         config = SimulationConfig(steps=1, batch_size=payload.batch_size, dt=payload.dt)
         simulator = Simulation(graph, node_rule, edge_rule)
+        # Match Survival evaluation: every node-coordinate begins as a small,
+        # independent, zero-mean perturbation.  It is deterministic for a
+        # chosen Live seed, but does not inject a signal during evolution.
+        state = simulator.initial_state(payload.batch_size)
+        initial_rng = Random(payload.seed)
+        state.node = [
+            [
+                tuple(
+                    initial_rng.gauss(0.0, payload.initial_state_scale)
+                    for _ in range(node_rule.state_width)
+                )
+                for _ in range(payload.nodes)
+            ]
+            for _ in range(payload.batch_size)
+        ]
         session_id = uuid4().hex
-        provider = GaussianInput(payload.input_seed, standard_deviation=payload.input_standard_deviation)
+        zero_input = [[(0.0,) * node_rule.state_width for _ in range(payload.nodes)] for _ in range(payload.batch_size)]
         session: dict[str, object] = {
             "id": session_id,
             "model_id": payload.model_id,
             "graph": graph,
             "config": config,
             "simulator": simulator,
-            "state": simulator.initial_state(payload.batch_size),
-            "provider": provider,
+            "state": state,
             "step": 0,
-            "input": provider.sample(0, payload.batch_size, payload.nodes, node_rule.state_width),
+            "input": zero_input,
             "diagnostics": TransitionDiagnostics(),
             "monitor": HealthMonitor(PathologyConfig(**dict(document.get("pathology", {})))),
             # Sandbox is intentionally observational: training decides survival;
@@ -423,6 +419,7 @@ class ApplicationRuntime:
             "last_safety_event": None,
             "topology": payload.topology,
             "seed": payload.seed,
+            "initial_state_scale": payload.initial_state_scale,
         }
         with self.live_lock:
             self.live_sessions[session_id] = session
@@ -455,6 +452,7 @@ class ApplicationRuntime:
             "inputs": session["input"],
             "topology": session["topology"],
             "graph_seed": session["seed"],
+            "initial_state_scale": session["initial_state_scale"],
             "status": "running",
             "last_warning": session.get("last_warning"),
             "last_safety_event": session.get("last_safety_event"),
@@ -468,12 +466,10 @@ class ApplicationRuntime:
                 raise KeyError(session_id)
             simulator = session["simulator"]
             state = session["state"]
-            provider = session["provider"]
             config = session["config"]
             diagnostics = session["diagnostics"]
             monitor = session["monitor"]
             assert isinstance(simulator, Simulation)
-            assert isinstance(provider, GaussianInput)
             assert isinstance(config, SimulationConfig)
             assert isinstance(diagnostics, TransitionDiagnostics)
             assert isinstance(monitor, HealthMonitor)
@@ -482,7 +478,7 @@ class ApplicationRuntime:
                 previous = deepcopy(state)
                 prior_nonfinite = diagnostics.nonfinite_proposals
                 prior_clipped = diagnostics.state_clipped
-                external = provider.sample(step, config.batch_size, simulator.graph.n_nodes, simulator.node_rule.state_width)
+                external = [[(0.0,) * simulator.node_rule.state_width for _ in range(simulator.graph.n_nodes)] for _ in range(config.batch_size)]
                 state = simulator._step(state, external, step, config, (), diagnostics, None)
                 session["state"] = state
                 session["input"] = external

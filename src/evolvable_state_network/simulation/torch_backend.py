@@ -192,8 +192,8 @@ class TorchMLPSimulator:
             if isinstance(self.edge_rule, FixedEdgeRule):
                 next_edge = edge
             else:
-                features = torch.cat((edge, source_state, target_state, current_message, source_external, target_external, torch.ones((*edge.shape[:2], 1), dtype=_DTYPE, device=self.device)), dim=-1)
-                next_edge = edge + config.edge_step_scale * self._mlp(features, self._edge_parameters)
+                features = torch.cat((edge, source_state, target_state, current_message, torch.ones((*edge.shape[:2], 1), dtype=_DTYPE, device=self.device)), dim=-1)
+                next_edge = edge + config.edge_step_scale * (config.dt / .05) * self._mlp(features, self._edge_parameters)
             next_edge = torch.where(valid_edge[None, :, None], next_edge, edge)
             messages = self._edge_message(next_edge, source_state)
         messages = torch.where(valid_edge[None, :, None], messages, torch.zeros_like(messages))
@@ -208,8 +208,8 @@ class TorchMLPSimulator:
             aggregate = torch.einsum("bew,en->bnw", weighted, target_matrix)
             counts = target_matrix.sum(dim=0)
             aggregate = aggregate / counts.clamp_min(1.0)[None, :, None]
-        features = torch.cat((node, aggregate, external, torch.ones((*node.shape[:2], 1), dtype=_DTYPE, device=self.device)), dim=-1)
-        proposed = node + config.max_delta * self.node_rule.architecture.increment_fraction * self._mlp(features, self._node_parameters)
+        features = torch.cat((node, aggregate, torch.ones((*node.shape[:2], 1), dtype=_DTYPE, device=self.device)), dim=-1)
+        proposed = node + config.max_delta * self.node_rule.architecture.increment_fraction * (config.dt / .05) * self._mlp(features, self._node_parameters)
         delta = proposed - node
         next_node = torch.clamp(node + torch.clamp(delta, -config.max_delta, config.max_delta), -config.max_abs_state, config.max_abs_state)
         if lesions:

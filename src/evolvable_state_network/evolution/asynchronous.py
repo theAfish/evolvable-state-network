@@ -21,7 +21,7 @@ from .candidate import EdgeArchitecture, RuleArchitecture
 from .cmaes import CMAES, CMAESConfig
 from .genome import EvolutionTarget, GenomeCodec
 from ..graph import Graph, generate_random_graph
-from ..inputs import GaussianInput
+from ..perturbations import ImpulseInjection
 from ..simulation import (
     EventWindow,
     NetworkState,
@@ -39,7 +39,11 @@ class PathologyConfig:
     recovery: float = 0.65
     communication_floor: float = 0.04
     boundary_fraction: float = 0.80
-    homogenization_variance: float = 1e-6
+    homogenization_variance: float = 1e-4
+    # A brief probe is allowed to make a resting state non-uniform, but it
+    # cannot repeatedly reset this counter.  A network that always collapses
+    # back to one shared vector is non-functional, not a viable equilibrium.
+    rest_homogenization_steps: int = 6
     response_floor: float = 2e-3
     propagation_floor: float = 5e-4
     distinguishability_floor: float = 2e-3
@@ -75,7 +79,9 @@ class CurriculumLevel:
     disturbance_frequency: int = 0
     disturbance_strength: float = 0.0
     compound_disturbances: bool = False
-    input_scale: float = 0.12
+    # Retained only so old persisted scenario records remain readable.  New
+    # survival dynamics have no external-input channel and ignore this field.
+    input_scale: float = 0.0
     graph_nodes: int = 8
     mean_degree: float = 3.0
 
@@ -100,8 +106,8 @@ class AsyncEvolutionConfig:
     )
     levels: tuple[CurriculumLevel, ...] = (
         CurriculumLevel(20),
-        CurriculumLevel(40, 10, .12, input_scale=.16, graph_nodes=10),
-        CurriculumLevel(70, 7, .20, True, .20, 12, 4.0),
+        CurriculumLevel(40, 10, .12, graph_nodes=10),
+        CurriculumLevel(70, 7, .20, graph_nodes=12, mean_degree=4.0),
     )
     pathology: PathologyConfig = PathologyConfig()
     probes: ProbeConfig = ProbeConfig()
@@ -110,6 +116,13 @@ class AsyncEvolutionConfig:
     stable_population_size: int = 4
     censor_interval: int = 5
     elite_size: int = 4
+    initial_state_scale: float = .12
+    # Final-stage candidates must also remain functional on unseen graphs of
+    # the default Live size.  This is a viability gate, not another objective.
+    deployment_validation_replicas: int = 3
+    deployment_validation_nodes: int = 24
+    deployment_validation_mean_degree: float = 5.0
+    deployment_autonomous_steps: int = 200
     # CMA-ES is the sole proposal mechanism.  The archive records survival
     # evidence and deployment candidates; it never breeds a hand-mutated
     # offspring population.
@@ -122,6 +135,10 @@ class AsyncEvolutionConfig:
             or self.replicas < 1
             or self.result_batch_size < 2
             or self.stable_population_size < 1
+            or self.deployment_validation_replicas < 1
+            or self.deployment_validation_nodes < 2
+            or self.initial_state_scale <= 0
+            or self.deployment_autonomous_steps < 1
         ):
             raise ValueError("slot, replica, optimizer, and population counts must be positive")
         if self.candidate_budget is not None and self.candidate_budget < 1:
@@ -132,6 +149,8 @@ class AsyncEvolutionConfig:
             raise ValueError("at least one positive curriculum lifetime is required")
         if self.target in {"edge", "joint"} and self.edge_architecture is None:
             raise ValueError("edge architecture is required for edge or joint evolution")
+        if self.deployment_validation_mean_degree > self.deployment_validation_nodes - 1:
+            raise ValueError("deployment validation mean degree cannot exceed nodes - 1")
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,6 +216,7 @@ class HealthMonitor:
     one_direction_signs: list[int] = field(default_factory=list)
     one_direction_runs: list[int] = field(default_factory=list)
     node_growth_runs: list[int] = field(default_factory=list)
+    rest_homogenization_runs: list[int] = field(default_factory=list)
     edge_ever_active: bool = False
     edge_growth_runs: list[int] = field(default_factory=list)
     death_cause: str | None = None
@@ -223,6 +243,7 @@ class HealthMonitor:
         probe: ProbeSummary | None = None,
         simulator_failed: bool = False,
         edge_gates: Sequence[Sequence[float]] | None = None,
+        resting: bool = True,
     ) -> str | None:
         values = [value for row in current.node for vector in row for value in vector]
         edges = [value for row in current.edge for vector in row for value in vector]
@@ -251,6 +272,7 @@ class HealthMonitor:
             self.one_direction_signs = [0] * width
             self.one_direction_runs = [0] * width
             self.node_growth_runs = [0] * width
+            self.rest_homogenization_runs = [0] * width
         for coordinate, (mean, prior_mean) in enumerate(
             zip(coordinate_means, prior_coordinate_means, strict=True)
         ):
@@ -269,6 +291,12 @@ class HealthMonitor:
                 self.node_growth_runs[coordinate] += 1
             else:
                 self.node_growth_runs[coordinate] = 0
+            if resting:
+                self.rest_homogenization_runs[coordinate] = (
+                    self.rest_homogenization_runs[coordinate] + 1
+                    if coordinate_variances[coordinate] < self.config.homogenization_variance
+                    else 0
+                )
 
         communication_collapsed = (
             not strengths or fmean(strengths) < self.config.communication_floor
@@ -286,6 +314,8 @@ class HealthMonitor:
             "state_homogenization",
             any(variance < self.config.homogenization_variance for variance in coordinate_variances),
         )
+        if any(run >= self.config.rest_homogenization_steps for run in self.rest_homogenization_runs):
+            return self._die("rest_state_homogenization", step)
         self._burden(
             "one_direction_degeneration",
             any(
@@ -430,11 +460,12 @@ class ReplicaRuntime:
     scenario: Scenario
     simulation: Simulation
     config: SimulationConfig
-    input_provider: GaussianInput
     state: NetworkState
     monitor: HealthMonitor
     age: int = 0
     active_probe_start: int | None = None
+    probe_node: int | None = None
+    probe_packet: tuple[float, ...] | None = None
     probe_baseline: NetworkState | None = None
     shadow_state: NetworkState | None = None
     probe_peak_response: list[float] = field(default_factory=list)
@@ -442,45 +473,62 @@ class ReplicaRuntime:
     probe_peak_distinguishability: list[float] = field(default_factory=list)
     diagnostics: TransitionDiagnostics = field(default_factory=TransitionDiagnostics)
     fatal_cause: str | None = None
-    last_external: object | None = None
+
+    def _gaussian_state_packet(
+        self, step: int, standard_deviation: float, salt: int
+    ) -> tuple[int, tuple[float, ...]]:
+        """Return one reproducible, local, coordinate-wise state mutation."""
+        rng = Random(self.scenario.initial_state_seed + 1_000_003 * step + salt)
+        node = rng.randrange(self.simulation.graph.n_nodes)
+        return (
+            node,
+            tuple(rng.gauss(0.0, standard_deviation) for _ in range(self.simulation.node_rule.state_width)),
+        )
 
     def advance(self, level: CurriculumLevel, probe_config: ProbeConfig) -> None:
         if self.fatal_cause:
             return
         previous = deepcopy(self.state)
-        external = self.input_provider.sample(
-            self.age, 1, self.simulation.graph.n_nodes, self.simulation.node_rule.state_width
-        )
+        width = self.simulation.node_rule.state_width
+        external = [[(0.0,) * width for _ in range(self.simulation.graph.n_nodes)]]
+        disturbances: list[ImpulseInjection] = []
+        probe_active = self.active_probe_start is not None
         if level.disturbance_frequency and self.age and self.age % level.disturbance_frequency == 0:
-            for node in range(len(external[0])):
-                if level.compound_disturbances or node == 0:
-                    external[0][node] = tuple(value + level.disturbance_strength for value in external[0][node])
+            # A rare local perturbation: random node and independent Gaussian
+            # displacement in every state coordinate.  Its seed is scenario
+            # derived, so all genomes still receive an identical test.
+            node, packet = self._gaussian_state_packet(
+                self.age, level.disturbance_strength, salt=17
+            )
+            disturbances.append(ImpulseInjection(self.age, (node,), packet))
         if self.active_probe_start is None and self.age and self.age % probe_config.interval == 0:
             self.active_probe_start = self.age
+            probe_active = True
+            self.probe_node, self.probe_packet = self._gaussian_state_packet(
+                self.age, probe_config.amplitude, salt=31
+            )
             self.probe_baseline = deepcopy(self.state)
             self.shadow_state = deepcopy(self.state)
-            width = self.simulation.node_rule.state_width
             self.probe_peak_response = [0.0] * width
             self.probe_peak_propagation = [0.0] * width
             self.probe_peak_distinguishability = [0.0] * width
-        shadow_external = deepcopy(external)
-        if (
-            self.active_probe_start is not None
-            and self.age - self.active_probe_start < probe_config.duration
-        ):
-            external[0][0] = tuple(value + probe_config.amplitude for value in external[0][0])
-            shadow_external[0][0] = tuple(value - probe_config.amplitude for value in shadow_external[0][0])
-        self.last_external = deepcopy(external)
+        shadow_disturbances = list(disturbances)
+        if self.active_probe_start == self.age:
+            assert self.probe_node is not None and self.probe_packet is not None
+            disturbances.append(ImpulseInjection(self.age, (self.probe_node,), self.probe_packet))
+            shadow_disturbances.append(
+                ImpulseInjection(self.age, (self.probe_node,), tuple(-value for value in self.probe_packet))
+            )
         prior_nonfinite = self.diagnostics.nonfinite_proposals
         prior_clipped = self.diagnostics.state_clipped
         try:
             self.state = self.simulation._step(
-                self.state, external, self.age, self.config, (), self.diagnostics, None
+                self.state, external, self.age, self.config, tuple(disturbances), self.diagnostics, None
             )
             if self.shadow_state is not None:
                 shadow_diagnostics = TransitionDiagnostics()
                 self.shadow_state = self.simulation._step(
-                    self.shadow_state, shadow_external, self.age, self.config, (), shadow_diagnostics, None
+                    self.shadow_state, external, self.age, self.config, tuple(shadow_disturbances), shadow_diagnostics, None
                 )
                 self.diagnostics.nonfinite_proposals += shadow_diagnostics.nonfinite_proposals
                 self.diagnostics.state_clipped += shadow_diagnostics.state_clipped
@@ -504,6 +552,8 @@ class ReplicaRuntime:
         ):
             probe = self._probe_summary()
             self.active_probe_start = None
+            self.probe_node = None
+            self.probe_packet = None
             self.probe_baseline = None
             self.shadow_state = None
         strengths = [
@@ -522,7 +572,7 @@ class ReplicaRuntime:
         )
         self.fatal_cause = self.monitor.observe(
             self.age, previous, self.state, strengths, step_diagnostics, probe,
-            edge_gates=edge_gates,
+            edge_gates=edge_gates, resting=not probe_active and not disturbances,
         )
 
     def _probe_summary(self) -> ProbeSummary:
@@ -559,11 +609,15 @@ class ReplicaRuntime:
         base = self.probe_baseline.node[0]
         live = self.state.node[0]
         shadow = self.shadow_state.node[0]
+        assert self.probe_node is not None
         for coordinate in range(self.simulation.node_rule.state_width):
-            response = abs(live[0][coordinate] - base[0][coordinate])
+            response = abs(
+                live[self.probe_node][coordinate] - base[self.probe_node][coordinate]
+            )
             propagation_values = [
                 abs(live_vector[coordinate] - base_vector[coordinate])
-                for base_vector, live_vector in zip(base[1:], live[1:], strict=True)
+                for node, (base_vector, live_vector) in enumerate(zip(base, live, strict=True))
+                if node != self.probe_node
             ]
             distinguishability = fmean(
                 abs(live_vector[coordinate] - shadow_vector[coordinate])
@@ -605,10 +659,9 @@ class ReplicaRuntime:
 @dataclass(frozen=True, slots=True)
 class CandidateProposal:
     genome: tuple[float, ...]
-    source: Literal["cma", "parent", "exploration", "initial"]
+    source: Literal["cma", "initial"]
     sample_id: int | None
     optimizer_update: int
-    parent_candidate_id: int | None = None
     lineage_id: int | None = None
 
 
@@ -674,7 +727,7 @@ class SteadyStateCMA:
         self.optimizer = CMAES(CMAESConfig(dimension, batch_size, sigma, seed))
         self.batch_size = batch_size
         self.pending: deque[tuple[int, tuple[float, ...]]] = deque()
-        self.results: list[tuple[int, tuple[float, ...], tuple[float, ...]]] = []
+        self.results: list[tuple[int, tuple[float, ...], float]] = []
         self.inflight: set[int] = set()
         self.bank_id: str | None = None
         self.next_sample_id = 0
@@ -721,7 +774,7 @@ class SteadyStateCMA:
         }
 
     def observe(
-        self, bank_id: str, sample_id: int | None, genome: tuple[float, ...], rank: tuple[float, ...]
+        self, bank_id: str, sample_id: int | None, genome: tuple[float, ...], lifetime: float
     ) -> bool:
         if sample_id is None or sample_id in self.observed_samples:
             return False
@@ -731,12 +784,15 @@ class SteadyStateCMA:
             return False
         self.observed_samples.add(sample_id)
         self.inflight.remove(sample_id)
-        self.results.append((sample_id, genome, rank))
+        self.results.append((sample_id, genome, float(lifetime)))
         if len(self.results) < self.batch_size:
             return False
         records = self.results
         self.results = []
-        ordered = sorted(records, key=lambda item: item[2])
+        # CMA-ES sees survival time only.  Death causes, probe measures,
+        # pathology burden, and archive ranking never enter this comparison.
+        # The sample id is only a deterministic tie-breaker.
+        ordered = sorted(records, key=lambda item: (item[2], item[0]))
         scalar_by_id = {sample: float(index) for index, (sample, _, _) in enumerate(ordered)}
         population = [genome_value for sample, genome_value, _ in records]
         fitness = [scalar_by_id[sample] for sample, _, _ in records]
@@ -828,13 +884,13 @@ class AsyncEvolutionRunner:
                 for replica in slot.replicas:
                     replica.advance(level, self.config.probes)
                 if slot.dead:
-                    self._finish(slot, "death")
+                    self._finish(slot, "death", progress=progress, tick=tick + 1)
                     finished.append(slot)
                 elif slot.age >= level.lifetime:
                     slot.milestone_history.append(
                         {"level": slot.level, "time": slot.age, "kind": "graduation"}
                     )
-                    self._finish(slot, "graduation")
+                    self._finish(slot, "graduation", progress=progress, tick=tick + 1)
                     finished.append(slot)
             self.slots = [slot for slot in self.slots if slot not in finished]
             level_before_transition = self.level
@@ -849,33 +905,15 @@ class AsyncEvolutionRunner:
                 for slot in self.slots:
                     self._publish_censored(slot, "stage_transition")
                 self.slots = []
+                # Stage-one graduates are not parents.  Once the curriculum
+                # advances, retaining them cannot affect future proposals.
+                self.stage_survivors.pop(level_before_transition, None)
                 self.optimizer.begin_stage(self.banks[self.level].bank_id)
                 self.stage_optimizer_updates_at_entry = self.optimizer.update_count
             self._fill_slots()
             self.ticks_elapsed = tick + 1
             if progress is not None:
-                progress(
-                    {
-                        "tick": tick + 1,
-                        "max_ticks": self.config.max_ticks,
-                        "report": self.report(),
-                        "slots": [
-                            {
-                                "slot": slot.slot,
-                                "candidate_id": slot.candidate_id,
-                                "age": slot.age,
-                                "level": slot.level,
-                                "milestone": self.config.levels[slot.level].lifetime,
-                                "source": slot.proposal.source,
-                                "worst_burden": max(
-                                    replica.monitor.normalized_burden
-                                    for replica in slot.replicas
-                                ),
-                            }
-                            for slot in self.slots
-                        ],
-                    }
-                )
+                progress(self._progress_snapshot(tick + 1))
             tick += 1
         if self.stop_reason == "running":
             self.stop_reason = "stage_not_passed_tick_limit"
@@ -919,6 +957,36 @@ class AsyncEvolutionRunner:
                 return
             self.slots.append(self._new_slot(slot_index, proposal))
 
+    def _progress_snapshot(
+        self, tick: int, validation: dict[str, object] | None = None
+    ) -> dict[str, object]:
+        """Return a single UI-safe view of evolution, including final validation.
+
+        Deployment validation is intentionally synchronous: its result is part
+        of a candidate's comparable lifetime.  It must nevertheless remain
+        observable so a long held-out test never looks like a stalled worker.
+        """
+        return {
+            "tick": tick,
+            "max_ticks": self.config.max_ticks,
+            "report": self.report(),
+            "slots": [
+                {
+                    "slot": slot.slot,
+                    "candidate_id": slot.candidate_id,
+                    "age": slot.age,
+                    "level": slot.level,
+                    "milestone": self.config.levels[slot.level].lifetime,
+                    "source": slot.proposal.source,
+                    "worst_burden": max(
+                        replica.monitor.normalized_burden for replica in slot.replicas
+                    ),
+                }
+                for slot in self.slots
+            ],
+            "validation": validation,
+        }
+
     def _new_slot(self, slot_index: int, proposal: CandidateProposal | None = None) -> CandidateSlot:
         proposal = proposal or self._proposal()
         if proposal is None:
@@ -942,7 +1010,10 @@ class AsyncEvolutionRunner:
             state = simulation.initial_state(1)
             init_rng = Random(scenario.initial_state_seed)
             state.node = [[
-                tuple(init_rng.gauss(0, .03) for _ in range(node_rule.state_width))
+                tuple(
+                    init_rng.gauss(0.0, self.config.initial_state_scale)
+                    for _ in range(node_rule.state_width)
+                )
                 for _ in range(graph.n_nodes)
             ]]
             replicas.append(
@@ -950,7 +1021,6 @@ class AsyncEvolutionRunner:
                     scenario,
                     simulation,
                     simulation_config,
-                    GaussianInput(scenario.input_seed, 0.0, scenario.input_scale),
                     state,
                     HealthMonitor(self.config.pathology),
                 )
@@ -981,12 +1051,184 @@ class AsyncEvolutionRunner:
         # Only lives still alive when the run stops are right-censored.  Periodic
         # health checks and stage graduation are observations, not censoring.
 
-    def _finish(self, slot: CandidateSlot, status: Literal["death", "graduation"]) -> bool:
+    def _validation_replicas(
+        self,
+        genome: tuple[float, ...],
+        level: CurriculumLevel,
+        probes: ProbeConfig,
+        steps: int,
+        *,
+        candidate_id: int,
+        phase: Literal["autonomous", "perturbed"],
+        progress: Callable[[dict[str, object]], None] | None,
+        tick: int,
+    ) -> list[dict[str, object]]:
+        """Run one deterministic held-out condition without retaining trajectories."""
+        node_rule, edge_rule = self.codec.decode_groups(genome)
+        if node_rule is None:
+            from .baselines import HomeostaticRule
+            node_rule = HomeostaticRule()
+        summaries: list[dict[str, object]] = []
+        for replica_index in range(self.config.deployment_validation_replicas):
+            base_seed = self.config.seed + 700_001 + 10_007 * replica_index
+            nodes = self.config.deployment_validation_nodes + (replica_index % 2)
+            graph = generate_random_graph(
+                nodes,
+                min(self.config.deployment_validation_mean_degree, nodes - 1),
+                base_seed,
+            )
+            simulation = Simulation(graph, node_rule, edge_rule)
+            state = simulation.initial_state(1)
+            initial_rng = Random(base_seed + 1)
+            state.node = [[
+                tuple(
+                    initial_rng.gauss(0.0, self.config.initial_state_scale)
+                    for _ in range(node_rule.state_width)
+                )
+                for _ in range(graph.n_nodes)
+            ]]
+            scenario = Scenario(
+                replica=replica_index,
+                graph_seed=base_seed,
+                initial_state_seed=base_seed + 1,
+                input_seed=base_seed + 2,
+                nodes=nodes,
+                mean_degree=min(self.config.deployment_validation_mean_degree, nodes - 1),
+                input_scale=0.0,
+            )
+            replica = ReplicaRuntime(
+                scenario,
+                simulation,
+                SimulationConfig(steps=1, batch_size=1, max_abs_state=4.0, record_every=1),
+                state,
+                HealthMonitor(self.config.pathology),
+            )
+            update_interval = max(1, steps // 20)
+            while replica.age < steps and replica.fatal_cause is None:
+                replica.advance(level, probes)
+                if progress is not None and (
+                    replica.age == 1
+                    or replica.age % update_interval == 0
+                    or replica.fatal_cause is not None
+                ):
+                    progress(
+                        self._progress_snapshot(
+                            tick,
+                            {
+                                "candidate_id": candidate_id,
+                                "phase": phase,
+                                "replica": replica_index + 1,
+                                "replicas": self.config.deployment_validation_replicas,
+                                "step": replica.age,
+                                "steps": steps,
+                            },
+                        )
+                    )
+            summaries.append(replica.summary())
+        return summaries
+
+    def _deployment_validation(
+        self,
+        genome: tuple[float, ...],
+        *,
+        candidate_id: int,
+        progress: Callable[[dict[str, object]], None] | None,
+        tick: int,
+    ) -> dict[str, object]:
+        """Require autonomous stability before testing recovery on held-out graphs."""
+        level = self.config.levels[-1]
+        autonomous_level = replace(
+            level, disturbance_frequency=0, disturbance_strength=0.0
+        )
+        autonomous_probes = ProbeConfig(
+            interval=self.config.deployment_autonomous_steps + 1,
+            duration=self.config.probes.duration,
+            amplitude=self.config.probes.amplitude,
+        )
+        autonomous = self._validation_replicas(
+            genome,
+            autonomous_level,
+            autonomous_probes,
+            self.config.deployment_autonomous_steps,
+            candidate_id=candidate_id,
+            phase="autonomous",
+            progress=progress,
+            tick=tick,
+        )
+        health = self.config.pathology
+        autonomous_passed = all(
+            summary["death_cause"] is None
+            and int(summary["age"]) >= self.config.deployment_autonomous_steps
+            and float(summary["normalized_pathology_burden"]) <= 1e-12
+            for summary in autonomous
+        )
+        perturbed = (
+            self._validation_replicas(
+                genome,
+                level,
+                self.config.probes,
+                level.lifetime,
+                candidate_id=candidate_id,
+                phase="perturbed",
+                progress=progress,
+                tick=tick,
+            )
+            if autonomous_passed else []
+        )
+        perturbed_passed = autonomous_passed and all(
+            summary["death_cause"] is None
+            and int(summary["age"]) >= level.lifetime
+            and float(summary["normalized_pathology_burden"]) <= 1e-12
+            and float(summary["responsiveness"]) >= health.response_floor
+            and float(summary["propagation"]) >= health.propagation_floor
+            and float(summary["distinguishability"]) >= health.distinguishability_floor
+            and bool(summary["recovered"])
+            for summary in perturbed
+        )
+        return {
+            "passed": autonomous_passed and perturbed_passed,
+            "autonomous": autonomous,
+            "perturbed": perturbed,
+            "autonomous_steps": self.config.deployment_autonomous_steps,
+            "nodes": self.config.deployment_validation_nodes,
+            "mean_degree": self.config.deployment_validation_mean_degree,
+        }
+
+    def _finish(
+        self,
+        slot: CandidateSlot,
+        status: Literal["death", "graduation"],
+        *,
+        progress: Callable[[dict[str, object]], None] | None = None,
+        tick: int = 0,
+    ) -> bool:
         graduated = status == "graduation"
+        deployment_validation: dict[str, object] | None = None
+        if graduated and slot.level == len(self.config.levels) - 1:
+            deployment_validation = self._deployment_validation(
+                slot.proposal.genome,
+                candidate_id=slot.candidate_id,
+                progress=progress,
+                tick=tick,
+            )
         causes = [
             replica.fatal_cause for replica in slot.replicas if replica.fatal_cause is not None
         ]
         rank_key = slot.rank_key(graduated)
+        if deployment_validation is not None and not bool(deployment_validation["passed"]):
+            rank_key = (rank_key[0], 0.0, *rank_key[2:])
+        cma_lifetime = float(slot.age)
+        if deployment_validation is not None:
+            # These are consecutive required survival exposures.  CMA-ES sees
+            # only their total duration, never the failure label or metric.
+            cma_lifetime += min(
+                (float(summary["age"]) for summary in deployment_validation["autonomous"]),
+                default=0.0,
+            )
+            cma_lifetime += min(
+                (float(summary["age"]) for summary in deployment_validation["perturbed"]),
+                default=0.0,
+            )
         replica_results = [replica.summary() for replica in slot.replicas]
         functional_at_last_probe = bool(rank_key[1]) if len(rank_key) > 1 else False
         functional = graduated and functional_at_last_probe
@@ -1005,6 +1247,7 @@ class AsyncEvolutionRunner:
             "bank": asdict(slot.bank),
             "level": slot.level,
             "age": slot.age,
+            "cma_lifetime": cma_lifetime,
             "death_time": slot.age if causes else None,
             "death_cause": causes[0] if causes else None,
             "milestone_history": slot.milestone_history,
@@ -1012,6 +1255,7 @@ class AsyncEvolutionRunner:
             "rank_key": list(rank_key),
             "functional": functional,
             "functional_at_last_probe": functional_at_last_probe,
+            "deployment_validation": deployment_validation,
             # A model is deployable only after the final curriculum test. Earlier
             # graduations remain useful training evidence, but are not Live models.
             "live_eligible": (
@@ -1019,6 +1263,8 @@ class AsyncEvolutionRunner:
                 and slot.level == len(self.config.levels) - 1
                 and functional
                 and unresolved_burden <= 1e-12
+                and deployment_validation is not None
+                and bool(deployment_validation["passed"])
             ),
         }
         self.archive.append(record)
@@ -1026,10 +1272,16 @@ class AsyncEvolutionRunner:
             slot.bank.bank_id,
             slot.proposal.sample_id,
             slot.proposal.genome,
-            rank_key,
+            cma_lifetime,
         )
         if graduated and functional:
             self.stage_survivors[slot.level].append(record)
+            self.stage_survivors[slot.level].sort(
+                key=lambda item: tuple(item["rank_key"]), reverse=True
+            )
+            del self.stage_survivors[slot.level][
+                max(self.config.elite_size, self.config.stable_population_size) :
+            ]
             self.survivors.consider(record)
             self.elites.consider(record)
         return updated
@@ -1212,8 +1464,8 @@ def run_diagnostic_experiment(
         edge_architecture=edge_architecture,
         target="joint",
         levels=(
-            CurriculumLevel(16, input_scale=.10, graph_nodes=7),
-            CurriculumLevel(28, 8, .10, input_scale=.15, graph_nodes=9),
+            CurriculumLevel(16, graph_nodes=7),
+            CurriculumLevel(28, 8, .10, graph_nodes=9),
         ),
         pathology=PathologyConfig(fatal_threshold=3.0),
         probes=ProbeConfig(interval=4, duration=2, amplitude=.10),
@@ -1262,6 +1514,11 @@ def async_config_from_dict(data: Mapping[str, object]) -> AsyncEvolutionConfig:
         stable_population_size=int(data.get("stable_population_size", 4)),
         censor_interval=int(data["censor_interval"]),
         elite_size=int(data["elite_size"]),
+        deployment_validation_replicas=int(data.get("deployment_validation_replicas", 3)),
+        deployment_validation_nodes=int(data.get("deployment_validation_nodes", 24)),
+        deployment_validation_mean_degree=float(data.get("deployment_validation_mean_degree", 5.0)),
+        deployment_autonomous_steps=int(data.get("deployment_autonomous_steps", 200)),
+        initial_state_scale=float(data.get("initial_state_scale", .12)),
         initial_sigma=float(data["initial_sigma"]),
         initial_genomes=tuple(tuple(float(value) for value in genome) for genome in data["initial_genomes"]),
     )
@@ -1303,21 +1560,21 @@ def replay_archived_candidate(
     state = simulation.initial_state(1)
     initial_rng = Random(scenario.initial_state_seed)
     state.node = [[
-        tuple(initial_rng.gauss(0, .03) for _ in range(node_rule.state_width))
+        tuple(
+            initial_rng.gauss(0.0, config.initial_state_scale)
+            for _ in range(node_rule.state_width)
+        )
         for _ in range(graph.n_nodes)
     ]]
     runtime = ReplicaRuntime(
         scenario,
         simulation,
         simulation_config,
-        GaussianInput(scenario.input_seed, 0.0, scenario.input_scale),
         state,
         HealthMonitor(config.pathology),
     )
     trajectory = Trajectory()
-    initial_external = runtime.input_provider.sample(
-        0, 1, graph.n_nodes, node_rule.state_width
-    )
+    initial_external = [[(0.0,) * node_rule.state_width for _ in range(graph.n_nodes)]]
     trajectory.append(
         0,
         0.0,
@@ -1334,18 +1591,18 @@ def replay_archived_candidate(
             trajectory.events.append(EventWindow("curriculum disturbance", prior_age, prior_age))
         if prior_age and prior_age % config.probes.interval == 0:
             trajectory.events.append(
-                EventWindow("paired input probe", prior_age, prior_age + config.probes.duration - 1)
+                EventWindow("paired state probe", prior_age, prior_age)
             )
         runtime.advance(level, config.probes)
         if runtime.age == prior_age and runtime.fatal_cause is not None:
             break
-        if runtime.age <= prior_age or runtime.last_external is None:
+        if runtime.age <= prior_age:
             raise RuntimeError("archived candidate could not advance during replay")
         trajectory.append(
             runtime.age,
             runtime.age * simulation_config.dt,
             runtime.state.node,
-            runtime.last_external,
+            [[(0.0,) * node_rule.state_width for _ in range(graph.n_nodes)]],
             runtime.state.edge,
             simulation._effective_strengths(runtime.state.edge),
         )

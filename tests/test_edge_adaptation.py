@@ -10,6 +10,7 @@ from evolvable_state_network.baselines import FixedRNNRule
 from evolvable_state_network.evolution.candidate import (
     EdgeArchitecture,
     MLPEdgeRule,
+    MLPUpdateRule,
     RuleArchitecture,
 )
 from evolvable_state_network.evolution.evaluation import (
@@ -41,7 +42,7 @@ class RelaxingEdgeRule:
     def initial_state(self) -> tuple[float, ...]:
         return (0.0,)
 
-    def update(self, state, source, target, message, source_external, target_external, edge_step_scale):
+    def update(self, state, source, target, message, edge_step_scale):
         from math import tanh
         return (state[0] + edge_step_scale * tanh(-state[0]),)
 
@@ -76,6 +77,24 @@ class EdgeAdaptationTests(unittest.TestCase):
         self.assertAlmostEqual(message[0], .5)
         self.assertGreater(message[1], .98)
         self.assertAlmostEqual(rule.communication_strength((0.0, 2.0)), sum(message) / 2)
+
+    def test_evolved_node_and_edge_rules_have_no_external_channels(self) -> None:
+        node_architecture = RuleArchitecture(state_width=1, hidden_width=2)
+        node_rule = MLPUpdateRule(
+            node_architecture, tuple(.03 * (index + 1) for index in range(node_architecture.parameter_count))
+        )
+        edge_architecture = EdgeArchitecture(node_state_width=1, latent_width=2, hidden_width=2)
+        edge_rule = MLPEdgeRule(
+            edge_architecture, tuple(.02 * (index + 1) for index in range(edge_architecture.parameter_count))
+        )
+        self.assertEqual(
+            node_rule.update((.1,), (.2,), .05, .12),
+            node_rule.update((.1,), (.2,), .05, .12),
+        )
+        self.assertEqual(
+            edge_rule.update((.1, -.1), (.2,), (.3,), (.4,), .06),
+            edge_rule.update((.1, -.1), (.2,), (.3,), (.4,), .06),
+        )
 
     def test_joint_codec_exports_and_restores_independent_parameter_groups(self) -> None:
         node_architecture = RuleArchitecture(state_width=1, hidden_width=2)

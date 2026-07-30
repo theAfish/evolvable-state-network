@@ -19,7 +19,6 @@ class NodeRule(Protocol):
         self,
         state: StateVector,
         aggregate: StateVector,
-        external: StateVector,
         dt: float,
         max_delta: float,
     ) -> StateVector:
@@ -40,8 +39,6 @@ class EdgeRule(Protocol):
         source: StateVector,
         target: StateVector,
         message: StateVector,
-        source_external: StateVector,
-        target_external: StateVector,
         edge_step_scale: float,
     ) -> StateVector:
         """Update from strictly local, current quantities only."""
@@ -63,7 +60,7 @@ class StatelessEdgeRule:
 
     def update(
         self, state: StateVector, source: StateVector, target: StateVector, message: StateVector,
-        source_external: StateVector, target_external: StateVector, edge_step_scale: float,
+        edge_step_scale: float,
     ) -> StateVector:
         return state
 

@@ -17,12 +17,50 @@ warnings.filterwarnings(
 from fastapi.testclient import TestClient
 
 from evolvable_state_network.api import create_app
+from evolvable_state_network.application.runtime import ApplicationRuntime
 from evolvable_state_network.evolution.candidate import RuleArchitecture
 from evolvable_state_network.server import main as server_main
 from evolvable_state_network.storage import application_data_dir
 
 
 class FastAPIServerTests(unittest.TestCase):
+    @staticmethod
+    def _write_survival_elite(
+        root: Path, run_id: str, architecture: RuleArchitecture, genome: list[float]
+    ) -> None:
+        """Create the smallest current-format Live artifact for API tests."""
+        run = root / "async_runs" / run_id
+        run.mkdir(parents=True)
+        config = {
+            "architecture": asdict(architecture),
+            "target": "node",
+            "pathology": {},
+            "levels": [{}],
+            "elite_size": 4,
+            "candidate_budget": 1,
+        }
+        record = {
+            "candidate_id": 1,
+            "genome": genome,
+            "rank_key": [1.0, 1.0, 20.0],
+            "status": "graduation",
+            "level": 0,
+            "age": 20,
+            "live_eligible": True,
+            "per_replica_results": [
+                {
+                    "normalized_pathology_burden": 0.0,
+                    "responsiveness": 1.0,
+                    "propagation": 1.0,
+                    "distinguishability": 1.0,
+                    "recovered": True,
+                }
+            ],
+            "deployment_validation": {"passed": True, "autonomous": [], "perturbed": []},
+        }
+        (run / "diagnostic_config.json").write_text(json.dumps(config), encoding="utf-8")
+        (run / "candidate_archive.json").write_text(json.dumps([record]), encoding="utf-8")
+
     def test_default_storage_is_project_local_outputs_directory(self) -> None:
         with patch.dict(os.environ):
             os.environ.pop("ESN_DATA_DIR", None)
@@ -167,20 +205,8 @@ class FastAPIServerTests(unittest.TestCase):
         architecture = RuleArchitecture(state_width=1, hidden_width=2)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            model = root / "evolution_runs" / "demo-best"
-            model.mkdir(parents=True)
-            (model / "best_genome.json").write_text(
-                json.dumps(
-                    {
-                        "architecture": asdict(architecture),
-                        "edge_architecture": None,
-                        "target": "node",
-                        "genome": [0.0] * architecture.parameter_count,
-                        "validation": {"fitness": .2},
-                        "test": {"fitness": .1},
-                    }
-                ),
-                encoding="utf-8",
+            self._write_survival_elite(
+                root, "demobest", architecture, [0.0] * architecture.parameter_count
             )
             with TestClient(create_app(root)) as client:
                 models = client.get("/api/live/models").json()
@@ -189,44 +215,62 @@ class FastAPIServerTests(unittest.TestCase):
                     json={
                         "model_id": models["models"][0]["id"], "seed": 7, "nodes": 5,
                         "mean_degree": 2, "batch_size": 1, "dt": .1,
-                        "topology": "ring", "input_seed": 19,
-                        "input_standard_deviation": .15,
+                        "topology": "ring",
+                    },
+                ).json()
+                repeat = client.post(
+                    "/api/live/sessions",
+                    json={
+                        "model_id": models["models"][0]["id"], "seed": 7, "nodes": 5,
+                        "mean_degree": 2, "batch_size": 1, "dt": .1,
+                        "topology": "ring",
                     },
                 ).json()
                 stepped = client.post(
                     f"/api/live/sessions/{initial['session_id']}/step",
                     json={"steps": 3},
                 ).json()
-        self.assertEqual(models["models"][0]["id"], "legacy:demo-best")
-        self.assertEqual(models["models"][0]["source"], "legacy")
+        self.assertEqual(models["models"][0]["id"], "survival:demobest:1")
+        self.assertEqual(models["models"][0]["source"], "survival")
         self.assertEqual(initial["graph"]["nodes"], 5)
         self.assertEqual(initial["topology"], "ring")
         self.assertEqual(initial["step"], 0)
+        self.assertEqual(initial["initial_state_scale"], .12)
+        self.assertEqual(initial["node_state"], repeat["node_state"])
+        self.assertEqual(len({node[0] for node in initial["node_state"][0]}), 5)
+        self.assertNotEqual(initial["node_state"][0], [(0.0,)] * 5)
         self.assertEqual(stepped["step"], 3)
+
+    def test_survival_live_models_require_fresh_graph_validation(self) -> None:
+        record = {
+            "candidate_id": 1,
+            "genome": [1.0],
+            "rank_key": [1.0, 1.0],
+            "status": "graduation",
+            "level": 0,
+            "live_eligible": True,
+            "per_replica_results": [],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            run = Path(directory)
+            (run / "candidate_archive.json").write_text(json.dumps([record]), encoding="utf-8")
+            self.assertEqual(ApplicationRuntime._survival_elites(run, {"levels": [{}]}), [])
+            record["deployment_validation"] = {"passed": True, "autonomous": [], "perturbed": []}
+            (run / "candidate_archive.json").write_text(json.dumps([record]), encoding="utf-8")
+            self.assertEqual(
+                [item["candidate_id"] for item in ApplicationRuntime._survival_elites(run, {"levels": [{}]})],
+                [1],
+            )
 
     def test_live_session_keeps_running_and_reports_safety_events(self) -> None:
         architecture = RuleArchitecture(state_width=1, hidden_width=1)
         # A positive output bias produces sustained growth.  Live replay must
         # surface whichever health failure occurs first, instead of continuing
         # with silently bounded state values.
-        genome = [0.0, 0.0, 2.0, 0.0, 0.0, 1.0, 2.0]
+        genome = [0.0, 0.0, 2.0, 0.0, 1.0, 2.0]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            model = root / "evolution_runs" / "runaway"
-            model.mkdir(parents=True)
-            (model / "best_genome.json").write_text(
-                json.dumps(
-                    {
-                        "architecture": asdict(architecture),
-                        "edge_architecture": None,
-                        "target": "node",
-                        "genome": genome,
-                        "validation": {"fitness": .2},
-                        "test": {"fitness": .1},
-                    }
-                ),
-                encoding="utf-8",
-            )
+            self._write_survival_elite(root, "runaway", architecture, genome)
             with TestClient(create_app(root)) as client:
                 model_id = client.get("/api/live/models").json()["models"][0]["id"]
                 initial = client.post(
@@ -236,7 +280,6 @@ class FastAPIServerTests(unittest.TestCase):
                         "seed": 7,
                         "nodes": 5,
                         "mean_degree": 2,
-                        "input_standard_deviation": 1.0,
                     },
                 ).json()
                 observed_response = None

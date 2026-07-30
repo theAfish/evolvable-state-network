@@ -86,6 +86,40 @@ class AsyncEvolutionTests(unittest.TestCase):
                 responsive.observe(step, state(.1), state(.11), (.5,), TransitionDiagnostics(), good)
             )
 
+    def test_resting_homogeneous_fixed_point_dies_even_if_probes_would_break_it(self) -> None:
+        monitor = HealthMonitor(
+            PathologyConfig(
+                fatal_threshold=99,
+                homogenization_variance=1e-4,
+                rest_homogenization_steps=3,
+            )
+        )
+        for step in range(1, 3):
+            self.assertIsNone(
+                monitor.observe(step, state(0), state(0), (.5,), TransitionDiagnostics())
+            )
+        self.assertEqual(
+            monitor.observe(3, state(0), state(0), (.5,), TransitionDiagnostics()),
+            "rest_state_homogenization",
+        )
+
+        interrupted = HealthMonitor(
+            PathologyConfig(
+                fatal_threshold=99,
+                homogenization_variance=1e-4,
+                rest_homogenization_steps=3,
+            )
+        )
+        for step in range(1, 7):
+            self.assertIsNone(
+                interrupted.observe(
+                    step, state(0), state(0), (.5,), TransitionDiagnostics(), resting=False
+                )
+            )
+        self.assertIsNone(
+            interrupted.observe(7, state(0), state(0), (.5,), TransitionDiagnostics())
+        )
+
     def test_delayed_one_direction_degeneration(self) -> None:
         monitor = HealthMonitor(
             PathologyConfig(
@@ -249,6 +283,29 @@ class AsyncEvolutionTests(unittest.TestCase):
         self.assertEqual(proposal.source, "cma")
         self.assertIsNotNone(proposal.sample_id)
 
+    def test_final_deployment_validation_emits_incremental_progress(self) -> None:
+        events: list[dict[str, object]] = []
+        runner = AsyncEvolutionRunner(
+            AsyncEvolutionConfig(
+                slots=1,
+                replicas=1,
+                result_batch_size=2,
+                max_ticks=1,
+                seed=41,
+                levels=(CurriculumLevel(1, graph_nodes=4, mean_degree=2),),
+                deployment_validation_replicas=1,
+                deployment_validation_nodes=4,
+                deployment_validation_mean_degree=2,
+                deployment_autonomous_steps=3,
+            )
+        )
+        runner.run(progress=events.append)
+        validation = [event["validation"] for event in events if event.get("validation")]
+        self.assertTrue(validation)
+        self.assertEqual(validation[0]["phase"], "autonomous")
+        self.assertEqual(validation[0]["candidate_id"], 0)
+        self.assertEqual(validation[-1]["replica"], 1)
+
     def test_common_scenario_bank_is_candidate_independent(self) -> None:
         level = CurriculumLevel(10)
         first = ScenarioBank.create(7, 0, 3, level)
@@ -256,18 +313,43 @@ class AsyncEvolutionTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(len({item.input_seed for item in first.scenarios}), 3)
 
+    def test_state_perturbations_are_seeded_random_nodes_with_coordinatewise_gaussians(self) -> None:
+        architecture = RuleArchitecture(state_width=2, hidden_width=2)
+        edge = EdgeArchitecture(node_state_width=2, latent_width=2, hidden_width=2)
+        codec = GenomeCodec(architecture, edge, "joint")
+        runner = AsyncEvolutionRunner(
+            AsyncEvolutionConfig(
+                slots=1,
+                replicas=1,
+                result_batch_size=2,
+                architecture=architecture,
+                edge_architecture=edge,
+                levels=(CurriculumLevel(12, graph_nodes=5),),
+                initial_state_scale=.2,
+            )
+        )
+        proposal = CandidateProposal((0.0,) * codec.dimension, "cma", 0, 0)
+        replica = runner._new_slot(0, proposal).replicas[0]
+        first = replica._gaussian_state_packet(7, .12, salt=17)
+        second = replica._gaussian_state_packet(7, .12, salt=17)
+        self.assertEqual(first, second)
+        self.assertGreaterEqual(first[0], 0)
+        self.assertLess(first[0], replica.simulation.graph.n_nodes)
+        self.assertEqual(len(first[1]), 2)
+        self.assertNotEqual(first[1][0], first[1][1])
+
     def test_result_buffered_cma_updates_only_after_batch(self) -> None:
         adapter = SteadyStateCMA(3, 4, .2, 9)
         samples = [adapter.ask() for _ in range(4)]
         for index, asked in enumerate(samples):
             assert asked is not None
             sample_id, genome = asked
-            updated = adapter.observe("same-bank", sample_id, genome, (1, index))
+            updated = adapter.observe("same-bank", sample_id, genome, float(index))
             self.assertEqual(updated, index == 3)
         self.assertEqual(adapter.update_count, 1)
         # A later censor record for an already told sample cannot tell it twice.
         sample_id, genome = samples[0]
-        self.assertFalse(adapter.observe("same-bank", sample_id, genome, (2, 99)))
+        self.assertFalse(adapter.observe("same-bank", sample_id, genome, 99.0))
         self.assertEqual(adapter.update_count, 1)
 
     def test_validated_elite_preservation(self) -> None:
@@ -338,7 +420,7 @@ class AsyncEvolutionTests(unittest.TestCase):
             seed=3,
             architecture=architecture,
             edge_architecture=edge,
-            levels=(CurriculumLevel(100, input_scale=.1, graph_nodes=5),),
+            levels=(CurriculumLevel(8, graph_nodes=5),),
             pathology=PathologyConfig(fatal_threshold=2),
             initial_genomes=diagnostic_reference_genomes(codec),
         )
@@ -359,7 +441,7 @@ class AsyncEvolutionTests(unittest.TestCase):
             seed=7,
             architecture=architecture,
             edge_architecture=edge,
-            levels=(CurriculumLevel(100, input_scale=.1, graph_nodes=5),),
+            levels=(CurriculumLevel(8, graph_nodes=5),),
             pathology=PathologyConfig(fatal_threshold=2),
         )
         runner = AsyncEvolutionRunner(config)
@@ -376,14 +458,14 @@ class AsyncEvolutionTests(unittest.TestCase):
         asked = adapter.ask()
         assert asked is not None
         sample_id, genome = asked
-        self.assertFalse(adapter.observe("stage-1", sample_id, genome, (1, 0)))
+        self.assertFalse(adapter.observe("stage-1", sample_id, genome, 1))
         adapter.begin_stage("stage-2")
         samples = [adapter.ask() for _ in range(2)]
         for index, asked in enumerate(samples):
             assert asked is not None
             sample_id, genome = asked
             self.assertEqual(
-                adapter.observe("stage-2", sample_id, genome, (2, index)), index == 1
+                adapter.observe("stage-2", sample_id, genome, float(index)), index == 1
             )
         self.assertEqual(adapter.update_count, 1)
         self.assertGreater(adapter.cancelled_samples, 0)

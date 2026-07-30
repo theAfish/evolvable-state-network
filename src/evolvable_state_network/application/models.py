@@ -54,12 +54,12 @@ class AsyncTrainingPayload(StrictModel):
     stable_population_size: int = Field(3, ge=1, le=32)
     optimizer_batch: int = Field(8, ge=2, le=32)
     state_width: int = Field(2, ge=1, le=8)
+    initial_state_scale: float = Field(.12, gt=0, le=1)
     stage_1_lifetime: int = Field(40, ge=4, le=2000)
     stage_2_lifetime: int = Field(100, ge=8, le=5000)
     stage_1_nodes: int = Field(8, ge=3, le=100)
     stage_2_nodes: int = Field(12, ge=3, le=200)
     mean_degree: float = Field(3.0, ge=0.5, le=20)
-    input_scale: float = Field(.12, gt=0, le=2)
     disturbance_interval: int = Field(10, ge=2, le=1000)
     disturbance_strength: float = Field(.12, ge=0, le=2)
     fatal_threshold: float = Field(8.0, gt=0, le=100)
@@ -81,13 +81,17 @@ class AsyncTrainingPayload(StrictModel):
 class LiveSessionPayload(StrictModel):
     model_id: str
     seed: int = Field(7, ge=0, lt=2**32)
+    initial_state_scale: float = Field(
+        .12,
+        ge=0,
+        le=1,
+        description="Standard deviation of independent zero-mean initial node coordinates",
+    )
     nodes: int = Field(24, ge=2, le=200)
     mean_degree: float = Field(5.0, ge=0)
     batch_size: int = Field(1, ge=1, le=64)
     dt: float = Field(.05, gt=0, le=1)
     topology: Literal["erdos_renyi", "ring"] = "erdos_renyi"
-    input_seed: int = Field(108, ge=0, lt=2**32)
-    input_standard_deviation: float = Field(.28, ge=0)
 
     @model_validator(mode="after")
     def validate_degree(self) -> "LiveSessionPayload":

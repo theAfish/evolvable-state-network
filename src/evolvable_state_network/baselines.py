@@ -21,9 +21,9 @@ class FixedRNNRule:
         return (0.0,)
 
     def update(
-        self, state: StateVector, aggregate: StateVector, external: StateVector, dt: float, max_delta: float
+        self, state: StateVector, aggregate: StateVector, dt: float, max_delta: float
     ) -> StateVector:
-        candidate = tanh(self.recurrent_scale * aggregate[0] + self.input_scale * external[0])
+        candidate = tanh(self.recurrent_scale * aggregate[0])
         return (state[0] + clip(dt * self.leak * (candidate - state[0]) / 0.2, max_delta),)
 
 
@@ -44,7 +44,7 @@ class HomeostaticRule:
         return (0.0, 0.0, 0.0, 0.0)
 
     def update(
-        self, state: StateVector, aggregate: StateVector, external: StateVector, dt: float, max_delta: float
+        self, state: StateVector, aggregate: StateVector, dt: float, max_delta: float
     ) -> StateVector:
         x, average, spread, control = state
         magnitude = abs(x)
@@ -53,6 +53,6 @@ class HomeostaticRule:
         next_control = control + clip(
             dt * (0.6 * (self.target_scale - next_average) - 0.2 * control - 0.1 * next_spread), max_delta
         )
-        candidate = tanh((1.0 + next_control) * aggregate[0] + external[0] - 0.18 * x)
+        candidate = tanh((1.0 + next_control) * aggregate[0] - 0.18 * x)
         next_x = x + clip(dt * (candidate - x) / 0.2, max_delta)
         return (next_x, next_average, next_spread, next_control)

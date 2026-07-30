@@ -26,12 +26,12 @@ class ApiConfigurationTests(unittest.TestCase):
             replicas=2,
             optimizer_batch=6,
             state_width=3,
+            initial_state_scale=.2,
             stage_1_lifetime=20,
             stage_2_lifetime=60,
             stage_1_nodes=7,
             stage_2_nodes=11,
             mean_degree=2.5,
-            input_scale=.2,
             disturbance_interval=9,
             disturbance_strength=.3,
             fatal_threshold=7,
@@ -49,9 +49,9 @@ class ApiConfigurationTests(unittest.TestCase):
         self.assertEqual(config.edge_architecture.latent_width, 3)
         self.assertEqual(config.architecture.hidden_width, 8)
         self.assertEqual(config.edge_architecture.hidden_width, 12)
+        self.assertEqual(config.initial_state_scale, .2)
         self.assertEqual(tuple(level.lifetime for level in config.levels), (20, 60))
         self.assertEqual(config.levels[1].disturbance_frequency, 9)
-        self.assertAlmostEqual(config.levels[1].input_scale, .3)
         self.assertEqual(config.pathology.fatal_threshold, 7)
         self.assertEqual(config.probes.interval, 6)
 

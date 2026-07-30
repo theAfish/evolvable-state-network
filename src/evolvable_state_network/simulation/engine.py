@@ -113,9 +113,9 @@ class TransitionDiagnostics:
 class Simulation:
     """Runs a shared local rule across graph sizes and batch members.
 
-    The simulator only exposes each node's own vector, a permutation-invariant
-    sum of incoming messages, and its external vector. It never passes a node
-    index, global trajectory, future input, or experimental score into rules.
+    The simulator only exposes each node's own vector and a permutation-
+    invariant sum of incoming messages. It never passes a node index, global
+    trajectory, external input, future input, or experimental score into rules.
     """
 
     def __init__(self, graph: Graph, node_rule: NodeRule, edge_rule: EdgeRule | None = None) -> None:
@@ -207,9 +207,7 @@ class Simulation:
                     state.node[batch][edge.source],
                     state.node[batch][edge.target],
                     current_message,
-                    external[batch][edge.source],
-                    external[batch][edge.target],
-                    config.edge_step_scale,
+                    config.edge_step_scale * (config.dt / .05),
                 )
                 edge_row.append(self._edge_transition(state.edge[batch][edge_index], edge_state, diagnostics))
                 messages.append(self.edge_rule.message(edge_row[-1], state.node[batch][edge.source]))
@@ -237,11 +235,9 @@ class Simulation:
                     count += 1
                 aggregate_vector = tuple(value / count for value in aggregate) if count else zeros(width)
                 if intervention is not None:
-                    aggregate_vector, local_external = intervention.local_inputs(aggregate_vector, external[batch][node])
-                else:
-                    local_external = external[batch][node]
+                    aggregate_vector, _ = intervention.local_inputs(aggregate_vector, zeros(width))
                 proposed = self.node_rule.update(
-                    state.node[batch][node], aggregate_vector, local_external, config.dt, config.max_delta
+                    state.node[batch][node], aggregate_vector, config.dt, config.max_delta
                 )
                 if intervention is not None:
                     proposed = intervention.transition(state.node[batch][node], proposed)

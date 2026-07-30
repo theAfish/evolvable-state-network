@@ -27,7 +27,7 @@ class NonfiniteRule:
     def initial_state(self) -> tuple[float, ...]:
         return (0.0,)
 
-    def update(self, state: tuple[float, ...], aggregate: tuple[float, ...], external: tuple[float, ...], dt: float, max_delta: float) -> tuple[float, ...]:
+    def update(self, state: tuple[float, ...], aggregate: tuple[float, ...], dt: float, max_delta: float) -> tuple[float, ...]:
         return (float("nan"),)
 
 

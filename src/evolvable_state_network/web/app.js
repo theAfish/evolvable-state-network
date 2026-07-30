@@ -3,8 +3,8 @@
   const $ = (id) => document.getElementById(id);
   const ui = {
     run: $('run-select'), batch: $('batch-select'), coordinate: $('coordinate-select'), rate: $('rate-select'), slider: $('frame-slider'), label: $('frame-label'), play: $('play'), prev: $('previous'), next: $('next'), loop: $('loop'), svg: $('network'), status: $('load-status'), file: $('file-input'), frameInfo: $('frame-info'), selection: $('selection-info'), metrics: $('metrics'), events: $('events'), form: $('experiment-form'), runStatus: $('run-status'), overview: $('overview-cards'),
-    searchForm: $('evolution-form'), searchSeed: $('search-seed'), searchSamples: $('search-samples'), searchGenerations: $('search-generations'), searchPopulation: $('search-population'), random: $('start-random'), cma: $('start-cma'), searchStatus: $('search-status'), searchProgress: $('search-progress'), searchProgressLabel: $('search-progress-label'), chart: $('fitness-chart'), searchCards: $('search-cards'), process: $('process-table'), result: $('result-summary'), outcomeStatus: $('outcome-status'), liveForm: $('live-form'), liveModel: $('live-model-select'), liveModelScope: $('live-model-scope'), liveModelDetail: $('live-model-detail'), liveRefresh: $('refresh-live-models'), liveStatus: $('live-status'), livePlay: $('live-play'), liveStep: $('live-step'), liveRate: $('live-rate'), liveLabel: $('live-frame-label'), workspace: $('shared-workspace'), replayHost: $('replay-workspace-host'), liveHost: $('live-workspace-host'),
-    asyncForm: $('async-form'), asyncSeed: $('async-seed'), asyncRun: $('async-run'), asyncDiagnostic: $('async-diagnostic'), asyncRefresh: $('async-refresh'), asyncStatus: $('async-status'), asyncProgress: $('async-progress'), asyncProgressLabel: $('async-progress-label'), asyncMetrics: $('async-metrics'), asyncSlots: $('async-slots'), asyncCauses: $('async-causes'), asyncCurriculum: $('async-curriculum'), asyncCurriculumCopy: $('async-curriculum-copy'), asyncCandidates: $('async-candidates'), asyncDetail: $('async-detail'), asyncArtifacts: $('async-artifacts'), asyncLearningState: $('async-learning-state'), asyncLearningCopy: $('async-learning-copy'), asyncRunFacts: $('async-run-facts'), asyncEstimate: $('async-work-estimate'), asyncCandidateBudget: $('async-candidates-budget'), asyncSlotsInput: $('async-slots-input'), asyncReplicasInput: $('async-replicas-input'), asyncStablePopulation: $('async-stable-population'), asyncBatchInput: $('async-batch-input'), asyncStateWidth: $('async-state-width'), asyncTicksInput: $('async-ticks-input')
+    liveForm: $('live-form'), liveModel: $('live-model-select'), liveModelDetail: $('live-model-detail'), liveRefresh: $('refresh-live-models'), liveStatus: $('live-status'), livePlay: $('live-play'), liveStep: $('live-step'), liveRate: $('live-rate'), liveLabel: $('live-frame-label'), workspace: $('shared-workspace'), replayHost: $('replay-workspace-host'), liveHost: $('live-workspace-host'),
+    asyncForm: $('async-form'), asyncSeed: $('async-seed'), asyncRun: $('async-run'), asyncDiagnostic: $('async-diagnostic'), asyncRefresh: $('async-refresh'), asyncStatus: $('async-status'), asyncProgress: $('async-progress'), asyncProgressLabel: $('async-progress-label'), asyncMetrics: $('async-metrics'), asyncValidation: $('async-validation'), asyncSlots: $('async-slots'), asyncCauses: $('async-causes'), asyncCurriculum: $('async-curriculum'), asyncCurriculumCopy: $('async-curriculum-copy'), asyncCandidates: $('async-candidates'), asyncDetail: $('async-detail'), asyncArtifacts: $('async-artifacts'), asyncLearningState: $('async-learning-state'), asyncLearningCopy: $('async-learning-copy'), asyncRunFacts: $('async-run-facts'), asyncEstimate: $('async-work-estimate'), asyncCandidateBudget: $('async-candidates-budget'), asyncSlotsInput: $('async-slots-input'), asyncReplicasInput: $('async-replicas-input'), asyncStablePopulation: $('async-stable-population'), asyncBatchInput: $('async-batch-input'), asyncStateWidth: $('async-state-width'), asyncInitialStateScale: $('async-initial-state-scale'), asyncTicksInput: $('async-ticks-input')
   };
   const state = { data: null, runName: '', frame: 0, batch: 0, coordinate: 0, selected: null, playing: false, lastTick: 0, layout: [], job: null, jobTimer: null, live: null, liveModels: [] };
   const NS = 'http://www.w3.org/2000/svg';
@@ -94,7 +94,6 @@
     const previews = document.createElement('div'); previews.className = 'analysis-previews'; [['Held-out trajectory', result.trajectory_svg_url], ['Perturbation recovery', result.recovery_svg_url]].forEach(([label, url]) => { const figure = document.createElement('figure'); const caption = document.createElement('figcaption'); caption.textContent = label; const image = document.createElement('img'); image.src = url; image.alt = `${label} analysis`; figure.append(caption, image); previews.append(figure); }); ui.result.append(previews);
   }
   function liveModelLabel(model) {
-    if (model.source !== 'survival') return `legacy · ${model.run_id} · validation ${number(model.validation_fitness)} · test ${number(model.test_fitness)}`;
     const functional = model.functional ? 'functional' : 'not functional';
     return `#${model.global_rank} · run ${model.run_id.slice(0, 8)} · elite ${model.elite_rank} · stage ${model.stage} · ${model.lifetime} ticks · ${functional} · burden ${Number(model.worst_pathology_burden).toFixed(3)}`;
   }
@@ -103,13 +102,11 @@
     const model = state.liveModels.find((item) => item.id === ui.liveModel.value);
     if (!model) { ui.liveModelDetail.innerHTML = '<p>No model matches this filter.</p>'; return; }
     const intro = document.createElement('div'), title = document.createElement('h4'), copy = document.createElement('p');
-    title.textContent = model.source === 'survival' ? `Overall survival rank #${model.global_rank}` : 'Legacy fixed-window comparison';
-    copy.textContent = model.source === 'survival'
-      ? `Candidate ${model.candidate_id} is elite ${model.elite_rank} within run ${model.run_id.slice(0, 8)}. Ranking is lexicographic—not an invented scalar score.`
-      : `Run ${model.run_id}. Legacy fitness is not directly comparable with death-driven survival evidence.`;
+    title.textContent = `Overall survival rank #${model.global_rank}`;
+    copy.textContent = `Candidate ${model.candidate_id} is elite ${model.elite_rank} within run ${model.run_id.slice(0, 8)}. Ranking is lexicographic—not an invented scalar score.`;
     intro.append(title, copy);
     if (model.global_rank === 1) { const badge = document.createElement('span'); badge.className = 'recommended'; badge.textContent = 'RECOMMENDED: strongest discovered survival rank'; intro.prepend(badge); }
-    const facts = model.source === 'survival' ? [
+    const facts = [
       ['run type', model.run_kind === 'training' ? 'configured training' : '80-tick smoke test'],
       ['node state coordinates', model.node_state_width ?? 'unknown'],
       ['edge state coordinates', model.edge_state_width ?? 'unknown'],
@@ -120,20 +117,14 @@
       ['minimum graph propagation', Number(model.minimum_propagation).toExponential(3)],
       ['minimum probe separation', Number(model.minimum_distinguishability).toExponential(3)],
       ['recovered in every replica', model.recovered_across_replicas ? 'yes' : 'no'],
-    ] : [
-      ['target', model.target], ['node state coordinates', model.node_state_width ?? 'unknown'], ['edge state coordinates', model.edge_state_width ?? 'unknown'], ['validation fitness', number(model.validation_fitness)], ['test fitness', number(model.test_fitness)],
     ];
     const list = document.createElement('dl'); facts.forEach(([key, value]) => { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = key; dd.textContent = value; list.append(dt, dd); });
     ui.liveModelDetail.replaceChildren(intro, list);
   }
 
   function renderLiveModelOptions() {
-    const prior = ui.liveModel.value, scope = ui.liveModelScope.value;
-    let visible = state.liveModels.filter((model) => scope === 'legacy' ? model.source === 'legacy' : model.source === 'survival');
-    if (scope === 'best') {
-      visible = visible.filter((model) => model.run_kind === 'training' && model.elite_rank === 1);
-      if (!visible.length) visible = state.liveModels.filter((model) => model.source === 'survival' && model.elite_rank === 1);
-    }
+    const prior = ui.liveModel.value;
+    const visible = state.liveModels;
     ui.liveModel.replaceChildren(...visible.map((model) => new Option(liveModelLabel(model), model.id)));
     if (visible.some((model) => model.id === prior)) ui.liveModel.value = prior;
     renderLiveModelDetail();
@@ -141,18 +132,18 @@
   }
 
   async function refreshLiveModels() {
-    ui.liveStatus.textContent = 'Finding trained survival elites and legacy exports…';
+    ui.liveStatus.textContent = 'Finding final-stage survival elites…';
     try {
       const response = await fetch('/api/live/models'), data = await response.json();
       if (!response.ok) throw new Error(apiError(data, 'model list unavailable'));
       state.liveModels = data.models; const visible = renderLiveModelOptions();
-      const survival = data.models.filter((model) => model.source === 'survival').length, legacy = data.models.length - survival, latest = data.latest_survival;
+      const latest = data.latest_survival;
       if (latest?.available && Number(latest.report?.graduations || 0) === 0) {
         const causes = (latest.candidates || []).reduce((counts, candidate) => { const cause = causeLabel(candidate.death_cause); counts[cause] = (counts[cause] || 0) + 1; return counts; }, {});
         const leading = Object.entries(causes).sort((left, right) => right[1] - left[1]).slice(0, 2).map(([cause, count]) => `${count} ${cause}`).join(', ');
         ui.liveStatus.textContent = `Latest run ${latest.run_id.slice(0, 8)} produced no Live model: ${latest.report.completed_candidates || 0} candidates died before graduation${leading ? ` (${leading})` : ''}. ${data.models.length ? `Showing ${visible} older eligible model${visible === 1 ? '' : 's'}.` : 'Train again after adjusting the survival guards.'}`;
       } else {
-        ui.liveStatus.textContent = data.models.length ? `Showing ${visible} of ${survival} survival elites; ${legacy} legacy export${legacy === 1 ? '' : 's'} also available.` : (latest?.available && Number(latest.report?.graduations || 0) ? `Latest run has ${latest.report.graduations} interim graduations, but no final-stage, functional, pathology-free Live model yet.` : 'No usable model exists yet. Complete final-stage functional survival validation.');
+        ui.liveStatus.textContent = data.models.length ? `${visible} final-stage survival elite${visible === 1 ? '' : 's'} available.` : (latest?.available && Number(latest.report?.graduations || 0) ? `Latest run has ${latest.report.graduations} interim graduations, but no final-stage, functional, pathology-free Live model yet.` : 'No usable model exists yet. Complete final-stage functional survival validation.');
       }
     } catch (error) { ui.liveStatus.textContent = `Could not load exports: ${error.message}`; }
   }
@@ -175,8 +166,8 @@
   async function launchLive(event) {
     event.preventDefault();
     const fields = {model_id: ui.liveModel.value};
-    [['seed','live-seed'], ['nodes','live-nodes'], ['batch_size','live-batch'], ['input_seed','live-input-seed']].forEach(([key, id]) => { fields[key] = Number($(id).value); });
-    [['mean_degree','live-degree'], ['dt','live-dt'], ['input_standard_deviation','live-input-std']].forEach(([key, id]) => { fields[key] = Number($(id).value); });
+    [['seed','live-seed'], ['nodes','live-nodes'], ['batch_size','live-batch']].forEach(([key, id]) => { fields[key] = Number($(id).value); });
+    [['mean_degree','live-degree'], ['initial_state_scale','live-initial-state-scale'], ['dt','live-dt']].forEach(([key, id]) => { fields[key] = Number($(id).value); });
     fields.topology = $('live-topology').value;
     ui.liveStatus.textContent = 'Opening in-memory sandbox…';
     try {
@@ -259,6 +250,24 @@
       const meta = document.createElement('span'); meta.className = 'lane-meta'; meta.textContent = `${slot.age} / ${slot.milestone} · L${slot.level}`;
       lane.append(name, candidate, track, meta); return lane;
     }));
+  }
+
+  function renderAsyncValidation(validation) {
+    if (!validation) {
+      ui.asyncValidation.classList.remove('active');
+      ui.asyncValidation.replaceChildren(Object.assign(document.createElement('div'), {innerHTML:'<p class="eyebrow">FINAL DEPLOYMENT VALIDATION</p><h3>Waiting for a final-stage graduation</h3>'}), Object.assign(document.createElement('p'), {textContent:'A final-stage candidate is tested first with no injected disturbance, then on fresh perturbed graphs. Progress appears here while those held-out lives run.'}));
+      return;
+    }
+    const phase = validation.phase === 'autonomous' ? 'Autonomous stability' : 'Perturbed recovery';
+    const fraction = Math.min(1, Number(validation.step || 0) / Math.max(1, Number(validation.steps || 1)));
+    const heading = document.createElement('div');
+    heading.innerHTML = `<p class="eyebrow">FINAL DEPLOYMENT VALIDATION</p><h3>${phase}</h3>`;
+    const detail = document.createElement('div'); detail.className = 'validation-detail';
+    const copy = document.createElement('span'); copy.textContent = `Candidate ${validation.candidate_id} · held-out replica ${validation.replica} / ${validation.replicas} · ${validation.step} / ${validation.steps} ticks`;
+    const progress = document.createElement('progress'); progress.value = fraction; progress.max = 1;
+    detail.append(copy, progress);
+    ui.asyncValidation.classList.add('active');
+    ui.asyncValidation.replaceChildren(heading, detail);
   }
 
   function renderAsyncCauses(report) {
@@ -347,6 +356,7 @@
     const report = data.report || {};
     [...ui.asyncMetrics.querySelectorAll('strong')].forEach((node, index) => { node.textContent = asyncMetricValues(report)[index]; });
     renderAsyncSlots(slotsOverride || data.slots || []);
+    renderAsyncValidation(data.validation);
     renderLearningVerdict(report, data.settings || {}, data.run_kind || 'training');
     renderAsyncCauses(report); renderAsyncCurriculum(report, data.settings || {});
     if (data.candidates) renderAsyncCandidates(data.candidates);
@@ -379,8 +389,16 @@
         ui.asyncProgressLabel.textContent = tickLimit == null
           ? `${tick} ticks · no cap · ${completed}${checkpoint ? ` / ${checkpoint} evidence checkpoint` : ''}`
           : `${tick} / ${tickLimit} ticks · ${completed}${checkpoint ? ` / ${checkpoint} evidence checkpoint` : ''}`;
-        ui.asyncStatus.textContent = `${job.kind === 'async_training' ? 'Survival training' : 'Smoke test'} is running · seed ${job.seed}`;
-        if (snapshot.report) renderAsyncData({report:snapshot.report}, snapshot.slots);
+        const validation = snapshot.validation;
+        if (validation) {
+          const phase = validation.phase === 'autonomous' ? 'autonomous stability' : 'perturbed recovery';
+          ui.asyncProgress.max = Math.max(1, Number(validation.steps || 1)); ui.asyncProgress.value = Number(validation.step || 0);
+          ui.asyncProgressLabel.textContent = `final validation · ${phase} · replica ${validation.replica}/${validation.replicas} · ${validation.step}/${validation.steps}`;
+          ui.asyncStatus.textContent = `Final held-out validation is running · candidate ${validation.candidate_id}`;
+        } else {
+          ui.asyncStatus.textContent = `${job.kind === 'async_training' ? 'Survival training' : 'Smoke test'} is running · seed ${job.seed}`;
+        }
+        if (snapshot.report) renderAsyncData({report:snapshot.report, validation}, snapshot.slots);
         window.setTimeout(() => pollAsyncJob(jobId), 300);
       } else if (job.status === 'complete') {
         setAsyncBusy(false); renderAsyncData(job.result); const report = job.result.report || {};
@@ -393,8 +411,8 @@
   async function startAsync(event) {
     event.preventDefault();
     const fields = {
-      candidate_budget:'async-candidates-budget', slots:'async-slots-input', replicas:'async-replicas-input', stable_population_size:'async-stable-population', optimizer_batch:'async-batch-input', state_width:'async-state-width',
-      stage_1_lifetime:'async-stage1-life', stage_2_lifetime:'async-stage2-life', stage_1_nodes:'async-stage1-nodes', stage_2_nodes:'async-stage2-nodes', mean_degree:'async-degree', input_scale:'async-input-scale',
+      candidate_budget:'async-candidates-budget', slots:'async-slots-input', replicas:'async-replicas-input', stable_population_size:'async-stable-population', optimizer_batch:'async-batch-input', state_width:'async-state-width', initial_state_scale:'async-initial-state-scale',
+      stage_1_lifetime:'async-stage1-life', stage_2_lifetime:'async-stage2-life', stage_1_nodes:'async-stage1-nodes', stage_2_nodes:'async-stage2-nodes', mean_degree:'async-degree',
       disturbance_interval:'async-disturbance-interval', disturbance_strength:'async-disturbance-strength', fatal_threshold:'async-fatal-threshold', node_growth_alert:'async-node-growth-alert', one_direction_steps:'async-one-direction-steps', probe_interval:'async-probe-interval',
     };
     const payload = Object.fromEntries(Object.entries(fields).map(([key, id]) => [key, Number($(id).value)]));
@@ -426,7 +444,7 @@
   document.querySelectorAll('.nav').forEach((button) => button.addEventListener('click', () => activate(button.dataset.view)));
   ui.run.addEventListener('change', () => { state.runName = ui.run.value; state.frame = state.batch = state.coordinate = 0; state.selected = null; refreshSelectors(); drawGraph(); update(); updateOverview(); }); ui.batch.addEventListener('change', () => { state.batch = Number(ui.batch.value); update(); }); ui.coordinate.addEventListener('change', () => { state.coordinate = Number(ui.coordinate.value); update(); }); ui.slider.addEventListener('input', () => { state.frame = Number(ui.slider.value); update(); }); ui.prev.addEventListener('click', () => move(-1)); ui.next.addEventListener('click', () => move(1)); ui.play.addEventListener('click', () => { state.playing = !state.playing; ui.play.textContent = state.playing ? 'Pause' : 'Play'; state.lastTick = performance.now(); if (state.playing) requestAnimationFrame(animate); });
   ui.form.addEventListener('submit', async (event) => { event.preventDefault(); const values = Object.fromEntries(new FormData(ui.form)); ['seed','nodes','steps','batch_size'].forEach((key) => { values[key] = Number(values[key]); }); ['mean_degree','dt'].forEach((key) => { values[key] = Number(values[key]); }); ui.runStatus.textContent = 'Running deterministic local experiment…'; try { const response = await fetch('/api/experiment', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(values)}), document = await response.json(); if (!response.ok) throw new Error(apiError(document, 'experiment request failed')); load(document); ui.runStatus.textContent = 'Reference simulation loaded. Open Replay for details.'; } catch (error) { ui.runStatus.textContent = `Could not start: ${error.message}`; } });
-  ui.random.addEventListener('click', () => startJob('/api/evolution/random-search')); ui.cma.addEventListener('click', () => startJob('/api/evolution/search')); ui.file.addEventListener('change', async () => { const file = ui.file.files[0]; if (!file) return; try { load(JSON.parse(await file.text())); } catch (error) { ui.status.textContent = error.message; } });
+  ui.file.addEventListener('change', async () => { const file = ui.file.files[0]; if (!file) return; try { load(JSON.parse(await file.text())); } catch (error) { ui.status.textContent = error.message; } });
   ui.asyncForm.addEventListener('submit', startAsync); ui.asyncDiagnostic.addEventListener('click', startAsyncDiagnostic); ui.asyncRefresh.addEventListener('click', loadLatestAsync); [ui.asyncCandidateBudget, ui.asyncReplicasInput, ui.asyncStablePopulation].forEach((input) => input.addEventListener('input', updateAsyncEstimate)); updateAsyncEstimate(); activate('survival'); loadLatestAsync();
-  ui.liveRefresh.addEventListener('click', refreshLiveModels); ui.liveModel.addEventListener('change', renderLiveModelDetail); ui.liveModelScope.addEventListener('change', () => { const visible = renderLiveModelOptions(); ui.liveStatus.textContent = `${visible} model${visible === 1 ? '' : 's'} shown by the current filter.`; }); ui.liveForm.addEventListener('submit', launchLive); ui.livePlay.addEventListener('click', () => { if (!state.live) return; state.playing = !state.playing; ui.livePlay.textContent = state.playing ? 'Pause' : 'Play'; state.lastTick = performance.now(); if (state.playing) requestAnimationFrame(animate); }); ui.liveStep.addEventListener('click', () => advanceLive()); refreshLiveModels();
+  ui.liveRefresh.addEventListener('click', refreshLiveModels); ui.liveModel.addEventListener('change', renderLiveModelDetail); ui.liveForm.addEventListener('submit', launchLive); ui.livePlay.addEventListener('click', () => { if (!state.live) return; state.playing = !state.playing; ui.livePlay.textContent = state.playing ? 'Pause' : 'Play'; state.lastTick = performance.now(); if (state.playing) requestAnimationFrame(animate); }); ui.liveStep.addEventListener('click', () => advanceLive()); refreshLiveModels();
 })();
