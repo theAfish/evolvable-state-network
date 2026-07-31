@@ -157,6 +157,7 @@ class ApplicationRuntime:
                     "nodes": config.get("deployment_validation_nodes", 24),
                     "mean_degree": config.get("deployment_validation_mean_degree", 5.0),
                     "autonomous_steps": config.get("deployment_autonomous_steps", 200),
+                    "workers": config.get("deployment_validation_workers"),
                 },
             },
             "report": report,

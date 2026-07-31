@@ -1,2 +1,8 @@
 __pycache__/
 experiment_output/
+.venv/
+*.pyc
+*.egg-info/
+
+
+.debug/

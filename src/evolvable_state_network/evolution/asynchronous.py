@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import json
 from collections import Counter, defaultdict, deque
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field, replace
 from math import isfinite
 from pathlib import Path
+from queue import Empty, SimpleQueue
 from random import Random
 from statistics import fmean
 from typing import Callable, Literal, Mapping, Sequence
@@ -123,6 +125,9 @@ class AsyncEvolutionConfig:
     deployment_validation_nodes: int = 24
     deployment_validation_mean_degree: float = 5.0
     deployment_autonomous_steps: int = 200
+    # Held-out replicas are independent.  None uses one worker per replica;
+    # set this to 1 to retain serial validation or cap CPU use explicitly.
+    deployment_validation_workers: int | None = None
     # CMA-ES is the sole proposal mechanism.  The archive records survival
     # evidence and deployment candidates; it never breeds a hand-mutated
     # offspring population.
@@ -151,6 +156,11 @@ class AsyncEvolutionConfig:
             raise ValueError("edge architecture is required for edge or joint evolution")
         if self.deployment_validation_mean_degree > self.deployment_validation_nodes - 1:
             raise ValueError("deployment validation mean degree cannot exceed nodes - 1")
+        if (
+            self.deployment_validation_workers is not None
+            and self.deployment_validation_workers < 1
+        ):
+            raise ValueError("deployment_validation_workers must be positive when provided")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1063,69 +1073,127 @@ class AsyncEvolutionRunner:
         progress: Callable[[dict[str, object]], None] | None,
         tick: int,
     ) -> list[dict[str, object]]:
-        """Run one deterministic held-out condition without retaining trajectories."""
+        """Run independent held-out replicas concurrently, preserving their order."""
+        progress_events: SimpleQueue[tuple[int, int]] = SimpleQueue()
+
+        def emit_progress(replica_index: int, step: int) -> None:
+            if progress is not None:
+                progress_events.put((replica_index, step))
+
+        def flush_progress() -> None:
+            if progress is None:
+                return
+            while True:
+                try:
+                    replica_index, step = progress_events.get_nowait()
+                except Empty:
+                    return
+                progress(
+                    self._progress_snapshot(
+                        tick,
+                        {
+                            "candidate_id": candidate_id,
+                            "phase": phase,
+                            "replica": replica_index + 1,
+                            "replicas": self.config.deployment_validation_replicas,
+                            "step": step,
+                            "steps": steps,
+                        },
+                    )
+                )
+
+        worker_count = min(
+            self.config.deployment_validation_replicas,
+            self.config.deployment_validation_workers
+            or self.config.deployment_validation_replicas,
+        )
+        summaries: list[dict[str, object] | None] = [
+            None
+        ] * self.config.deployment_validation_replicas
+        with ThreadPoolExecutor(
+            max_workers=worker_count, thread_name_prefix="deployment-validation"
+        ) as executor:
+            pending = {
+                executor.submit(
+                    self._validation_replica,
+                    genome,
+                    level,
+                    probes,
+                    steps,
+                    replica_index=replica_index,
+                    progress=emit_progress,
+                ): replica_index
+                for replica_index in range(self.config.deployment_validation_replicas)
+            }
+            while pending:
+                done, _ = wait(
+                    pending, timeout=0.05, return_when=FIRST_COMPLETED
+                )
+                flush_progress()
+                for future in done:
+                    replica_index = pending.pop(future)
+                    summaries[replica_index] = future.result()
+        flush_progress()
+        return [summary for summary in summaries if summary is not None]
+
+    def _validation_replica(
+        self,
+        genome: tuple[float, ...],
+        level: CurriculumLevel,
+        probes: ProbeConfig,
+        steps: int,
+        *,
+        replica_index: int,
+        progress: Callable[[int, int], None],
+    ) -> dict[str, object]:
+        """Run one isolated held-out replica and report compact progress events."""
         node_rule, edge_rule = self.codec.decode_groups(genome)
         if node_rule is None:
             from .baselines import HomeostaticRule
             node_rule = HomeostaticRule()
-        summaries: list[dict[str, object]] = []
-        for replica_index in range(self.config.deployment_validation_replicas):
-            base_seed = self.config.seed + 700_001 + 10_007 * replica_index
-            nodes = self.config.deployment_validation_nodes + (replica_index % 2)
-            graph = generate_random_graph(
-                nodes,
-                min(self.config.deployment_validation_mean_degree, nodes - 1),
-                base_seed,
+        base_seed = self.config.seed + 700_001 + 10_007 * replica_index
+        nodes = self.config.deployment_validation_nodes + (replica_index % 2)
+        graph = generate_random_graph(
+            nodes,
+            min(self.config.deployment_validation_mean_degree, nodes - 1),
+            base_seed,
+        )
+        simulation = Simulation(graph, node_rule, edge_rule)
+        state = simulation.initial_state(1)
+        initial_rng = Random(base_seed + 1)
+        state.node = [[
+            tuple(
+                initial_rng.gauss(0.0, self.config.initial_state_scale)
+                for _ in range(node_rule.state_width)
             )
-            simulation = Simulation(graph, node_rule, edge_rule)
-            state = simulation.initial_state(1)
-            initial_rng = Random(base_seed + 1)
-            state.node = [[
-                tuple(
-                    initial_rng.gauss(0.0, self.config.initial_state_scale)
-                    for _ in range(node_rule.state_width)
-                )
-                for _ in range(graph.n_nodes)
-            ]]
-            scenario = Scenario(
-                replica=replica_index,
-                graph_seed=base_seed,
-                initial_state_seed=base_seed + 1,
-                input_seed=base_seed + 2,
-                nodes=nodes,
-                mean_degree=min(self.config.deployment_validation_mean_degree, nodes - 1),
-                input_scale=0.0,
-            )
-            replica = ReplicaRuntime(
-                scenario,
-                simulation,
-                SimulationConfig(steps=1, batch_size=1, max_abs_state=4.0, record_every=1),
-                state,
-                HealthMonitor(self.config.pathology),
-            )
-            update_interval = max(1, steps // 20)
-            while replica.age < steps and replica.fatal_cause is None:
-                replica.advance(level, probes)
-                if progress is not None and (
-                    replica.age == 1
-                    or replica.age % update_interval == 0
-                    or replica.fatal_cause is not None
-                ):
-                    progress(
-                        self._progress_snapshot(
-                            tick,
-                            {
-                                "candidate_id": candidate_id,
-                                "phase": phase,
-                                "replica": replica_index + 1,
-                                "replicas": self.config.deployment_validation_replicas,
-                                "step": replica.age,
-                                "steps": steps,
-                            },
-                        )
-                    )
-            summaries.append(replica.summary())
-        return summaries
+            for _ in range(graph.n_nodes)
+        ]]
+        scenario = Scenario(
+            replica=replica_index,
+            graph_seed=base_seed,
+            initial_state_seed=base_seed + 1,
+            input_seed=base_seed + 2,
+            nodes=nodes,
+            mean_degree=min(self.config.deployment_validation_mean_degree, nodes - 1),
+            input_scale=0.0,
+        )
+        replica = ReplicaRuntime(
+            scenario,
+            simulation,
+            SimulationConfig(steps=1, batch_size=1, max_abs_state=4.0, record_every=1),
+            state,
+            HealthMonitor(self.config.pathology),
+        )
+        update_interval = max(1, steps // 20)
+        while replica.age < steps and replica.fatal_cause is None:
+            replica.advance(level, probes)
+            if (
+                replica.age == 1
+                or replica.age % update_interval == 0
+                or replica.fatal_cause is not None
+            ):
+                progress(replica_index, replica.age)
+        return replica.summary()
 
     def _deployment_validation(
         self,
@@ -1518,6 +1586,11 @@ def async_config_from_dict(data: Mapping[str, object]) -> AsyncEvolutionConfig:
         deployment_validation_nodes=int(data.get("deployment_validation_nodes", 24)),
         deployment_validation_mean_degree=float(data.get("deployment_validation_mean_degree", 5.0)),
         deployment_autonomous_steps=int(data.get("deployment_autonomous_steps", 200)),
+        deployment_validation_workers=(
+            int(data["deployment_validation_workers"])
+            if data.get("deployment_validation_workers") is not None
+            else None
+        ),
         initial_state_scale=float(data.get("initial_state_scale", .12)),
         initial_sigma=float(data["initial_sigma"]),
         initial_genomes=tuple(tuple(float(value) for value in genome) for genome in data["initial_genomes"]),

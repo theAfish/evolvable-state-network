@@ -4,6 +4,8 @@ import tempfile
 import unittest
 from copy import deepcopy
 from pathlib import Path
+from threading import Barrier, get_ident
+from unittest.mock import patch
 
 from evolvable_state_network.evolution.asynchronous import (
     AsyncEvolutionConfig,
@@ -16,6 +18,7 @@ from evolvable_state_network.evolution.asynchronous import (
     HealthMonitor,
     PathologyConfig,
     ProbeSummary,
+    ReplicaRuntime,
     ScenarioBank,
     SteadyStateCMA,
     diagnostic_reference_genomes,
@@ -305,6 +308,49 @@ class AsyncEvolutionTests(unittest.TestCase):
         self.assertEqual(validation[0]["phase"], "autonomous")
         self.assertEqual(validation[0]["candidate_id"], 0)
         self.assertEqual(validation[-1]["replica"], 1)
+
+    def test_final_deployment_validation_runs_replicas_in_parallel(self) -> None:
+        runner = AsyncEvolutionRunner(
+            AsyncEvolutionConfig(
+                slots=1,
+                replicas=1,
+                result_batch_size=2,
+                max_ticks=1,
+                seed=41,
+                levels=(CurriculumLevel(1, graph_nodes=4, mean_degree=2),),
+                deployment_validation_replicas=2,
+                deployment_validation_workers=2,
+                deployment_validation_nodes=4,
+                deployment_validation_mean_degree=2,
+            )
+        )
+        proposal = runner._proposal()
+        assert proposal is not None
+        barrier = Barrier(2, timeout=2)
+        worker_threads: set[int] = set()
+        original_advance = ReplicaRuntime.advance
+
+        def synchronized_advance(
+            replica: ReplicaRuntime, level: CurriculumLevel, probes: object
+        ) -> None:
+            worker_threads.add(get_ident())
+            barrier.wait()
+            original_advance(replica, level, probes)  # type: ignore[arg-type]
+
+        with patch.object(ReplicaRuntime, "advance", synchronized_advance):
+            summaries = runner._validation_replicas(
+                proposal.genome,
+                runner.config.levels[-1],
+                runner.config.probes,
+                1,
+                candidate_id=0,
+                phase="autonomous",
+                progress=None,
+                tick=1,
+            )
+
+        self.assertEqual(len(summaries), 2)
+        self.assertEqual(len(worker_threads), 2)
 
     def test_common_scenario_bank_is_candidate_independent(self) -> None:
         level = CurriculumLevel(10)
