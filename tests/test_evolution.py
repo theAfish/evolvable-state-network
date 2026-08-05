@@ -7,6 +7,7 @@ from pathlib import Path
 
 from evolvable_state_network.evolution.candidate import RuleArchitecture
 from evolvable_state_network.evolution.cmaes import CMAES, CMAESConfig
+from evolvable_state_network.evolution.genetic import GeneticAlgorithm, GeneticAlgorithmConfig
 from evolvable_state_network.evolution.evaluation import (
     CandidateEvaluator,
     ScenarioConfig,
@@ -62,6 +63,19 @@ class EvolutionTests(unittest.TestCase):
         self.assertEqual(optimizer.generation, restored.generation)
         self.assertEqual(optimizer.sigma, restored.sigma)
         self.assertEqual(len(optimizer.ask()), len(restored.ask()))
+
+    def test_genetic_algorithm_is_deterministic_and_preserves_an_elite(self) -> None:
+        config = GeneticAlgorithmConfig(3, population_size=4, mutation_sigma=.2, seed=13)
+        first, repeated = GeneticAlgorithm(config), GeneticAlgorithm(config)
+        population = first.ask()
+        self.assertEqual(population, repeated.ask())
+        fitnesses = (0.0, 3.0, 1.0, 2.0)
+        first.tell(population, fitnesses)
+        repeated.tell(population, fitnesses)
+        next_population = first.ask()
+        self.assertEqual(next_population, repeated.ask())
+        self.assertIn(population[1], next_population)
+        self.assertEqual(first.generation, 1)
 
     def test_exported_best_genome_reproduces_saved_test_evaluation(self) -> None:
         suite = ScenarioSuite(

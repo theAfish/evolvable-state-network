@@ -18,7 +18,8 @@ from fastapi.testclient import TestClient
 
 from evolvable_state_network.api import create_app
 from evolvable_state_network.application.runtime import ApplicationRuntime
-from evolvable_state_network.evolution.candidate import RuleArchitecture
+from evolvable_state_network.evolution.candidate import EdgeArchitecture, RuleArchitecture
+from evolvable_state_network.evolution.genome import GenomeCodec
 from evolvable_state_network.server import main as server_main
 from evolvable_state_network.storage import application_data_dir
 
@@ -61,6 +62,23 @@ class FastAPIServerTests(unittest.TestCase):
         (run / "diagnostic_config.json").write_text(json.dumps(config), encoding="utf-8")
         (run / "candidate_archive.json").write_text(json.dumps([record]), encoding="utf-8")
 
+    @staticmethod
+    def _write_embodied_run(root: Path, run_id: str) -> tuple[list[float], list[float]]:
+        architecture = RuleArchitecture(state_width=2, hidden_width=2)
+        edge_architecture = EdgeArchitecture(node_state_width=2, latent_width=2, hidden_width=2)
+        dimension = GenomeCodec(architecture, edge_architecture, target="joint").dimension
+        prey, predator = [0.0] * dimension, [0.1] * dimension
+        report = {
+            "ticks": 1, "architecture": asdict(architecture), "edge_architecture": asdict(edge_architecture),
+            "prey_best_genome": prey, "predator_best_genome": predator,
+            "prey": {"best_fitness": 0.0}, "predator": {"best_fitness": 0.0},
+            "task_config": {"network": {"nodes": 12, "mean_degree": 0.0, "state_width": 2, "initial_state_scale": .12}, "environment": {}, "prey_count": 2, "predator_count": 1},
+        }
+        path = root / "embodied_runs" / run_id
+        path.mkdir(parents=True)
+        (path / "report.json").write_text(json.dumps(report), encoding="utf-8")
+        return prey, predator
+
     def test_default_storage_is_project_local_outputs_directory(self) -> None:
         with patch.dict(os.environ):
             os.environ.pop("ESN_DATA_DIR", None)
@@ -95,6 +113,8 @@ class FastAPIServerTests(unittest.TestCase):
         self.assertEqual(root.status_code, 200)
         self.assertIn("Train local rules by how long they remain healthy", root.text)
         self.assertIn("Evidence checkpoint", root.text)
+        self.assertIn('id="embodied-algorithm"', root.text)
+        self.assertIn('id="embodied-training-mode"', root.text)
         self.assertEqual(redirect.status_code, 307)
         self.assertEqual(redirect.headers["location"], "/")
         self.assertEqual(health.json()["status"], "ok")
@@ -117,6 +137,92 @@ class FastAPIServerTests(unittest.TestCase):
         self.assertEqual(set(document["runs"]), {"fixed_rnn"})
         self.assertEqual(document["graph"]["nodes"], 5)
         self.assertEqual(document["simulation_config"]["dt"], .1)
+
+    def test_embodied_training_can_continue_a_completed_run(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_embodied_run(root, "previousrun")
+            with TestClient(create_app(root)) as client:
+                invalid = client.post("/api/embodied/food-web/train", json={"model_id": "x", "continue_run_id": "previousrun"})
+                started = client.post(
+                    "/api/embodied/food-web/train",
+                    json={"continue_run_id": "previousrun", "training_mode": "continuous", "algorithm": "genetic", "seed": 4, "population_size": 2, "ticks": 1, "prey_count": 1, "predator_count": 1, "nodes": 33, "mean_degree": 0},
+                )
+                job = client.get(f"/api/jobs/{started.json()['job_id']}").json()
+                checkpoint = root / "embodied_runs" / started.json()["job_id"] / "checkpoint.json"
+                checkpoint_exists = checkpoint.is_file()
+                checkpoint_tick = json.loads(checkpoint.read_text(encoding="utf-8"))["checkpoint_tick"] if checkpoint_exists else None
+        self.assertEqual(invalid.status_code, 422)
+        self.assertEqual(started.status_code, 200)
+        self.assertEqual(job["status"], "complete")
+        self.assertEqual(job["result"]["algorithm"], "genetic")
+        self.assertEqual(job["result"]["prey"]["algorithm"], "genetic")
+        self.assertEqual(job["result"]["initialization"], {"kind": "embodied_run", "run_id": "previousrun"})
+        self.assertTrue(checkpoint_exists)
+        self.assertEqual(checkpoint_tick, 1)
+
+    def test_embodied_batch_training_completes_comparable_generation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with TestClient(create_app(root)) as client:
+                started = client.post(
+                    "/api/embodied/food-web/train",
+                    json={
+                        "training_mode": "batch", "algorithm": "genetic", "seed": 4,
+                        "population_size": 2, "batch_generations": 1,
+                        "batch_episode_steps": 8, "batch_trials": 2, "batch_validation_trials": 1,
+                        "batch_test_trials": 1, "batch_opponents": 1,
+                        "enforce_survival_pressure": False,
+                        "prey_count": 1, "predator_count": 1, "nodes": 33, "mean_degree": 0,
+                    },
+                )
+                job = client.get(f"/api/jobs/{started.json()['job_id']}").json()
+                checkpoint = root / "embodied_runs" / started.json()["job_id"] / "checkpoint.json"
+                checkpoint_generation = json.loads(checkpoint.read_text(encoding="utf-8"))["checkpoint_generation"]
+        self.assertEqual(started.status_code, 200, started.text)
+        self.assertEqual(job["status"], "complete")
+        self.assertEqual(job["result"]["training_mode"], "batch")
+        self.assertEqual(job["result"]["prey"]["updates"], 1)
+        self.assertGreater(job["result"]["prey"]["evaluations"], 0)
+        self.assertIn("test_fitness", job["result"]["prey"])
+        self.assertIn("vision_masked_fitness", job["result"]["prey"]["baselines"])
+        self.assertTrue(job["result"]["task_config"]["diagnostics"]["final_test_touched_only_after_selection"])
+        self.assertEqual(checkpoint_generation, 1)
+
+    def test_embodied_demo_accepts_ecology_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_embodied_run(root, "demorun")
+            with TestClient(create_app(root)) as client:
+                response = client.post(
+                    "/api/embodied/sessions",
+                    json={"run_id": "demorun", "seed": 4, "prey_count": 4, "predator_count": 3, "initial_food": 11, "max_food": 30, "food_growth_rate": 5.5},
+                )
+        self.assertEqual(response.status_code, 200, response.text)
+        state = response.json()["state"]
+        self.assertEqual(state["population"], {"prey": 4, "predator": 3})
+        self.assertEqual(len(state["plants"]), 11)
+        self.assertEqual(state["plant_capacity"], 30)
+
+    def test_embodied_demo_uses_current_checkpoint_before_run_completes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_embodied_run(root, "checkpointed")
+            run = root / "embodied_runs" / "checkpointed"
+            report = (run / "report.json").read_text(encoding="utf-8")
+            (run / "checkpoint.json").write_text(report, encoding="utf-8")
+            (run / "report.json").unlink()
+            with TestClient(create_app(root)) as client:
+                runs = client.get("/api/embodied/runs").json()["runs"]
+                response = client.post(
+                    "/api/embodied/sessions",
+                    json={"run_id": "checkpointed", "seed": 4, "initial_food": 11, "max_food": 30},
+                )
+        selected = next(run for run in runs if run["id"] == "checkpointed")
+        self.assertFalse(selected["complete"])
+        self.assertEqual(selected["source"], "current_checkpoint")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["model_source"], "current_checkpoint")
 
     def test_random_search_background_job(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

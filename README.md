@@ -1,5 +1,69 @@
 # Evolvable State Network
 
+## Embodied-environment task module
+
+`evolvable_state_network.environments` now contains an optimizer-free,
+continuous predator–prey–plant world imported from the former `evo-eco`
+prototype.  It owns world state, observations, rewards, and controller
+lifecycle only; it does **not** import ESN evolution, CMA-ES, NEAT, or any
+selection/mutation code.  This package can therefore be extracted as a
+standalone environment library.
+
+`evolvable_state_network.evolution` remains task-agnostic and can likewise be
+extracted independently.  The only join is
+`evolvable_state_network.tasks.food_web.FoodWebTaskEvaluator`, which decodes a
+node-rule genome into a recurrent controller and evaluates it over repeatable
+food-web episodes.  New environments and learning tasks should add another
+module under `tasks/`, rather than importing environments from `evolution`.
+
+### Embodied rule learning
+
+`evolvable_state_network.embodied` implements the next-stage architecture.
+An environment-specific `AgentAdapter` normalises observations onto fixed input
+nodes and maps one `[-1, 1]` output per action node into the environment's
+action space. `EmbodiedNetwork` then creates a fresh random graph and fresh
+random node states for every agent/episode; only the node and edge update-rule
+genome is inherited. The food-web implementation in
+`tasks.embodied_food_web` evaluates prey and predator in separate runs, and
+can start CMA-ES from an exported joint rule genome via
+`EmbodiedRuleEvolutionConfig(initial_genome=...)`.
+
+Food-web agents sense hunger, signed energy change, whether they ate on the
+previous world tick, and elapsed starvation time as ordinary body channels.
+No optimizer reward or previous action is injected into the network; retaining
+action or body history is the job of recurrent node and edge state. Immutable
+boundary-role tags distinguish sensor and actuator meanings without becoming
+heritable parameters. Vision is a nine-pixel ego-relative ray image with
+separate plant, prey, and predator proximity channels per pixel; pixel order
+encodes left-to-right direction and ray angles are not network inputs. Random
+graphs and initial states remain fresh, but batch
+candidates are compared on matched scenario realizations independent of their
+genomes. One disjoint fixed seed bank selects the archive; a second seed bank
+is not touched until that winner is frozen and supplies the final test score.
+The final pass also evaluates a neutral zero rule and a causal intervention
+that masks every ray pixel. Reports include the resulting gain over neutral,
+vision-ablation delta, steering alignment, motor drift and saturation, deaths,
+energy state, meal rate, and lifetime-average hunger.
+
+Default food regrowth occurs around persistent patches, for which a simple
+ray-guided policy materially outperforms blind straight-line sweeping. Setting
+`plant_cluster_count=0` restores uniform food for deliberate ablations. Batch
+requests enforce that the episode reaches the configured no-food starvation
+lifetime by default; this guard can be explicitly disabled for short-horizon
+experiments. The default embodied network has 64 nodes, leaving 31 anonymous
+hidden nodes after the 31 sensor and two actuator boundary nodes.
+
+In the web UI, a completed embodied run can also be selected as a continuation
+starting point. Its prey and predator best genomes seed their respective new
+online libraries; the newly chosen population, world, and network settings are
+then used for the new run. This restarts optimization from the learned rules;
+it does not restore an in-progress CMA-ES optimizer state.
+
+Each embodied run writes an atomic `checkpoint.json` when live progress is
+reported (the first tick, then every four ticks, and the final tick). It holds
+the current best genome for each species and can be selected as a continuation
+source even if the original run has not completed.
+
 A minimal, deterministic experimental foundation for evolving **generic local
 graph dynamics**. It intentionally does not model biological cells or impose
 meanings on state-vector coordinates. A node holds a finite vector, edges can

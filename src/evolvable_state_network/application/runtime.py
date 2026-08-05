@@ -12,6 +12,7 @@ from copy import deepcopy
 from pathlib import Path
 from random import Random
 from threading import Lock
+from time import sleep
 from uuid import uuid4
 
 from ..evolution.asynchronous import (
@@ -30,7 +31,10 @@ from ..evolution.genome import GenomeCodec
 from ..dashboard import dashboard_document
 from ..graph import generate_random_graph
 from ..simulation import Simulation, SimulationConfig, TransitionDiagnostics
-from .models import LiveSessionPayload
+from ..embodied import EmbodiedNetworkConfig
+from ..environments import FoodWebConfig
+from ..tasks import EmbodiedFoodWebTaskConfig, FoodWebCoevolutionEvaluator, FoodWebDemonstration
+from .models import EmbodiedDemoPayload, LiveSessionPayload
 
 
 class ApplicationRuntime:
@@ -40,12 +44,134 @@ class ApplicationRuntime:
         self.jobs_lock = Lock()
         self.live_sessions: dict[str, dict[str, object]] = {}
         self.live_lock = Lock()
+        self.embodied_sessions: dict[str, FoodWebDemonstration] = {}
+        self.embodied_lock = Lock()
+        self.embodied_checkpoint_lock = Lock()
 
     def ensure_root(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
 
     def artifact_url(self, path: Path) -> str:
         return f"/artifacts/{path.relative_to(self.root).as_posix()}"
+
+    def available_embodied_runs(self) -> list[dict[str, object]]:
+        root = self.root / "embodied_runs"
+        runs: list[dict[str, object]] = []
+        if not root.is_dir():
+            return runs
+        for directory in root.iterdir():
+            report_path = directory / "report.json"
+            checkpoint_path = directory / "checkpoint.json"
+            if not directory.is_dir() or not (report_path.is_file() or checkpoint_path.is_file()):
+                continue
+            try:
+                completed = report_path.is_file()
+                path = report_path if completed else checkpoint_path
+                # A writer replaces checkpoints atomically, but sharing its
+                # lock also prevents a Windows reader from briefly blocking a
+                # replacement while a debug demo is being started.
+                if completed:
+                    report = json.loads(path.read_text(encoding="utf-8"))
+                else:
+                    with self.embodied_checkpoint_lock:
+                        report = json.loads(path.read_text(encoding="utf-8"))
+                mode = report.get("training_mode", report.get("task_config", {}).get("training_mode", "continuous"))
+                total = report.get("generations", 0) if mode == "batch" else report.get("ticks", 0)
+                checkpoint = report.get("checkpoint_generation", total) if mode == "batch" else report.get("checkpoint_tick", total)
+                runs.append({"id": directory.name, "training_mode": mode, "algorithm": report.get("algorithm", report.get("task_config", {}).get("algorithm", "cma_es")), "ticks": total, "checkpoint_tick": checkpoint, "complete": completed, "source": "completed_report" if completed else "current_checkpoint", "prey_best_fitness": report["prey"]["best_fitness"], "predator_best_fitness": report["predator"]["best_fitness"], "prey_count": report["task_config"]["prey_count"], "predator_count": report["task_config"]["predator_count"]})
+            except (OSError, KeyError, TypeError, ValueError):
+                continue
+        return sorted(runs, key=lambda item: item["id"], reverse=True)
+
+    def _load_embodied_document(self, run_id: str) -> tuple[dict[str, object], str]:
+        if not run_id.isalnum():
+            raise ValueError("invalid embodied run identifier")
+        directory = (self.root / "embodied_runs" / run_id).resolve()
+        report_path = directory / "report.json"
+        checkpoint_path = directory / "checkpoint.json"
+        root = (self.root / "embodied_runs").resolve()
+        if root not in directory.parents:
+            raise ValueError("selected embodied run is unavailable")
+        if report_path.is_file():
+            return json.loads(report_path.read_text(encoding="utf-8")), "completed_report"
+        with self.embodied_checkpoint_lock:
+            if not checkpoint_path.is_file():
+                raise ValueError("selected embodied run is unavailable")
+            return json.loads(checkpoint_path.read_text(encoding="utf-8")), "current_checkpoint"
+
+    def load_embodied_report(self, run_id: str) -> dict[str, object]:
+        """Load a completed report or the latest usable training checkpoint."""
+        report, _ = self._load_embodied_document(run_id)
+        return report
+
+    def write_embodied_checkpoint(self, job_id: str, checkpoint: dict[str, object]) -> str:
+        """Atomically persist a current embodied-evolution best-result snapshot."""
+        if not job_id.isalnum():
+            raise ValueError("invalid embodied job identifier")
+        directory = self.root / "embodied_runs" / job_id
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / "checkpoint.json"
+        # Windows denies a replacement while an antivirus scanner or artifact
+        # reader briefly holds the previous checkpoint open.  A unique temporary
+        # name prevents writers from trampling one another; the lock and short
+        # retry window make the final atomic replacement reliable.
+        temporary = directory / f"checkpoint.{uuid4().hex}.json.tmp"
+        with self.embodied_checkpoint_lock:
+            temporary.write_text(json.dumps(checkpoint, indent=2, sort_keys=True), encoding="utf-8")
+            try:
+                for attempt in range(6):
+                    try:
+                        temporary.replace(path)
+                        break
+                    except PermissionError:
+                        if attempt == 5:
+                            raise
+                        sleep(.05 * (attempt + 1))
+            finally:
+                if temporary.exists():
+                    temporary.unlink()
+        return self.artifact_url(path)
+
+    def create_embodied_session(self, payload: EmbodiedDemoPayload) -> dict[str, object]:
+        report, model_source = self._load_embodied_document(payload.run_id)
+        task_data = dict(report["task_config"])
+        environment_data = dict(task_data["environment"])
+        overrides = {
+            "initial_plants": payload.initial_food,
+            "max_plants": payload.max_food,
+            "plant_regrowth": payload.food_growth_rate,
+        }
+        environment_data.update({key: value for key, value in overrides.items() if value is not None})
+        environment_data["initial_plants"] = min(int(environment_data.get("initial_plants", 24)), int(environment_data["max_plants"]))
+        network_data = dict(task_data["network"])
+        # Reports written before ray_image_v3 used the compact 7/13-channel
+        # adapter and often have fewer than 33 nodes.
+        network_data.setdefault("observation_schema", task_data.get("observation_schema", "body_v2"))
+        network_data.setdefault("vision_pixels", 9)
+        task = EmbodiedFoodWebTaskConfig(
+            network=EmbodiedNetworkConfig(**network_data), environment=FoodWebConfig(**environment_data),
+            prey_count=payload.prey_count if payload.prey_count is not None else int(task_data["prey_count"]),
+            predator_count=payload.predator_count if payload.predator_count is not None else int(task_data["predator_count"]),
+            max_steps=1, trials=1, seed=payload.seed,
+        )
+        evaluator = FoodWebCoevolutionEvaluator(RuleArchitecture(**report["architecture"]), EdgeArchitecture(**report["edge_architecture"]), task)
+        session = FoodWebDemonstration(evaluator, report["prey_best_genome"], report["predator_best_genome"], seed=payload.seed)
+        session_id = uuid4().hex
+        with self.embodied_lock:
+            self.embodied_sessions[session_id] = session
+        return {
+            "session_id": session_id,
+            "run_id": payload.run_id,
+            "model_source": model_source,
+            **session.snapshot(),
+        }
+
+    def advance_embodied_session(self, session_id: str, ticks: int) -> dict[str, object]:
+        with self.embodied_lock:
+            session = self.embodied_sessions.get(session_id)
+            if session is None:
+                raise KeyError(session_id)
+            return {"session_id": session_id, **session.advance(ticks)}
 
     def update_job(self, job_id: str, event: dict[str, object]) -> None:
         with self.jobs_lock:
@@ -369,6 +495,10 @@ class ApplicationRuntime:
                 "pathology": config.get("pathology", {}),
             }
         raise ValueError("select a trained survival elite")
+
+    def load_trained_rule(self, model_id: str) -> dict[str, object]:
+        """Return an eligible basic-training rule for a task-specific runner."""
+        return self._load_live_model(model_id)
 
     def create_live_session(self, payload: LiveSessionPayload) -> dict[str, object]:
         document = self._load_live_model(payload.model_id)

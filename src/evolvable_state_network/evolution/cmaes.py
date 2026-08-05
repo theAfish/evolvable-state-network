@@ -46,6 +46,11 @@ class CMAES:
     def sigma(self) -> float:
         return float(self._strategy.sigma)
 
+    @property
+    def mean(self) -> tuple[float, ...]:
+        """Current distribution centre, for task-level parent-centred births."""
+        return tuple(float(value) for value in self._strategy.mean)
+
     def ask(self) -> tuple[tuple[float, ...], ...]:
         caller_state = np.random.get_state()
         np.random.set_state(self._rng_state)

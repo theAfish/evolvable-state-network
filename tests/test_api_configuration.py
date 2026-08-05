@@ -9,6 +9,8 @@ from evolvable_state_network.application.configuration import (
 )
 from evolvable_state_network.application.models import (
     AsyncTrainingPayload,
+    EmbodiedDemoPayload,
+    EmbodiedFoodWebTrainingPayload,
     ExperimentPayload,
 )
 
@@ -62,6 +64,39 @@ class ApiConfigurationTests(unittest.TestCase):
             ExperimentPayload(nodes=4, mean_degree=5)
         with self.assertRaises(ValidationError):
             ExperimentPayload(unsupported=True)
+
+    def test_embodied_food_and_demo_ecology_controls_are_validated(self) -> None:
+        training = EmbodiedFoodWebTrainingPayload(algorithm="genetic", max_food=120, food_growth_rate=8.5)
+        demo = EmbodiedDemoPayload(run_id="run", prey_count=4, predator_count=3, initial_food=20, max_food=90, food_growth_rate=7.5)
+        self.assertEqual(training.max_food, 120)
+        self.assertEqual(training.food_growth_rate, 8.5)
+        self.assertEqual(training.algorithm, "genetic")
+        self.assertEqual(training.training_mode, "batch")
+        self.assertEqual(training.batch_validation_trials, 4)
+        self.assertEqual(training.batch_test_trials, 8)
+        self.assertEqual(training.nodes, 64)
+        self.assertEqual(training.population_size, 16)
+        self.assertTrue(training.enforce_survival_pressure)
+        self.assertEqual(EmbodiedFoodWebTrainingPayload(max_food=0).max_food, 0)
+        self.assertEqual(demo.max_food, 90)
+        with self.assertRaises(ValidationError):
+            EmbodiedDemoPayload(run_id="run", initial_food=91, max_food=90)
+        with self.assertRaises(ValidationError):
+            EmbodiedFoodWebTrainingPayload(algorithm="unknown")
+        with self.assertRaises(ValidationError):
+            EmbodiedFoodWebTrainingPayload(training_mode="unknown")
+        with self.assertRaises(ValidationError):
+            EmbodiedFoodWebTrainingPayload(
+                training_mode="batch", initial_energy_scale=10,
+                batch_episode_steps=64,
+            )
+        ablation = EmbodiedFoodWebTrainingPayload(
+            training_mode="batch", initial_energy_scale=10,
+            batch_episode_steps=64, enforce_survival_pressure=False,
+            plant_cluster_count=0,
+        )
+        self.assertFalse(ablation.enforce_survival_pressure)
+        self.assertEqual(ablation.plant_cluster_count, 0)
 
 
 if __name__ == "__main__":

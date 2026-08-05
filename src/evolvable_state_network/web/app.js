@@ -4,21 +4,69 @@
   const ui = {
     run: $('run-select'), batch: $('batch-select'), coordinate: $('coordinate-select'), rate: $('rate-select'), slider: $('frame-slider'), label: $('frame-label'), play: $('play'), prev: $('previous'), next: $('next'), loop: $('loop'), svg: $('network'), status: $('load-status'), file: $('file-input'), frameInfo: $('frame-info'), selection: $('selection-info'), metrics: $('metrics'), events: $('events'), form: $('experiment-form'), runStatus: $('run-status'), overview: $('overview-cards'),
     liveForm: $('live-form'), liveModel: $('live-model-select'), liveModelDetail: $('live-model-detail'), liveRefresh: $('refresh-live-models'), liveStatus: $('live-status'), livePlay: $('live-play'), liveStep: $('live-step'), liveRate: $('live-rate'), liveLabel: $('live-frame-label'), workspace: $('shared-workspace'), replayHost: $('replay-workspace-host'), liveHost: $('live-workspace-host'),
-    asyncForm: $('async-form'), asyncSeed: $('async-seed'), asyncRun: $('async-run'), asyncDiagnostic: $('async-diagnostic'), asyncRefresh: $('async-refresh'), asyncStatus: $('async-status'), asyncProgress: $('async-progress'), asyncProgressLabel: $('async-progress-label'), asyncMetrics: $('async-metrics'), asyncValidation: $('async-validation'), asyncSlots: $('async-slots'), asyncCauses: $('async-causes'), asyncCurriculum: $('async-curriculum'), asyncCurriculumCopy: $('async-curriculum-copy'), asyncCandidates: $('async-candidates'), asyncDetail: $('async-detail'), asyncArtifacts: $('async-artifacts'), asyncLearningState: $('async-learning-state'), asyncLearningCopy: $('async-learning-copy'), asyncRunFacts: $('async-run-facts'), asyncEstimate: $('async-work-estimate'), asyncCandidateBudget: $('async-candidates-budget'), asyncSlotsInput: $('async-slots-input'), asyncReplicasInput: $('async-replicas-input'), asyncStablePopulation: $('async-stable-population'), asyncBatchInput: $('async-batch-input'), asyncStateWidth: $('async-state-width'), asyncInitialStateScale: $('async-initial-state-scale'), asyncTicksInput: $('async-ticks-input')
+    asyncForm: $('async-form'), asyncSeed: $('async-seed'), asyncRun: $('async-run'), asyncDiagnostic: $('async-diagnostic'), asyncRefresh: $('async-refresh'), asyncStatus: $('async-status'), asyncProgress: $('async-progress'), asyncProgressLabel: $('async-progress-label'), asyncMetrics: $('async-metrics'), asyncValidation: $('async-validation'), asyncSlots: $('async-slots'), asyncCauses: $('async-causes'), asyncCurriculum: $('async-curriculum'), asyncCurriculumCopy: $('async-curriculum-copy'), asyncCandidates: $('async-candidates'), asyncDetail: $('async-detail'), asyncArtifacts: $('async-artifacts'), asyncLearningState: $('async-learning-state'), asyncLearningCopy: $('async-learning-copy'), asyncRunFacts: $('async-run-facts'), asyncEstimate: $('async-work-estimate'), asyncCandidateBudget: $('async-candidates-budget'), asyncSlotsInput: $('async-slots-input'), asyncReplicasInput: $('async-replicas-input'), asyncStablePopulation: $('async-stable-population'), asyncBatchInput: $('async-batch-input'), asyncStateWidth: $('async-state-width'), asyncInitialStateScale: $('async-initial-state-scale'), asyncTicksInput: $('async-ticks-input'),
+    embodiedForm: $('embodied-form'), embodiedModel: $('embodied-model'), embodiedContinueRun: $('embodied-continue-run'), embodiedRefresh: $('embodied-refresh'), embodiedAlgorithm: $('embodied-algorithm'), embodiedTrainingMode: $('embodied-training-mode'), embodiedPopulation: $('embodied-population'), embodiedTicks: $('embodied-ticks'), embodiedBatchGenerations: $('embodied-batch-generations'), embodiedBatchSteps: $('embodied-batch-steps'), embodiedBatchTrials: $('embodied-batch-trials'), embodiedBatchValidationTrials: $('embodied-batch-validation-trials'), embodiedBatchTestTrials: $('embodied-batch-test-trials'), embodiedBatchOpponents: $('embodied-batch-opponents'), embodiedPreyCount: $('embodied-prey-count'), embodiedPredatorCount: $('embodied-predator-count'), embodiedMaxFood: $('embodied-max-food'), embodiedFoodGrowthRate: $('embodied-food-growth-rate'), embodiedPlantClusters: $('embodied-plant-clusters'), embodiedPlantClusterRadius: $('embodied-plant-cluster-radius'), embodiedNodes: $('embodied-nodes'), embodiedDegree: $('embodied-degree'), embodiedStateScale: $('embodied-state-scale'), embodiedEnergyScale: $('embodied-energy-scale'), embodiedSurvivalPressure: $('embodied-survival-pressure'), embodiedSeed: $('embodied-seed'), embodiedRun: $('embodied-run'), embodiedStatus: $('embodied-status'), embodiedProgress: $('embodied-progress'), embodiedResult: $('embodied-result'), embodiedDeathsChart: $('embodied-deaths-chart'), embodiedMealsChart: $('embodied-meals-chart'), embodiedChartOneLabel: $('embodied-chart-one-label'), embodiedChartTwoLabel: $('embodied-chart-two-label'),
+    demoForm: $('demo-form'), demoRun: $('demo-run'), demoRefresh: $('demo-refresh'), demoSeed: $('demo-seed'), demoPreyCount: $('demo-prey-count'), demoPredatorCount: $('demo-predator-count'), demoInitialFood: $('demo-initial-food'), demoMaxFood: $('demo-max-food'), demoFoodGrowthRate: $('demo-food-growth-rate'), demoRate: $('demo-rate'), demoStart: $('demo-start'), demoStatus: $('demo-status'), demoPlay: $('demo-play'), demoStep: $('demo-step'), demoLabel: $('demo-label'), demoCanvas: $('ecology-canvas'), demoEvents: $('demo-events')
   };
-  const state = { data: null, runName: '', frame: 0, batch: 0, coordinate: 0, selected: null, playing: false, lastTick: 0, layout: [], job: null, jobTimer: null, live: null, liveModels: [] };
+  const state = { data: null, runName: '', frame: 0, batch: 0, coordinate: 0, selected: null, playing: false, lastTick: 0, layout: [], job: null, jobTimer: null, live: null, liveModels: [], demo: null, demoLastTick: 0, embodiedCheckpointVersion: '' };
   const NS = 'http://www.w3.org/2000/svg';
   const element = (tag, attrs = {}) => { const node = document.createElementNS(NS, tag); Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value)); return node; };
   const number = (value) => Number.isFinite(value) ? Number(value).toFixed(5) : '—';
   const apiError = (data, fallback) => Array.isArray(data?.detail)
     ? data.detail.map((item) => item.msg).join('; ')
     : (data?.detail || data?.error || fallback);
+  const viewTitles = {
+    survival: 'Survival training',
+    embodied: 'Embodied learning',
+    'ecology-demo': 'Ecology demo',
+    overview: 'Reference simulation',
+    replay: 'Trajectory replay',
+    live: 'Live graph',
+    evolution: 'Evolution search',
+  };
+  const preferenceForms = ['async-form', 'embodied-form', 'demo-form', 'experiment-form', 'live-form'];
 
-  function activate(view) {
+  function restorePreferences() {
+    preferenceForms.forEach((formId) => {
+      const form = $(formId);
+      if (!form) return;
+      [...form.elements].forEach((control) => {
+        if (!control.id && !control.name) return;
+        try {
+          const saved = localStorage.getItem(`state-network-lab:${formId}:${control.id || control.name}`);
+          if (saved === null) return;
+          if (control.type === 'checkbox') control.checked = saved === 'true';
+          else control.value = saved;
+        } catch (_) { /* Storage may be disabled; defaults remain usable. */ }
+      });
+      form.addEventListener('change', ({target}) => {
+        if (!target.matches('input, select') || (!target.id && !target.name)) return;
+        try {
+          localStorage.setItem(
+            `state-network-lab:${formId}:${target.id || target.name}`,
+            target.type === 'checkbox' ? String(target.checked) : target.value,
+          );
+        } catch (_) { /* Preferences are an optional enhancement. */ }
+      });
+    });
+  }
+
+  function activate(view, updateUrl = true) {
+    if (!document.querySelector(`.view[data-view="${view}"]`)) view = 'survival';
     if (view === 'live') ui.liveHost.append(ui.workspace); else ui.replayHost.append(ui.workspace);
     document.body.dataset.view = view;
-    document.querySelectorAll('.view').forEach((item) => item.classList.toggle('active', item.dataset.view === view));
-    document.querySelectorAll('.nav').forEach((item) => item.classList.toggle('active', item.dataset.view === view));
+    document.querySelectorAll('.view').forEach((item) => {
+      const active = item.dataset.view === view;
+      item.classList.toggle('active', active);
+      item.setAttribute('aria-hidden', String(!active));
+    });
+    document.querySelectorAll('.nav').forEach((item) => {
+      const active = item.dataset.view === view;
+      item.classList.toggle('active', active);
+      item.setAttribute('aria-current', active ? 'page' : 'false');
+    });
+    document.title = `${viewTitles[view] || 'Workspace'} · State Network Lab`;
+    if (updateUrl && location.hash !== `#${view}`) history.pushState({view}, '', `#${view}`);
   }
   function load(data) {
     if (!data || ![1, 2].includes(data.schema_version) || !data.graph || !data.runs) {
@@ -441,10 +489,124 @@
     ui.asyncEstimate.value = `Evidence checkpoint: ${checkpoint} completed lives across ${replicas} replicas. The stage advances only after ${survivors} healthy survivors; no trajectory is stored by default.`;
   }
 
+  async function refreshEmbodiedModels() {
+    const prior = ui.embodiedModel.value, priorRun = ui.embodiedContinueRun.value; ui.embodiedModel.replaceChildren(new Option('Fresh joint rules', '')); ui.embodiedContinueRun.replaceChildren(new Option('Do not continue a prior run', ''));
+    try {
+      const [response, runsResponse] = await Promise.all([fetch('/api/live/models'), fetch('/api/embodied/runs')]), [data, runs] = await Promise.all([response.json(), runsResponse.json()]);
+      if (!response.ok) throw new Error(apiError(data, 'basic-model list unavailable')); if (!runsResponse.ok) throw new Error(apiError(runs, 'embodied-run list unavailable'));
+      data.models.filter((model) => model.target === 'joint').forEach((model) => ui.embodiedModel.append(new Option(`#${model.global_rank} · stage ${model.stage} · ${model.lifetime} ticks`, model.id)));
+      ui.embodiedModel.value = [...ui.embodiedModel.options].some((option) => option.value === prior) ? prior : '';
+      runs.runs.forEach((run) => { const unit = run.training_mode === 'batch' ? 'gen' : 'tick', status = run.complete ? 'complete' : `checkpoint ${run.checkpoint_tick}/${run.ticks} ${unit}`, algorithm = run.algorithm === 'genetic' ? 'GA' : 'CMA-ES'; ui.embodiedContinueRun.append(new Option(`${run.id.slice(0, 8)} · ${run.training_mode || 'continuous'} · ${algorithm} · ${status} · prey ${number(run.prey_best_fitness)} · predator ${number(run.predator_best_fitness)}`, run.id)); });
+      ui.embodiedContinueRun.value = [...ui.embodiedContinueRun.options].some((option) => option.value === priorRun) ? priorRun : '';
+    } catch (error) { ui.embodiedStatus.textContent = `Could not load basic rules: ${error.message}`; }
+  }
+  function drawEmbodiedTelemetry(canvas, telemetry, series) {
+    const context = canvas.getContext('2d'), width = canvas.width, height = canvas.height, left = 48, right = width - 18, top = 28, bottom = height - 32;
+    context.clearRect(0, 0, width, height); context.fillStyle = '#0d131d'; context.fillRect(0, 0, width, height);
+    if (!telemetry.length) { context.fillStyle = '#9caac2'; context.font = '13px system-ui'; context.fillText('Waiting for continuous-world telemetry…', 22, 42); return; }
+    const values = telemetry.flatMap((point) => series.map((item) => Number(point[item.key])).filter(Number.isFinite));
+    if (!values.length) { context.fillStyle = '#9caac2'; context.font = '13px system-ui'; context.fillText('No meal events yet.', 22, 42); return; }
+    const maximum = Math.max(1, ...values), minimum = Math.min(0, ...values), range = Math.max(.001, maximum - minimum);
+    const x = (index) => left + index / Math.max(1, telemetry.length - 1) * (right - left), y = (value) => bottom - (value - minimum) / range * (bottom - top);
+    context.font = '11px system-ui'; context.strokeStyle = '#29394f'; context.fillStyle = '#9caac2'; context.lineWidth = 1;
+    for (let tick = 0; tick <= 4; tick += 1) { const value = minimum + range * tick / 4, py = y(value); context.beginPath(); context.moveTo(left, py); context.lineTo(right, py); context.stroke(); context.fillText(value.toFixed(2), 3, py + 3); }
+    context.fillText(String(telemetry[0].tick ?? telemetry[0].generation), left, height - 12); context.fillText(String(telemetry[telemetry.length - 1].tick ?? telemetry[telemetry.length - 1].generation), right - 22, height - 12);
+    series.forEach((item, index) => { context.strokeStyle = item.color; context.lineWidth = 2; context.beginPath(); let drawing = false; telemetry.forEach((point, pointIndex) => { const value = Number(point[item.key]); if (!Number.isFinite(value)) { drawing = false; return; } const px = x(pointIndex), py = y(value); if (drawing) context.lineTo(px, py); else { context.moveTo(px, py); drawing = true; } }); context.stroke(); context.fillStyle = item.color; context.fillText(item.label, left + index * 132, 15); });
+  }
+  function renderEmbodiedJob(job) {
+    const latest = job.latest || {}, population = latest.population || {}, mode = latest.training_mode || job.result?.training_mode || 'continuous', progress = mode === 'batch' ? (latest.generation || 0) : (latest.tick || 0), total = mode === 'batch' ? (latest.generations || job.samples_total || 0) : (latest.ticks || job.samples_total || 0), checkpoint = latest.checkpoint_url ? ` · checkpoint saved at ${progress}` : '', algorithm = (latest.algorithm || latest.prey?.algorithm || job.result?.algorithm) === 'genetic' ? 'GA' : 'CMA-ES', running = mode === 'batch' ? `Generation ${progress} / ${total} · ${algorithm} · episode evaluations ${latest.prey?.evaluations ?? 0}/${latest.predator?.evaluations ?? 0}` : `World tick ${progress} / ${total} · ${algorithm} · live prey ${population.prey ?? '—'} · predators ${population.predator ?? '—'} · optimizer updates ${latest.prey?.updates ?? 0}/${latest.predator?.updates ?? 0}`, phase = job.status === 'failed' ? `Failed: ${job.error}` : job.status === 'complete' ? `Complete · ${mode} · ${algorithm}` : `${running}${checkpoint}`;
+    ui.embodiedProgress.textContent = phase;
+    if (mode === 'batch') {
+      const history = latest.history || job.result?.history || [];
+      ui.embodiedChartOneLabel.textContent = 'Training winner versus selection-validation fitness'; ui.embodiedChartTwoLabel.textContent = 'Motor drift during each episode';
+      drawEmbodiedTelemetry(ui.embodiedDeathsChart, history, [{key:'prey_best_fitness', label:'prey train', color:'#63d5c2'}, {key:'prey_validation_fitness', label:'prey held-out', color:'#d1a9ff'}, {key:'predator_best_fitness', label:'predator train', color:'#f39b72'}, {key:'predator_validation_fitness', label:'predator held-out', color:'#ffd166'}]);
+      drawEmbodiedTelemetry(ui.embodiedMealsChart, history, [{key:'prey_abs_turn_drift', label:'prey turn drift', color:'#63d5c2'}, {key:'prey_speed_drift', label:'prey speed drift', color:'#d1a9ff'}, {key:'predator_abs_turn_drift', label:'predator turn drift', color:'#f39b72'}]);
+    } else {
+      const telemetry = latest.telemetry || job.result?.telemetry || [];
+      ui.embodiedChartOneLabel.textContent = 'Cumulative meals by world tick'; ui.embodiedChartTwoLabel.textContent = 'Food-energy replacement (1.0 = metabolic break-even)';
+      drawEmbodiedTelemetry(ui.embodiedDeathsChart, telemetry, [{key:'prey_meals', label:'prey', color:'#63d5c2'}, {key:'predator_meals', label:'predator', color:'#f39b72'}]);
+      drawEmbodiedTelemetry(ui.embodiedMealsChart, telemetry, [{key:'prey_meal_rate_coverage', label:'prey coverage', color:'#63d5c2'}]);
+    }
+    if (job.result) {
+      const result = job.result, source = result.initialization?.kind === 'embodied_run' ? `embodied run ${result.initialization.run_id.slice(0, 8)}` : result.initialization?.kind === 'basic_model' ? 'one basic Survival rule for both species' : 'fresh joint rules';
+      const batch = result.training_mode === 'batch';
+      const behavior = result.prey.behavior || {}, testBehavior = result.prey.test_behavior || behavior, baselines = result.prey.baselines || {}, ecology = result.ecology || {};
+      if (batch) ui.embodiedResult.replaceChildren(statCard('Prey untouched test fitness', number(result.prey.test_fitness ?? result.prey.best_fitness)), statCard('Predator untouched test fitness', number(result.predator.test_fitness ?? result.predator.best_fitness)), statCard('Selection-validation fitness', number(result.prey.selection_validation_fitness ?? result.prey.best_fitness)), statCard('Neutral-rule test fitness', number(baselines.zero_rule_fitness)), statCard('Vision-masked test fitness', number(baselines.vision_masked_fitness)), statCard('Gain over neutral rule', number(baselines.gain_over_zero_rule)), statCard('Vision contribution', number(baselines.vision_ablation_delta)), statCard('Test turn / speed drift', `${number(testBehavior.abs_turn_drift)} / ${number(testBehavior.speed_drift)}`), statCard('Visible-food steering alignment', `${(100 * Number(testBehavior.plant_steering_alignment || 0)).toFixed(1)}%`), statCard('Test deaths / 1000 steps', number(testBehavior.deaths_per_1000_steps)), statCard(`Optimizer updates · prey/predator`, `${result.prey.updates} / ${result.predator.updates}`));
+      else ui.embodiedResult.replaceChildren(statCard('Prey replicated fitness', number(result.prey.best_fitness)), statCard('Meal-rate coverage', `${(100 * Number(behavior.meal_rate_coverage || 0)).toFixed(1)}%`), statCard('Actual / required meals per tick', `${number(behavior.meal_rate)} / ${number(behavior.required_meal_rate)}`), statCard('Lifetime gain over no-food baseline', behavior.excess_lifetime == null ? '—' : `${number(behavior.excess_lifetime)} ticks`), statCard('Regrowth supply / prey demand', `${number(ecology.prey_energy_supply_ratio)}${ecology.population_sustainable_from_regrowth === false ? ' · insufficient' : ''}`), statCard(`Optimizer updates · ${result.prey.evaluation_replicates || 1} lives/candidate`, `${result.prey.updates} / ${result.predator.updates}`));
+      const budgetWarning = !batch && result.ecology?.population_sustainable_from_regrowth === false ? ' Warning: plant regrowth supplies less energy than the prey population consumes even under perfect collection.' : '';
+      const visionWarning = batch && Number(baselines.vision_ablation_delta) <= 0 ? ' Warning: masking ray vision did not reduce final test fitness.' : '';
+      ui.embodiedStatus.textContent = `${batch ? 'Batch episodic' : 'Continuous'} ${algorithm} coevolution complete from ${source}: prey ${result.prey.updates} and predator ${result.predator.updates} optimizer updates.${budgetWarning}${visionWarning}`;
+    }
+  }
+  async function pollEmbodiedJob(jobId) {
+    try {
+      const response = await fetch(`/api/jobs/${jobId}`), job = await response.json();
+      if (!response.ok) throw new Error(apiError(job, 'embodied job unavailable'));
+      renderEmbodiedJob(job);
+      const checkpointUrl = job.latest?.checkpoint_url || '', checkpointProgress = job.latest?.generation ?? job.latest?.tick ?? '';
+      const checkpointVersion = `${checkpointUrl}:${checkpointProgress}`;
+      if (checkpointUrl && checkpointVersion !== state.embodiedCheckpointVersion) {
+        state.embodiedCheckpointVersion = checkpointVersion;
+        refreshDemoRuns();
+        refreshEmbodiedModels();
+      }
+      if (job.status === 'running') window.setTimeout(() => pollEmbodiedJob(jobId), 500); else { ui.embodiedRun.disabled = false; refreshDemoRuns(); refreshEmbodiedModels(); }
+    } catch (error) { ui.embodiedStatus.textContent = `Embodied run status unavailable: ${error.message}`; ui.embodiedRun.disabled = false; }
+  }
+  async function startEmbodied(event) {
+    event.preventDefault();
+    const payload = {training_mode:ui.embodiedTrainingMode.value, algorithm:ui.embodiedAlgorithm.value, population_size:Number(ui.embodiedPopulation.value), ticks:Number(ui.embodiedTicks.value), batch_generations:Number(ui.embodiedBatchGenerations.value), batch_episode_steps:Number(ui.embodiedBatchSteps.value), batch_trials:Number(ui.embodiedBatchTrials.value), batch_validation_trials:Number(ui.embodiedBatchValidationTrials.value), batch_test_trials:Number(ui.embodiedBatchTestTrials.value), batch_opponents:Number(ui.embodiedBatchOpponents.value), prey_count:Number(ui.embodiedPreyCount.value), predator_count:Number(ui.embodiedPredatorCount.value), max_food:Number(ui.embodiedMaxFood.value), food_growth_rate:Number(ui.embodiedFoodGrowthRate.value), plant_cluster_count:Number(ui.embodiedPlantClusters.value), plant_cluster_radius:Number(ui.embodiedPlantClusterRadius.value), nodes:Number(ui.embodiedNodes.value), mean_degree:Number(ui.embodiedDegree.value), initial_state_scale:Number(ui.embodiedStateScale.value), initial_energy_scale:Number(ui.embodiedEnergyScale.value), enforce_survival_pressure:ui.embodiedSurvivalPressure.checked};
+    if (ui.embodiedModel.value) payload.model_id = ui.embodiedModel.value;
+    if (ui.embodiedContinueRun.value) payload.continue_run_id = ui.embodiedContinueRun.value;
+    if (ui.embodiedSeed.value.trim()) payload.seed = Number(ui.embodiedSeed.value);
+    ui.embodiedRun.disabled = true; ui.embodiedStatus.textContent = payload.training_mode === 'batch' ? 'Preparing common episode seeds and frozen opponent pools…' : 'Starting the persistent world and assigning its first random networks…';
+    try {
+      const response = await fetch('/api/embodied/food-web/train', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}), data = await response.json();
+      if (!response.ok) throw new Error(apiError(data, 'could not start embodied evolution'));
+      pollEmbodiedJob(data.job_id);
+    } catch (error) { ui.embodiedStatus.textContent = `Could not start embodied evolution: ${error.message}`; ui.embodiedRun.disabled = false; }
+  }
+
+  async function refreshDemoRuns() {
+    const prior = ui.demoRun.value; ui.demoRun.replaceChildren();
+    try {
+      const response = await fetch('/api/embodied/runs'), data = await response.json();
+      if (!response.ok) throw new Error(apiError(data, 'embodied-run list unavailable'));
+      if (!data.runs.length) { ui.demoRun.append(new Option('No usable embodied model yet', '')); return; }
+      data.runs.forEach((run) => { const progress = run.training_mode === 'batch' ? `${run.checkpoint_tick}/${run.ticks} generations` : `${run.checkpoint_tick}/${run.ticks} ticks`; const source = run.complete ? 'complete' : 'current checkpoint'; ui.demoRun.append(new Option(`${run.id.slice(0, 8)} · ${source} · ${progress} · prey ${number(run.prey_best_fitness)} · predator ${number(run.predator_best_fitness)}`, run.id)); });
+      ui.demoRun.value = [...ui.demoRun.options].some((option) => option.value === prior) ? prior : ui.demoRun.options[0].value;
+    } catch (error) { ui.demoStatus.textContent = `Could not load embodied runs: ${error.message}`; }
+  }
+  function drawDemo(snapshot) {
+    const context = ui.demoCanvas.getContext('2d'), width = ui.demoCanvas.width, height = ui.demoCanvas.height, world = snapshot.state, bounds = world.bounds;
+    context.clearRect(0, 0, width, height); context.fillStyle = '#101a24'; context.fillRect(0, 0, width, height);
+    const x = (value) => value / bounds.width * width, y = (value) => height - value / bounds.height * height;
+    world.plants.forEach((plant) => { context.fillStyle = '#74c365'; context.beginPath(); context.arc(x(plant.x), y(plant.y), Math.max(2, plant.radius * 3), 0, 2 * Math.PI); context.fill(); });
+    world.organisms.forEach((organism) => { const px = x(organism.x), py = y(organism.y), predator = organism.species === 'predator', radius = predator ? 9 : 7; context.fillStyle = predator ? '#f39b72' : '#63d5c2'; context.beginPath(); context.arc(px, py, radius, 0, 2 * Math.PI); context.fill(); context.strokeStyle = '#e9edf7'; context.lineWidth = 1.5; context.beginPath(); context.moveTo(px, py); context.lineTo(px + Math.cos(organism.heading) * radius * 1.6, py - Math.sin(organism.heading) * radius * 1.6); context.stroke(); context.fillStyle = '#cbd6e8'; context.font = '10px ui-monospace'; context.fillText(`${organism.id} e${organism.energy.toFixed(1)}`, px + radius + 3, py - radius - 2); });
+    context.fillStyle = '#9caac2'; context.font = '12px system-ui'; context.fillText('green = plant · cyan = prey · orange = predator · line = heading', 12, 20);
+    ui.demoLabel.textContent = `world tick ${snapshot.tick} · prey ${world.population.prey} · predators ${world.population.predator} · plants ${world.plants.length}`;
+    const events = snapshot.events || {}; ui.demoEvents.textContent = `births: ${(events.births || []).join(', ') || 'none'} · deaths: ${(events.deaths || []).join(', ') || 'none'} · meals: ${(events.meals || []).map((meal) => `${meal.species}:${Number(meal.interval).toFixed(2)}s`).join(', ') || 'none'}`;
+  }
+  async function advanceDemo(ticks = 1) {
+    if (!state.demo || state.demo.pending) return;
+    state.demo.pending = true;
+    try { const response = await fetch(`/api/embodied/sessions/${state.demo.id}/step`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ticks})}), snapshot = await response.json(); if (!response.ok) throw new Error(apiError(snapshot, 'demo update failed')); drawDemo(snapshot); } catch (error) { state.demo.playing = false; ui.demoPlay.textContent = 'Play'; ui.demoStatus.textContent = `Demo update failed: ${error.message}`; } finally { if (state.demo) state.demo.pending = false; }
+  }
+  function animateDemo(now) { if (!state.demo?.playing) return; if (now - state.demoLastTick >= 1000 / Number(ui.demoRate.value)) { state.demoLastTick = now; advanceDemo(); } requestAnimationFrame(animateDemo); }
+  async function startDemo(event) {
+    event.preventDefault(); if (!ui.demoRun.value) return;
+    ui.demoStart.disabled = true; ui.demoStatus.textContent = 'Creating a fresh ecology with the selected best rules…';
+    try { const response = await fetch('/api/embodied/sessions', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({run_id:ui.demoRun.value, seed:Number(ui.demoSeed.value), prey_count:Number(ui.demoPreyCount.value), predator_count:Number(ui.demoPredatorCount.value), initial_food:Number(ui.demoInitialFood.value), max_food:Number(ui.demoMaxFood.value), food_growth_rate:Number(ui.demoFoodGrowthRate.value)})}), snapshot = await response.json(); if (!response.ok) throw new Error(apiError(snapshot, 'could not create demo')); state.demo = {id:snapshot.session_id, pending:false, playing:false}; drawDemo(snapshot); const source = snapshot.model_source === 'current_checkpoint' ? 'the current training checkpoint' : 'the completed run'; ui.demoStatus.textContent = `Loaded ${source} ${snapshot.run_id.slice(0, 8)} with independent ecology settings. Press Play or Step.`; } catch (error) { ui.demoStatus.textContent = `Could not start demo: ${error.message}`; } finally { ui.demoStart.disabled = false; }
+  }
+
   document.querySelectorAll('.nav').forEach((button) => button.addEventListener('click', () => activate(button.dataset.view)));
+  window.addEventListener('popstate', () => activate(location.hash.slice(1) || 'survival', false));
   ui.run.addEventListener('change', () => { state.runName = ui.run.value; state.frame = state.batch = state.coordinate = 0; state.selected = null; refreshSelectors(); drawGraph(); update(); updateOverview(); }); ui.batch.addEventListener('change', () => { state.batch = Number(ui.batch.value); update(); }); ui.coordinate.addEventListener('change', () => { state.coordinate = Number(ui.coordinate.value); update(); }); ui.slider.addEventListener('input', () => { state.frame = Number(ui.slider.value); update(); }); ui.prev.addEventListener('click', () => move(-1)); ui.next.addEventListener('click', () => move(1)); ui.play.addEventListener('click', () => { state.playing = !state.playing; ui.play.textContent = state.playing ? 'Pause' : 'Play'; state.lastTick = performance.now(); if (state.playing) requestAnimationFrame(animate); });
   ui.form.addEventListener('submit', async (event) => { event.preventDefault(); const values = Object.fromEntries(new FormData(ui.form)); ['seed','nodes','steps','batch_size'].forEach((key) => { values[key] = Number(values[key]); }); ['mean_degree','dt'].forEach((key) => { values[key] = Number(values[key]); }); ui.runStatus.textContent = 'Running deterministic local experiment…'; try { const response = await fetch('/api/experiment', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(values)}), document = await response.json(); if (!response.ok) throw new Error(apiError(document, 'experiment request failed')); load(document); ui.runStatus.textContent = 'Reference simulation loaded. Open Replay for details.'; } catch (error) { ui.runStatus.textContent = `Could not start: ${error.message}`; } });
   ui.file.addEventListener('change', async () => { const file = ui.file.files[0]; if (!file) return; try { load(JSON.parse(await file.text())); } catch (error) { ui.status.textContent = error.message; } });
-  ui.asyncForm.addEventListener('submit', startAsync); ui.asyncDiagnostic.addEventListener('click', startAsyncDiagnostic); ui.asyncRefresh.addEventListener('click', loadLatestAsync); [ui.asyncCandidateBudget, ui.asyncReplicasInput, ui.asyncStablePopulation].forEach((input) => input.addEventListener('input', updateAsyncEstimate)); updateAsyncEstimate(); activate('survival'); loadLatestAsync();
+  restorePreferences();
+  ui.asyncForm.addEventListener('submit', startAsync); ui.asyncDiagnostic.addEventListener('click', startAsyncDiagnostic); ui.asyncRefresh.addEventListener('click', loadLatestAsync); [ui.asyncCandidateBudget, ui.asyncReplicasInput, ui.asyncStablePopulation].forEach((input) => input.addEventListener('input', updateAsyncEstimate)); updateAsyncEstimate(); activate(location.hash.slice(1) || 'survival', false); loadLatestAsync();
+  ui.embodiedForm.addEventListener('submit', startEmbodied); ui.embodiedRefresh.addEventListener('click', refreshEmbodiedModels); ui.embodiedModel.addEventListener('change', () => { if (ui.embodiedModel.value) ui.embodiedContinueRun.value = ''; }); ui.embodiedContinueRun.addEventListener('change', () => { if (ui.embodiedContinueRun.value) ui.embodiedModel.value = ''; }); refreshEmbodiedModels();
+  ui.demoForm.addEventListener('submit', startDemo); ui.demoRefresh.addEventListener('click', refreshDemoRuns); ui.demoPlay.addEventListener('click', () => { if (!state.demo) return; state.demo.playing = !state.demo.playing; ui.demoPlay.textContent = state.demo.playing ? 'Pause' : 'Play'; state.demoLastTick = performance.now(); if (state.demo.playing) requestAnimationFrame(animateDemo); }); ui.demoStep.addEventListener('click', () => advanceDemo()); refreshDemoRuns();
   ui.liveRefresh.addEventListener('click', refreshLiveModels); ui.liveModel.addEventListener('change', renderLiveModelDetail); ui.liveForm.addEventListener('submit', launchLive); ui.livePlay.addEventListener('click', () => { if (!state.live) return; state.playing = !state.playing; ui.livePlay.textContent = state.playing ? 'Pause' : 'Play'; state.lastTick = performance.now(); if (state.playing) requestAnimationFrame(animate); }); ui.liveStep.addEventListener('click', () => advanceLive()); refreshLiveModels();
 })();

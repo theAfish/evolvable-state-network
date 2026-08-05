@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import secrets
+from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
 
@@ -14,6 +16,9 @@ from .application.configuration import build_async_training_config
 from .application.models import (
     AsyncDiagnosticPayload,
     AsyncTrainingPayload,
+    EmbodiedFoodWebTrainingPayload,
+    EmbodiedDemoPayload,
+    EmbodiedDemoStepPayload,
     EvolutionPayload,
     ExperimentPayload,
     LiveSessionPayload,
@@ -27,6 +32,17 @@ from .evolution.evaluation import CandidateEvaluator
 from .evolution import EvolutionConfig, EvolutionRunner, random_search_smoke_test
 from .experiment import ExperimentRequest, run_experiment
 from .storage import application_data_dir
+from .embodied import EmbodiedNetworkConfig
+from .environments import FoodWebConfig
+from .tasks import (
+    BatchFoodWebCoevolutionRunner,
+    BatchFoodWebConfig,
+    EmbodiedFoodWebTaskConfig,
+    EmbodiedRuleEvolutionConfig,
+    ContinuousFoodWebConfig,
+    ContinuousFoodWebCoevolutionRunner,
+    FoodWebCoevolutionEvaluator,
+)
 
 
 def _seed(value: int | None) -> int:
@@ -116,6 +132,163 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
 
         background_tasks.add_task(worker)
         return {"job_id": job_id}
+
+    @application.post("/api/embodied/food-web/train")
+    def start_embodied_food_web_training(
+        payload: EmbodiedFoodWebTrainingPayload, background_tasks: BackgroundTasks
+    ) -> dict[str, str]:
+        """Co-evolve prey and predator rules in matched random food-web episodes."""
+        runtime.ensure_root()
+        seed = _seed(payload.seed)
+        initial_genome: tuple[float, ...] | None = None
+        initial_prey_genome: tuple[float, ...] | None = None
+        initial_predator_genome: tuple[float, ...] | None = None
+        initialization: dict[str, str] = {"kind": "fresh"}
+        architecture = RuleArchitecture(state_width=2)
+        edge_architecture = EdgeArchitecture(node_state_width=2)
+        if payload.model_id:
+            document = runtime.load_trained_rule(payload.model_id)
+            if document.get("target") != "joint" or not document.get("edge_architecture"):
+                raise HTTPException(400, "selected basic model must contain both node and edge rules")
+            architecture = RuleArchitecture(**document["architecture"])
+            edge_architecture = EdgeArchitecture(**document["edge_architecture"])
+            initial_genome = tuple(float(value) for value in document["genome"])
+            initialization = {"kind": "basic_model", "model_id": payload.model_id}
+        elif payload.continue_run_id:
+            try:
+                previous = runtime.load_embodied_report(payload.continue_run_id)
+                architecture = RuleArchitecture(**previous["architecture"])
+                edge_architecture = EdgeArchitecture(**previous["edge_architecture"])
+                initial_prey_genome = tuple(float(value) for value in previous["prey_best_genome"])
+                initial_predator_genome = tuple(float(value) for value in previous["predator_best_genome"])
+            except (KeyError, TypeError, ValueError) as error:
+                raise HTTPException(400, "selected embodied run cannot be continued") from error
+            initialization = {"kind": "embodied_run", "run_id": payload.continue_run_id}
+        network = EmbodiedNetworkConfig(
+            nodes=payload.nodes, mean_degree=payload.mean_degree,
+            state_width=architecture.state_width, initial_state_scale=payload.initial_state_scale,
+            observation_schema="ray_image_v3", vision_pixels=9,
+        )
+        task = EmbodiedFoodWebTaskConfig(
+            network=network,
+            environment=FoodWebConfig(
+                prey_initial_energy=9.0 * payload.initial_energy_scale,
+                predator_initial_energy=14.0 * payload.initial_energy_scale,
+                initial_plants=min(24, payload.max_food),
+                max_plants=payload.max_food,
+                plant_regrowth=payload.food_growth_rate,
+                plant_cluster_count=payload.plant_cluster_count,
+                plant_cluster_radius=payload.plant_cluster_radius,
+            ),
+            prey_count=payload.prey_count, predator_count=payload.predator_count,
+            max_steps=payload.batch_episode_steps if payload.training_mode == "batch" else 1,
+            trials=1, seed=seed,
+        )
+        evaluator = FoodWebCoevolutionEvaluator(architecture, edge_architecture, task)
+        evolution = EmbodiedRuleEvolutionConfig(
+            generations=payload.batch_generations if payload.training_mode == "batch" else 1,
+            population_size=payload.population_size, seed=seed,
+            initial_genome=initial_genome, algorithm=payload.algorithm,
+        )
+        if payload.training_mode == "batch":
+            runner = BatchFoodWebCoevolutionRunner(
+                evaluator, evolution,
+                BatchFoodWebConfig(
+                    generations=payload.batch_generations, episode_steps=payload.batch_episode_steps,
+                    trials=payload.batch_trials, validation_trials=payload.batch_validation_trials,
+                    test_trials=payload.batch_test_trials,
+                    opponent_pool_size=payload.batch_opponents,
+                    seed=seed, initial_genome=initial_genome,
+                    initial_prey_genome=initial_prey_genome, initial_predator_genome=initial_predator_genome,
+                ),
+            )
+            job_total = payload.batch_generations
+        else:
+            runner = ContinuousFoodWebCoevolutionRunner(
+                evaluator, evolution,
+                ContinuousFoodWebConfig(
+                    ticks=payload.ticks, seed=seed, initial_genome=initial_genome,
+                    initial_prey_genome=initial_prey_genome, initial_predator_genome=initial_predator_genome,
+                ),
+            )
+            job_total = payload.ticks
+        job_id = runtime.new_job("embodied_food_web", seed, job_total)
+        task_config = {
+            "training_mode": payload.training_mode, "algorithm": payload.algorithm,
+            "observation_schema": "ray_image_v3",
+            "network": asdict(network), "environment": asdict(task.environment),
+            "prey_count": task.prey_count, "predator_count": task.predator_count,
+            "batch_generations": payload.batch_generations, "batch_episode_steps": payload.batch_episode_steps,
+            "batch_trials": payload.batch_trials, "batch_validation_trials": payload.batch_validation_trials,
+            "batch_test_trials": payload.batch_test_trials, "batch_opponents": payload.batch_opponents,
+            "enforce_survival_pressure": payload.enforce_survival_pressure,
+            "diagnostics": {
+                "boundary_nodes": 33,
+                "hidden_nodes": max(0, payload.nodes - 33),
+                "no_food_lifetime_steps": 20.0 * payload.initial_energy_scale,
+                "survival_pressure_active": (
+                    payload.training_mode != "batch"
+                    or payload.batch_episode_steps >= 20.0 * payload.initial_energy_scale
+                ),
+                "selection_validation_reused_for_model_selection": True,
+                "final_test_touched_only_after_selection": payload.training_mode == "batch",
+                "causal_baselines": ["zero_rule", "vision_masked"] if payload.training_mode == "batch" else [],
+            },
+        }
+
+        def checkpoint(event: dict[str, object]) -> None:
+            prey, predator = dict(event["prey"]), dict(event["predator"])
+            if payload.training_mode == "batch":
+                progress_fields = {"generations": payload.batch_generations, "checkpoint_generation": event["generation"]}
+                task_name = "batch_food_web_coevolution_checkpoint"
+            else:
+                progress_fields = {"ticks": payload.ticks, "checkpoint_tick": event["tick"]}
+                task_name = "continuous_food_web_coevolution_checkpoint"
+            snapshot = {
+                "task": task_name, "training_mode": payload.training_mode, "algorithm": payload.algorithm,
+                **progress_fields, "prey": prey, "predator": predator,
+                "prey_best_genome": prey["best_genome"], "predator_best_genome": predator["best_genome"],
+                "architecture": asdict(architecture), "edge_architecture": asdict(edge_architecture),
+                "task_config": task_config, "initialization": initialization,
+            }
+            checkpoint_url = runtime.write_embodied_checkpoint(job_id, snapshot)
+            runtime.update_job(job_id, {"phase": "embodied_food_web", **event, "checkpoint_url": checkpoint_url})
+
+        def worker() -> None:
+            try:
+                report = runner.run(progress=checkpoint)
+                report["architecture"] = asdict(architecture)
+                report["edge_architecture"] = asdict(edge_architecture)
+                report["initialization"] = initialization
+                report["task_config"] = task_config
+                output = runtime.root / "embodied_runs" / job_id
+                output.mkdir(parents=True, exist_ok=True)
+                (output / "report.json").write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+                report["output_url"] = runtime.artifact_url(output / "report.json")
+                runtime.finish_job(job_id, report)
+            except Exception as error:
+                runtime.fail_job(job_id, error)
+
+        background_tasks.add_task(worker)
+        return {"job_id": job_id}
+
+    @application.get("/api/embodied/runs")
+    def embodied_runs() -> dict[str, object]:
+        return {"runs": runtime.available_embodied_runs()}
+
+    @application.post("/api/embodied/sessions")
+    def create_embodied_session(payload: EmbodiedDemoPayload) -> dict[str, object]:
+        try:
+            return runtime.create_embodied_session(payload)
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+
+    @application.post("/api/embodied/sessions/{session_id}/step")
+    def step_embodied_session(session_id: str, payload: EmbodiedDemoStepPayload) -> dict[str, object]:
+        try:
+            return runtime.advance_embodied_session(session_id, payload.ticks)
+        except KeyError as error:
+            raise HTTPException(404, "embodied demonstration session is unavailable") from error
 
     @application.get("/api/async/latest")
     def latest_async() -> dict[str, object]:

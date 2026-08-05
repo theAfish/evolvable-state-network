@@ -11,7 +11,13 @@ main { max-width:1500px; margin:auto; padding:28px 22px 42px; } .view { display:
 .live-model-detail p { color:var(--muted); font-size:12px; }
 .live-model-detail dl { grid-template-columns:auto auto; justify-content:start; font-size:12px; }
 .live-model-detail .recommended { color:var(--accent); font-weight:700; }
-@media (max-width:1050px) { body { min-width:0; } header { grid-template-columns:1fr; position:static; } nav,.load-controls { justify-self:start; } .workspace,.evolution-layout,.evolution-results { grid-template-columns:1fr; } .controls { grid-template-columns:repeat(4,max-content) 1fr; } } @media (max-width:700px) { main { padding:18px 12px; } .summary-grid { grid-template-columns:1fr; } .page-heading { align-items:start; flex-direction:column; } .form-panel,.evolution-form { display:flex; } #fitness-chart { min-width:0; } }
+.embodied-charts { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+.embodied-charts figure { min-width:0; margin:0; padding:14px; border:1px solid var(--line); border-radius:8px; background:#111724; }
+.embodied-charts figcaption { margin-bottom:10px; color:var(--text); font-weight:650; }
+.embodied-charts canvas { display:block; width:100%; height:auto; border:1px solid #273448; border-radius:5px; background:#0d131d; }
+#ecology-canvas { display:block; width:100%; height:auto; border:1px solid #526174; border-radius:8px; background:#101a24; }
+.demo-events { margin-top:12px; color:var(--muted); font:12px ui-monospace,monospace; }
+@media (max-width:1050px) { body { min-width:0; } header { grid-template-columns:1fr; position:static; } nav,.load-controls { justify-self:start; } .workspace,.evolution-layout,.evolution-results,.embodied-charts { grid-template-columns:1fr; } .controls { grid-template-columns:repeat(4,max-content) 1fr; } } @media (max-width:700px) { main { padding:18px 12px; } .summary-grid { grid-template-columns:1fr; } .page-heading { align-items:start; flex-direction:column; } .form-panel,.evolution-form { display:flex; } #fitness-chart { min-width:0; } }
 
 /* Flat asynchronous workspace. The older tools remain available as secondary views. */
 body { min-width:0; background:linear-gradient(90deg,transparent 0 49.92%,#ffffff05 50%,transparent 50.08%),#0a0e14; }

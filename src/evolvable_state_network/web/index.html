@@ -5,20 +5,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>State Network Lab</title>
     <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="shell.css" />
   </head>
   <body>
-    <header>
-      <div><p class="eyebrow">GENERIC STATE NETWORKS</p><h1>State Network Lab</h1></div>
+    <a class="skip-link" href="#main-content">Skip to workspace</a>
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">SN</span>
+        <div><p class="eyebrow">EVOLVABLE SYSTEMS</p><h1>State Network Lab</h1></div>
+      </div>
       <nav aria-label="Primary views">
-        <button class="nav active" data-view="survival">Survival</button>
-        <button class="nav" data-view="overview">Reference</button>
-        <button class="nav" data-view="replay">Replay</button>
-        <button class="nav" data-view="live">Live graph</button>
+        <button class="nav active" data-view="survival"><span>01</span>Survival</button>
+        <button class="nav" data-view="embodied"><span>02</span>Embodied</button>
+        <button class="nav" data-view="ecology-demo"><span>03</span>Ecology</button>
+        <button class="nav" data-view="overview"><span>04</span>Reference</button>
+        <button class="nav" data-view="replay"><span>05</span>Replay</button>
+        <button class="nav" data-view="live"><span>06</span>Live graph</button>
       </nav>
-      <div class="load-controls"><label class="file-button">Load replay data<input id="file-input" type="file" accept="application/json,.json" /></label><span id="load-status">Load a replay JSON when needed.</span></div>
+      <div class="load-controls">
+        <span class="server-state"><i aria-hidden="true"></i>Local workspace</span>
+        <label class="file-button">Import replay<input id="file-input" type="file" accept="application/json,.json" /></label>
+        <span id="load-status" role="status">Load a replay JSON when needed.</span>
+      </div>
     </header>
 
-    <main>
+    <main id="main-content" tabindex="-1">
       <section class="view active survival-view" data-view="survival">
         <div class="survival-hero">
           <div>
@@ -120,6 +131,35 @@
             <aside id="async-detail" class="candidate-detail"><p>Select a candidate to inspect conservative replica evidence.</p></aside>
           </div>
         </section>
+      </section>
+
+      <section class="view" data-view="embodied">
+        <div class="page-heading"><div><p class="eyebrow">EMBODIED RULE LEARNING</p><h2>Co-evolve prey and predator rules through random agent networks.</h2><p>Only node and edge update rules are inherited. Every agent receives a newly sampled graph and initial state. Body sensations accompany a nine-pixel left-to-right ray image with separate food, prey, and predator proximity channels; no angle is supplied.</p></div></div>
+        <form id="embodied-form" class="form-panel panel">
+          <div><p class="eyebrow">PREDATOR–PREY–PLANT</p><h3>Start a species-specific rule-evolution run</h3></div>
+          <label>Basic-rule starting point <select id="embodied-model"><option value="">Fresh joint rules</option></select><small>Eligible completed Survival models supply one shared initial node and edge rule genome.</small></label>
+          <label>Continue an embodied run <select id="embodied-continue-run"><option value="">Do not continue a prior run</option></select><small>Uses that run’s prey and predator best genomes separately, then applies all settings below to a new world.</small></label><button id="embodied-refresh" type="button">Refresh starting points</button>
+          <label>Coevolution <input value="Prey + predator in one persistent world" readonly /><small>Two independent optimizer populations experience the same ecology.</small></label>
+          <label>Evolution algorithm <select id="embodied-algorithm"><option value="cma_es">CMA-ES</option><option value="genetic">Genetic algorithm</option></select><small>GA preserves elites, crosses parents, mutates offspring, and injects broad random immigrants.</small></label>
+          <label>Training mode <select id="embodied-training-mode"><option value="batch" selected>Comparable episode batches</option><option value="continuous">Continuous world</option></select><small>Batch mode freezes opponents and gives every candidate matched random graphs, initial states, and world seeds.</small></label>
+          <label>Optimizer library per species <input id="embodied-population" type="number" value="16" min="2" max="64" /><small>Continuous mode advances only after every candidate has completed two independent lives; batch mode uses the trial count below.</small></label><label>Continuous world ticks <input id="embodied-ticks" type="number" value="600" min="1" max="100000" /></label>
+          <label>Batch generations <input id="embodied-batch-generations" type="number" value="16" min="1" max="200" /><small>One generation performs a complete prey batch followed by a complete predator batch.</small></label><label>Episode steps <input id="embodied-batch-steps" type="number" value="256" min="8" max="5000" /><small>With survival-pressure enforcement, this must reach the no-food starvation lifetime.</small></label>
+          <label>Trials per opponent <input id="embodied-batch-trials" type="number" value="4" min="1" max="32" /><small>All candidates in a generation receive the same training seeds.</small></label><label>Selection-validation trials <input id="embodied-batch-validation-trials" type="number" value="4" min="1" max="32" /><small>A fixed disjoint bank selects the archived rule; it is not reported as final test performance.</small></label><label>Untouched final-test trials <input id="embodied-batch-test-trials" type="number" value="8" min="1" max="64" /><small>Evaluated only once after selection, alongside neutral-rule and vision-masked baselines.</small></label><label>Frozen opponents <input id="embodied-batch-opponents" type="number" value="2" min="1" max="16" /><small>Selection-validated rules form the common opponent pool.</small></label>
+          <label>Prey slots <input id="embodied-prey-count" type="number" value="5" min="1" max="64" /><small>Concurrent prey organisms in the persistent ecology.</small></label><label>Predator slots <input id="embodied-predator-count" type="number" value="2" min="0" max="64" /><small>Set to 0 for prey-only evolution.</small></label>
+          <label>Maximum food <input id="embodied-max-food" type="number" value="80" min="0" max="10000" /><small>Plant capacity of the learning world; the initial food is capped to this value.</small></label><label>Food growth rate <input id="embodied-food-growth-rate" type="number" value="24" min="0" max="10000" step="0.1" /><small>New plants per simulated second.</small></label><label>Plant clusters <input id="embodied-plant-clusters" type="number" value="4" min="0" max="64" /><small>Food regrows around persistent patches, making ray-guided targeting more useful than uniform blind sweeping. Set 0 for a uniform-food ablation.</small></label><label>Plant cluster radius <input id="embodied-plant-cluster-radius" type="number" value="5" min="0" max="100" step="0.5" /></label>
+          <label>Random-network nodes <input id="embodied-nodes" type="number" value="64" min="33" max="400" /><small>Leaves 31 anonymous hidden nodes after 31 sensory and 2 actuator boundary nodes.</small></label><label>Mean degree <input id="embodied-degree" type="number" value="6" min="0" max="40" step="0.5" /></label>
+          <label>Initial node-state spread <input id="embodied-state-scale" type="number" value="0.12" min="0" max="1" step="0.001" /></label><label>Life-energy scale <input id="embodied-energy-scale" type="number" value="1" min="0.1" max="20" step="0.1" /><small>At scale 1, no-food lifetime is 20 ticks. Raising it requires a proportionally longer batch episode.</small></label><label>Require survival pressure <input id="embodied-survival-pressure" type="checkbox" checked /><small>Rejects batch settings where the episode ends before a no-food organism can starve. Uncheck only for a deliberate short-horizon ablation.</small></label><label>Seed <input id="embodied-seed" type="number" placeholder="random" min="0" max="4294967295" /></label>
+          <button id="embodied-run" type="submit">Co-evolve embodied rules</button><output id="embodied-status">Start fresh, choose a basic rule, or continue a completed embodied run.</output>
+        </form>
+        <section class="flat-section"><div class="section-heading"><div><p class="eyebrow">RUN STATUS</p><h3>Generalization, causal baselines, and body-state evidence</h3></div><span id="embodied-progress">No coevolution run has been started.</span></div><div id="embodied-result" class="metric-ribbon"><div><span>Untouched test fitness</span><strong>—</strong></div><div><span>Selection validation</span><strong>—</strong></div><div><span>Neutral baseline</span><strong>—</strong></div><div><span>Vision-masked baseline</span><strong>—</strong></div><div><span>Vision contribution</span><strong>—</strong></div><div><span>Motor drift</span><strong>—</strong></div></div></section>
+        <section class="flat-section"><div class="section-heading"><div><p class="eyebrow">EVOLUTION TELEMETRY</p><h3>Selection evidence over training</h3></div><span>Batch mode separates training from held-out performance; continuous mode reports meals and sensed hunger.</span></div><div class="embodied-charts"><figure><figcaption id="embodied-chart-one-label">Training and held-out fitness</figcaption><canvas id="embodied-deaths-chart" width="700" height="260"></canvas></figure><figure><figcaption id="embodied-chart-two-label">Early-to-late adaptation delta</figcaption><canvas id="embodied-meals-chart" width="700" height="260"></canvas></figure></div></section>
+      </section>
+
+      <section class="view" data-view="ecology-demo">
+        <div class="page-heading"><div><p class="eyebrow">BEST-RULE ECOLOGY DEMO</p><h2>Watch the two best learned rules in a fresh living world.</h2><p>Each demo uses the selected run’s prey and predator best genomes, while every organism still receives its own random network and initial state. A current checkpoint is available for debugging as soon as training saves it; finished runs retain their final best genomes. Deaths continue to replace organisms with the same demonstrated rule.</p></div></div>
+        <form id="demo-form" class="form-panel panel"><label>Embodied model <select id="demo-run"></select><small>Supplies learned rules only. Current checkpoints refresh automatically during training; ecology settings below are independent.</small></label><button id="demo-refresh" type="button">Refresh models</button><label>World seed <input id="demo-seed" type="number" value="17" min="0" max="4294967295" /></label><label>Prey slots <input id="demo-prey-count" type="number" value="5" min="1" max="64" /></label><label>Predator slots <input id="demo-predator-count" type="number" value="2" min="0" max="64" /></label><label>Initial food <input id="demo-initial-food" type="number" value="24" min="0" max="10000" /></label><label>Maximum food <input id="demo-max-food" type="number" value="80" min="0" max="10000" /></label><label>Food growth rate <input id="demo-food-growth-rate" type="number" value="24" min="0" max="10000" step="0.1" /><small>New plants per simulated second.</small></label><label>Simulation speed <select id="demo-rate"><option value="1">1 tick/s</option><option value="4">4 ticks/s</option><option value="12" selected>12 ticks/s</option><option value="30">30 ticks/s</option><option value="120">120 ticks/s</option></select></label><button id="demo-start" type="submit">Start demo</button><output id="demo-status">Start a run and wait for its first checkpoint, or choose a completed run.</output></form>
+        <section class="controls panel"><button id="demo-play" type="button">Play</button><button id="demo-step" type="button">Step</button><span id="demo-label">Choose a run to begin.</span></section>
+        <section class="flat-section"><canvas id="ecology-canvas" width="1100" height="600" aria-label="Live predator prey plant ecology"></canvas><div id="demo-events" class="demo-events">No events yet.</div></section>
       </section>
 
       <section class="view" data-view="overview">

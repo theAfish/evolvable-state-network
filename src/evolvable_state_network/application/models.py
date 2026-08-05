@@ -78,6 +78,72 @@ class AsyncTrainingPayload(StrictModel):
         return self
 
 
+class EmbodiedFoodWebTrainingPayload(StrictModel):
+    """One species-specific evolutionary run in the predator–prey–plant task."""
+
+    model_id: str | None = None
+    continue_run_id: str | None = None
+    seed: int | None = Field(None, ge=0, lt=2**32)
+    training_mode: Literal["batch", "continuous"] = "batch"
+    algorithm: Literal["cma_es", "genetic"] = "cma_es"
+    population_size: int = Field(16, ge=2, le=64)
+    prey_count: int = Field(5, ge=1, le=64)
+    predator_count: int = Field(2, ge=0, le=64)
+    nodes: int = Field(64, ge=33, le=400)
+    mean_degree: float = Field(6.0, ge=0, le=40)
+    initial_state_scale: float = Field(.12, ge=0, le=1)
+    initial_energy_scale: float = Field(1.0, gt=0, le=20)
+    max_food: int = Field(80, ge=0, le=10_000)
+    food_growth_rate: float = Field(24.0, ge=0, le=10_000)
+    plant_cluster_count: int = Field(4, ge=0, le=64)
+    plant_cluster_radius: float = Field(5.0, ge=0, le=100)
+    ticks: int = Field(600, ge=1, le=100_000)
+    batch_generations: int = Field(16, ge=1, le=200)
+    batch_episode_steps: int = Field(256, ge=8, le=5000)
+    batch_trials: int = Field(4, ge=1, le=32)
+    batch_validation_trials: int = Field(4, ge=1, le=32)
+    batch_test_trials: int = Field(8, ge=1, le=64)
+    batch_opponents: int = Field(2, ge=1, le=16)
+    enforce_survival_pressure: bool = True
+
+    @model_validator(mode="after")
+    def validate_degree(self) -> "EmbodiedFoodWebTrainingPayload":
+        if self.mean_degree > self.nodes - 1:
+            raise ValueError("mean_degree cannot exceed nodes - 1")
+        if self.model_id and self.continue_run_id:
+            raise ValueError("choose either a basic model or a prior embodied run, not both")
+        natural_lifetime_steps = self.initial_energy_scale * 9.0 / (3.6 * .125)
+        if (
+            self.training_mode == "batch" and self.enforce_survival_pressure
+            and self.batch_episode_steps < natural_lifetime_steps
+        ):
+            raise ValueError(
+                "batch_episode_steps must reach the no-food starvation lifetime; "
+                "lower initial_energy_scale, lengthen the episode, or explicitly disable survival-pressure enforcement"
+            )
+        return self
+
+
+class EmbodiedDemoPayload(StrictModel):
+    run_id: str
+    seed: int = Field(7, ge=0, lt=2**32)
+    prey_count: int | None = Field(None, ge=1, le=64)
+    predator_count: int | None = Field(None, ge=0, le=64)
+    initial_food: int | None = Field(None, ge=0, le=10_000)
+    max_food: int | None = Field(None, ge=0, le=10_000)
+    food_growth_rate: float | None = Field(None, ge=0, le=10_000)
+
+    @model_validator(mode="after")
+    def validate_food_amount(self) -> "EmbodiedDemoPayload":
+        if self.initial_food is not None and self.max_food is not None and self.initial_food > self.max_food:
+            raise ValueError("initial_food cannot exceed max_food")
+        return self
+
+
+class EmbodiedDemoStepPayload(StrictModel):
+    ticks: int = Field(1, ge=1, le=128)
+
+
 class LiveSessionPayload(StrictModel):
     model_id: str
     seed: int = Field(7, ge=0, lt=2**32)

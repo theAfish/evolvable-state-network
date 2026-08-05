@@ -35,6 +35,7 @@ from .generational import (
     random_search_smoke_test,
 )
 from .genome import EvolutionTarget, GenomeCodec
+from .genetic import GeneticAlgorithm, GeneticAlgorithmConfig
 
 __all__ = [
     "AsyncEvolutionConfig",
@@ -49,6 +50,8 @@ __all__ = [
     "FailureReport",
     "FixedEdgeRule",
     "GenomeCodec",
+    "GeneticAlgorithm",
+    "GeneticAlgorithmConfig",
     "HealthMonitor",
     "MLPEdgeRule",
     "MLPUpdateRule",
