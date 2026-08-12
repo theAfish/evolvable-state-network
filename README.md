@@ -4,8 +4,9 @@
 
 `evolvable_state_network.environments` now contains an optimizer-free,
 continuous predator–prey–plant world imported from the former `evo-eco`
-prototype.  It owns world state, observations, rewards, and controller
-lifecycle only; it does **not** import ESN evolution, CMA-ES, NEAT, or any
+prototype.  It owns world state, observations, ecological events, and controller
+lifecycle only. Its generic transition reward is always zero; it does **not**
+import ESN evolution, CMA-ES, NEAT, or any
 selection/mutation code.  This package can therefore be extracted as a
 standalone environment library.
 
@@ -24,7 +25,8 @@ nodes and maps one `[-1, 1]` output per action node into the environment's
 action space. `EmbodiedNetwork` then creates a fresh random graph and fresh
 random node states for every agent/episode; only the node and edge update-rule
 genome is inherited. The food-web implementation in
-`tasks.embodied_food_web` evaluates prey and predator in separate runs, and
+`tasks.embodied_food_web` evaluates prey and predator update rules on matched
+random worlds, and
 can start CMA-ES from an exported joint rule genome via
 `EmbodiedRuleEvolutionConfig(initial_genome=...)`.
 
@@ -38,20 +40,34 @@ separate plant, prey, and predator proximity channels per pixel; pixel order
 encodes left-to-right direction and ray angles are not network inputs. Random
 graphs and initial states remain fresh, but batch
 candidates are compared on matched scenario realizations independent of their
-genomes. One disjoint fixed seed bank selects the archive; a second seed bank
-is not touched until that winner is frozen and supplies the final test score.
+genomes. Evolution maximizes only the first life's duration, restricted at the
+episode horizon; meals, hunger, energy, movement, and ecological events are
+diagnostics and never selection terms. One disjoint fixed seed bank selects the
+archive; a second seed bank is not touched until that winner is frozen and
+supplies the final lifetime estimate.
 The final pass also evaluates a neutral zero rule and a causal intervention
-that masks every ray pixel. Reports include the resulting gain over neutral,
-vision-ablation delta, steering alignment, motor drift and saturation, deaths,
-energy state, meal rate, and lifetime-average hunger.
+that masks every ray pixel. Reports include lifetime gain over neutral,
+horizon survival, correctly aggregated completed lifetimes, deaths, and
+diagnostic body/behavior measurements.
 
 Default food regrowth occurs around persistent patches, for which a simple
 ray-guided policy materially outperforms blind straight-line sweeping. Setting
 `plant_cluster_count=0` restores uniform food for deliberate ablations. Batch
-requests enforce that the episode reaches the configured no-food starvation
-lifetime by default; this guard can be explicitly disabled for short-horizon
-experiments. The default embodied network has 64 nodes, leaving 31 anonymous
+requests enforce a horizon of at least three configured no-food lifetimes and
+enough theoretical plant regrowth to sustain all prey by default; these guards
+can be explicitly disabled for infeasible or short-horizon ablations. The
+default embodied network has 64 nodes, leaving 31 anonymous
 hidden nodes after the 31 sensor and two actuator boundary nodes.
+
+Embodied training has two independent acceleration controls. The `torch`
+execution backend keeps agent node/edge state in persistent tensors and can
+run on `cpu`, `cuda`, or `auto`; the reference `python` backend remains
+available for comparisons. Batch evolution can also evaluate candidate
+genomes in reusable spawned processes with `workers=0` selecting up to eight
+CPU workers automatically. CPU workers preserve candidate order, common seed
+banks, and frozen opponents. CUDA intentionally uses one process to avoid
+duplicating GPU contexts; for the default small 64-node agents, vectorized
+Torch CPU plus several candidate workers is normally faster than CUDA.
 
 In the web UI, a completed embodied run can also be selected as a continuation
 starting point. Its prey and predator best genomes seed their respective new

@@ -194,6 +194,7 @@ class TorchMLPSimulator:
             else:
                 features = torch.cat((edge, source_state, target_state, current_message, torch.ones((*edge.shape[:2], 1), dtype=_DTYPE, device=self.device)), dim=-1)
                 next_edge = edge + config.edge_step_scale * (config.dt / .05) * self._mlp(features, self._edge_parameters)
+            next_edge = torch.where(torch.isfinite(next_edge), next_edge, edge)
             next_edge = torch.where(valid_edge[None, :, None], next_edge, edge)
             messages = self._edge_message(next_edge, source_state)
         messages = torch.where(valid_edge[None, :, None], messages, torch.zeros_like(messages))
@@ -210,6 +211,7 @@ class TorchMLPSimulator:
             aggregate = aggregate / counts.clamp_min(1.0)[None, :, None]
         features = torch.cat((node, aggregate, torch.ones((*node.shape[:2], 1), dtype=_DTYPE, device=self.device)), dim=-1)
         proposed = node + config.max_delta * self.node_rule.architecture.increment_fraction * (config.dt / .05) * self._mlp(features, self._node_parameters)
+        proposed = torch.where(torch.isfinite(proposed), proposed, torch.zeros_like(proposed))
         delta = proposed - node
         next_node = torch.clamp(node + torch.clamp(delta, -config.max_delta, config.max_delta), -config.max_abs_state, config.max_abs_state)
         if lesions:
@@ -227,6 +229,13 @@ class TorchMLPSimulator:
         diagnostics.components_per_step.append(components)
         diagnostics.clipped_components_per_step.append(0)
         return next_node, next_edge
+
+    def step_state(
+        self, node: torch.Tensor, edge: torch.Tensor, external: torch.Tensor,
+        step: int, config: SimulationConfig, diagnostics: TransitionDiagnostics,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Advance resident tensor state once without recording a trajectory."""
+        return self._step(node, edge, external, step, config, (), diagnostics)
 
     def _edge_message(self, edge: torch.Tensor, source: torch.Tensor) -> torch.Tensor:
         if self.edge_rule is None:

@@ -11,7 +11,7 @@ import json
 from copy import deepcopy
 from pathlib import Path
 from random import Random
-from threading import Lock
+from threading import Event, Lock
 from time import sleep
 from uuid import uuid4
 
@@ -42,6 +42,7 @@ class ApplicationRuntime:
         self.root = root
         self.jobs: dict[str, dict[str, object]] = {}
         self.jobs_lock = Lock()
+        self.job_termination_events: dict[str, Event] = {}
         self.live_sessions: dict[str, dict[str, object]] = {}
         self.live_lock = Lock()
         self.embodied_sessions: dict[str, FoodWebDemonstration] = {}
@@ -78,7 +79,7 @@ class ApplicationRuntime:
                 mode = report.get("training_mode", report.get("task_config", {}).get("training_mode", "continuous"))
                 total = report.get("generations", 0) if mode == "batch" else report.get("ticks", 0)
                 checkpoint = report.get("checkpoint_generation", total) if mode == "batch" else report.get("checkpoint_tick", total)
-                runs.append({"id": directory.name, "training_mode": mode, "algorithm": report.get("algorithm", report.get("task_config", {}).get("algorithm", "cma_es")), "ticks": total, "checkpoint_tick": checkpoint, "complete": completed, "source": "completed_report" if completed else "current_checkpoint", "prey_best_fitness": report["prey"]["best_fitness"], "predator_best_fitness": report["predator"]["best_fitness"], "prey_count": report["task_config"]["prey_count"], "predator_count": report["task_config"]["predator_count"]})
+                runs.append({"id": directory.name, "training_mode": mode, "algorithm": report.get("algorithm", report.get("task_config", {}).get("algorithm", "cma_es")), "objective": report.get("objective", report.get("task_config", {}).get("objective", "legacy_fitness")), "ticks": total, "checkpoint_tick": checkpoint, "complete": completed, "source": "completed_report" if completed else "current_checkpoint", "prey_best_lifetime": report["prey"].get("best_lifetime", report["prey"].get("best_fitness", 0.0)), "predator_best_lifetime": report["predator"].get("best_lifetime", report["predator"].get("best_fitness", 0.0)), "prey_count": report["task_config"]["prey_count"], "predator_count": report["task_config"]["predator_count"]})
             except (OSError, KeyError, TypeError, ValueError):
                 continue
         return sorted(runs, key=lambda item: item["id"], reverse=True)
@@ -143,6 +144,10 @@ class ApplicationRuntime:
         }
         environment_data.update({key: value for key, value in overrides.items() if value is not None})
         environment_data["initial_plants"] = min(int(environment_data.get("initial_plants", 24)), int(environment_data["max_plants"]))
+        # Batch reports intentionally disable replacement so every score is
+        # one fresh first life. Demonstrations are persistent observational
+        # worlds and therefore always replace deaths with the learned rule.
+        environment_data["respawn_on_death"] = True
         network_data = dict(task_data["network"])
         # Reports written before ray_image_v3 used the compact 7/13-channel
         # adapter and often have fewer than 33 nodes.
@@ -191,6 +196,24 @@ class ApplicationRuntime:
             if job is None:
                 raise KeyError(job_id)
             return dict(job)
+
+    def request_job_termination(self, job_id: str, *, kind: str) -> bool:
+        """Request cooperative termination for a currently running job."""
+        with self.jobs_lock:
+            job = self.jobs.get(job_id)
+            if job is None or job["kind"] != kind:
+                raise KeyError(job_id)
+            if job["status"] != "running":
+                return False
+            job["termination_requested"] = True
+            job["phase"] = "termination_requested"
+            self.job_termination_events[job_id].set()
+            return True
+
+    def job_termination_requested(self, job_id: str) -> bool:
+        with self.jobs_lock:
+            event = self.job_termination_events.get(job_id)
+            return event.is_set() if event is not None else False
 
     def async_run_summary(self, run_directory: Path) -> dict[str, object]:
         report_path = run_directory / "diagnostic_report.json"
@@ -655,7 +678,9 @@ class ApplicationRuntime:
                 "generations": [],
                 "latest": {},
                 "result": None,
+                "termination_requested": False,
             }
+            self.job_termination_events[job_id] = Event()
         return job_id
 
     def finish_job(self, job_id: str, result: dict[str, object]) -> None:
@@ -668,4 +693,10 @@ class ApplicationRuntime:
         with self.jobs_lock:
             self.jobs[job_id].update(
                 {"status": "failed", "phase": "failed", "error": str(error)}
+            )
+
+    def terminate_job(self, job_id: str) -> None:
+        with self.jobs_lock:
+            self.jobs[job_id].update(
+                {"status": "terminated", "phase": "terminated", "termination_requested": True}
             )

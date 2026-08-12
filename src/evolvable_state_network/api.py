@@ -41,6 +41,7 @@ from .tasks import (
     EmbodiedRuleEvolutionConfig,
     ContinuousFoodWebConfig,
     ContinuousFoodWebCoevolutionRunner,
+    EvolutionTerminated,
     FoodWebCoevolutionEvaluator,
 )
 
@@ -167,7 +168,10 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         network = EmbodiedNetworkConfig(
             nodes=payload.nodes, mean_degree=payload.mean_degree,
             state_width=architecture.state_width, initial_state_scale=payload.initial_state_scale,
+            dt=payload.network_dt, max_delta=payload.max_delta,
+            edge_step_scale=payload.edge_step_scale,
             observation_schema="ray_image_v3", vision_pixels=9,
+            execution_backend=payload.execution_backend, device=payload.device,
         )
         task = EmbodiedFoodWebTaskConfig(
             network=network,
@@ -177,8 +181,11 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 initial_plants=min(24, payload.max_food),
                 max_plants=payload.max_food,
                 plant_regrowth=payload.food_growth_rate,
+                max_speed=payload.max_speed,
+                max_turn=payload.max_turn,
                 plant_cluster_count=payload.plant_cluster_count,
                 plant_cluster_radius=payload.plant_cluster_radius,
+                respawn_on_death=payload.training_mode != "batch",
             ),
             prey_count=payload.prey_count, predator_count=payload.predator_count,
             max_steps=payload.batch_episode_steps if payload.training_mode == "batch" else 1,
@@ -200,6 +207,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                     opponent_pool_size=payload.batch_opponents,
                     seed=seed, initial_genome=initial_genome,
                     initial_prey_genome=initial_prey_genome, initial_predator_genome=initial_predator_genome,
+                    workers=payload.workers,
                 ),
             )
             job_total = payload.batch_generations
@@ -215,6 +223,12 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         job_id = runtime.new_job("embodied_food_web", seed, job_total)
         task_config = {
             "training_mode": payload.training_mode, "algorithm": payload.algorithm,
+            "objective": "restricted_mean_lifetime" if payload.training_mode == "batch" else "completed_lifetime",
+            "objective_units": "ticks", "reward_shaping": False,
+            "seed": seed, "population_size": payload.population_size,
+            "initial_sigma": evolution.initial_sigma,
+            "execution_backend": payload.execution_backend, "device": payload.device,
+            "workers": payload.workers,
             "observation_schema": "ray_image_v3",
             "network": asdict(network), "environment": asdict(task.environment),
             "prey_count": task.prey_count, "predator_count": task.predator_count,
@@ -226,11 +240,20 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 "boundary_nodes": 33,
                 "hidden_nodes": max(0, payload.nodes - 33),
                 "no_food_lifetime_steps": 20.0 * payload.initial_energy_scale,
+                "survival_horizon_multiple": (
+                    payload.batch_episode_steps / max(20.0 * payload.initial_energy_scale, 1e-12)
+                    if payload.training_mode == "batch" else None
+                ),
                 "survival_pressure_active": (
                     payload.training_mode != "batch"
-                    or payload.batch_episode_steps >= 20.0 * payload.initial_energy_scale
+                    or payload.batch_episode_steps >= 60.0 * payload.initial_energy_scale
                 ),
-                "selection_validation_reused_for_model_selection": True,
+                "population_sustainable_from_regrowth": (
+                    (payload.food_growth_rate * task.environment.plant_energy if payload.max_food > 0 else 0.0)
+                    >= payload.prey_count * task.environment.prey_metabolism
+                ),
+                "selection_objective": "first_life_restricted_mean_lifetime",
+                "common_validation_bank_for_model_selection": True,
                 "final_test_touched_only_after_selection": payload.training_mode == "batch",
                 "causal_baselines": ["zero_rule", "vision_masked"] if payload.training_mode == "batch" else [],
             },
@@ -256,7 +279,10 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
 
         def worker() -> None:
             try:
-                report = runner.run(progress=checkpoint)
+                report = runner.run(
+                    progress=checkpoint,
+                    should_stop=lambda: runtime.job_termination_requested(job_id),
+                )
                 report["architecture"] = asdict(architecture)
                 report["edge_architecture"] = asdict(edge_architecture)
                 report["initialization"] = initialization
@@ -266,11 +292,23 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 (output / "report.json").write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
                 report["output_url"] = runtime.artifact_url(output / "report.json")
                 runtime.finish_job(job_id, report)
+            except EvolutionTerminated:
+                runtime.terminate_job(job_id)
             except Exception as error:
                 runtime.fail_job(job_id, error)
 
         background_tasks.add_task(worker)
         return {"job_id": job_id}
+
+    @application.post("/api/embodied/jobs/{job_id}/terminate")
+    def terminate_embodied_food_web_training(job_id: str) -> dict[str, object]:
+        try:
+            requested = runtime.request_job_termination(job_id, kind="embodied_food_web")
+        except KeyError as error:
+            raise HTTPException(404, "unknown embodied evolution job") from error
+        if not requested:
+            raise HTTPException(409, "embodied evolution job is no longer running")
+        return {"job_id": job_id, "termination_requested": True}
 
     @application.get("/api/embodied/runs")
     def embodied_runs() -> dict[str, object]:

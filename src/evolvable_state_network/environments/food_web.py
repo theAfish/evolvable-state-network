@@ -19,6 +19,13 @@ from .core import Action, AgentId, ControllerBlueprint, Environment, Observation
 from .sensing import RayHit, SenseTarget, Vec2, Viewport, scan_ray_fan
 
 
+# Population placement and environment layout receive the same episode seed.
+# Keep their pseudo-random streams independent so an organism's index cannot
+# reveal (or exactly reproduce) a plant-cluster position.
+_PREY_POSITION_SEED_SALT = 0x6A09E667
+_PREDATOR_POSITION_SEED_SALT = 0xBB67AE85
+
+
 class Species(StrEnum):
     PLANT = "plant"
     PREY = "prey"
@@ -37,7 +44,6 @@ class Organism:
     age: int = 0
     alive: bool = True
     traits: dict[str, float] = field(default_factory=dict)
-    lifetime_reward: float = 0.0
     last_energy_change: float = 0.0
     ate_last_step: bool = False
     controller: ControllerBlueprint | None = None
@@ -76,6 +82,7 @@ class FoodWebConfig:
     spawn_candidate_count: int = 48
     plant_cluster_count: int = 4
     plant_cluster_radius: float = 5.0
+    respawn_on_death: bool = True
 
     def __post_init__(self) -> None:
         if self.width <= 0 or self.height <= 0 or self.timestep_seconds <= 0:
@@ -125,7 +132,6 @@ class FoodWebEnvironment(Environment):
             self._grow_plant()
         for organism in self._organisms.values():
             organism.position, organism.energy, organism.alive, organism.age = organism.spawn_position, organism.spawn_energy, True, 0
-            organism.lifetime_reward = 0.0
             organism.last_energy_change, organism.ate_last_step = 0.0, False
         self._last_meal_time = {organism.id: 0.0 for organism in self._organisms.values()}
         return self._observations()
@@ -139,7 +145,9 @@ class FoodWebEnvironment(Environment):
         starting_energy = {organism.id: organism.energy for organism in living}
         for organism in living:
             organism.ate_last_step = False
-        rewards = {organism.id: -0.01 for organism in living}
+        # The food web exposes ecological events and body sensations, never a
+        # hand-shaped learning reward. Evolution measures lifespan directly.
+        rewards = {organism.id: 0.0 for organism in living}
         meals: list[dict[str, object]] = []
         if living:
             turns = np.asarray([float(actions.get(organism.id, {}).get("turn", 0.0)) for organism in living])
@@ -164,7 +172,7 @@ class FoodWebEnvironment(Environment):
                     plant = plants[int(choices[0])]
                     available[int(choices[0])] = False
                     del self._plants[plant.id]
-                    organism.energy, rewards[organism.id] = organism.energy + self.config.plant_energy, rewards[organism.id] + 1.0
+                    organism.energy += self.config.plant_energy
                     self._record_meal(organism, event_time, meals)
 
         deaths: list[AgentId] = []
@@ -179,33 +187,28 @@ class FoodWebEnvironment(Environment):
                     prey_alive[int(choices[0])] = False
                     victim.alive = False
                     deaths.append(victim.id)
-                    predator.energy, rewards[predator.id], rewards[victim.id] = predator.energy + self.config.prey_energy, rewards[predator.id] + 2.0, rewards[victim.id] - 2.0
+                    predator.energy += self.config.prey_energy
                     self._record_meal(predator, event_time, meals)
 
         births: list[AgentId] = []
         for organism in living:
             if organism.alive and organism.energy <= 0:
                 organism.alive = False
-                rewards[organism.id] -= 1.0
                 deaths.append(organism.id)
         for organism in living:
             organism.last_energy_change = (
                 organism.energy - starting_energy[organism.id]
             ) / max(organism.spawn_energy, 1e-12)
-        for organism in living:
-            organism.lifetime_reward += rewards[organism.id]
         death_records = tuple(
             {"agent_id": str(agent_id), "species": str(self._organisms[agent_id].species),
-             "age": self._organisms[agent_id].age, "lifetime_reward": self._organisms[agent_id].lifetime_reward,
-             # Longevity matters, but must not numerically swamp eating and
-             # ecological outcomes in continuous selection.
-             "fitness": 0.1 * self._organisms[agent_id].age + self._organisms[agent_id].lifetime_reward}
+             "age": self._organisms[agent_id].age}
             for agent_id in dict.fromkeys(deaths)
         )
-        for organism in self._organisms.values():
-            if not organism.alive:
-                self._respawn(organism)
-                births.append(organism.id)
+        if self.config.respawn_on_death:
+            for organism in self._organisms.values():
+                if not organism.alive:
+                    self._respawn(organism)
+                    births.append(organism.id)
         self._plant_regrowth_credit += self.config.plant_regrowth * dt
         for _ in range(int(self._plant_regrowth_credit)):
             self._grow_plant()
@@ -221,7 +224,7 @@ class FoodWebEnvironment(Environment):
         return {"time": round(self._elapsed_seconds, 3), "bounds": {"width": self.config.width, "height": self.config.height}, "plant_capacity": self.config.max_plants,
                 "plant_clusters": [{"x": round(center.x, 2), "y": round(center.y, 2), "radius": self.config.plant_cluster_radius} for center in self._plant_cluster_centers],
                 "plants": [{"id": plant.id, "x": round(plant.position.x, 2), "y": round(plant.position.y, 2), "radius": plant.radius} for plant in self._plants.values()],
-                "organisms": [{"id": str(organism.id), "species": str(organism.species), "x": round(organism.position.x, 2), "y": round(organism.position.y, 2), "heading": round(organism.heading, 3), "energy": round(organism.energy, 2), "age": organism.age, "generation_reward": round(organism.lifetime_reward, 2)} for organism in self._organisms.values() if organism.alive],
+                "organisms": [{"id": str(organism.id), "species": str(organism.species), "x": round(organism.position.x, 2), "y": round(organism.position.y, 2), "heading": round(organism.heading, 3), "energy": round(organism.energy, 2), "age": organism.age} for organism in self._organisms.values() if organism.alive],
                 "population": {species: sum(organism.alive and str(organism.species) == species for organism in self._organisms.values()) for species in (str(Species.PREY), str(Species.PREDATOR))}}
 
     def _grow_plant(self) -> None:
@@ -241,7 +244,6 @@ class FoodWebEnvironment(Environment):
     def _respawn(self, organism: Organism) -> None:
         organism.position = self._spawn_position(organism)
         organism.heading, organism.energy, organism.age, organism.alive = self._random.uniform(-pi, pi), organism.spawn_energy, 0, True
-        organism.lifetime_reward = 0.0
         organism.last_energy_change, organism.ate_last_step = 0.0, False
         self._last_meal_time[organism.id] = self._elapsed_seconds + self.config.timestep_seconds
 
@@ -310,14 +312,14 @@ def make_reference_population(*, prey_count: int = 5, predator_count: int = 2, w
     if prey_count < 0 or predator_count < 0 or prey_initial_energy <= 0 or predator_initial_energy <= 0:
         raise ValueError("population counts and initial energy must be positive")
     blueprint = controller or RandomControllerBlueprint()
-    def positions(count: int, offset: float) -> list[Vec2]:
+    def positions(count: int, offset: float, seed_salt: int) -> list[Vec2]:
         if seed is not None:
-            random = Random(seed + int(offset * 1000))
+            random = Random((int(seed) + seed_salt) % (2**32))
             return [Vec2(random.uniform(0, width), random.uniform(0, height)) for _ in range(count)]
         columns = max(1, int(np.ceil(np.sqrt(max(1, count) * width / height))))
         rows = max(1, int(np.ceil(count / columns)))
         return [Vec2(((index % columns + .5) / columns * width + offset) % width, (index // columns + .5) / rows * height) for index in range(count)]
     traits = {"speed_multiplier": 1.0, "metabolism_multiplier": 1.0}
-    prey = [Organism(AgentId(f"prey-{index}"), Species.PREY, position, prey_initial_energy, heading=index * .7, traits=dict(traits), controller=blueprint) for index, position in enumerate(positions(prey_count, 0.0))]
-    predators = [Organism(AgentId(f"predator-{index}"), Species.PREDATOR, position, predator_initial_energy, heading=pi, viewport=Viewport(range=24, field_of_view=pi * .65, ray_count=11), traits=dict(traits), controller=blueprint) for index, position in enumerate(positions(predator_count, width * .19))]
+    prey = [Organism(AgentId(f"prey-{index}"), Species.PREY, position, prey_initial_energy, heading=index * .7, traits=dict(traits), controller=blueprint) for index, position in enumerate(positions(prey_count, 0.0, _PREY_POSITION_SEED_SALT))]
+    predators = [Organism(AgentId(f"predator-{index}"), Species.PREDATOR, position, predator_initial_energy, heading=pi, viewport=Viewport(range=24, field_of_view=pi * .65, ray_count=11), traits=dict(traits), controller=blueprint) for index, position in enumerate(positions(predator_count, width * .19, _PREDATOR_POSITION_SEED_SALT))]
     return prey + predators

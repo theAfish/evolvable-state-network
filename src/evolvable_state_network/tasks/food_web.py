@@ -108,8 +108,8 @@ class FoodWebTaskEvaluator:
     def evaluate(self, genome: Sequence[float]) -> FoodWebEvaluation:
         encoded = tuple(float(value) for value in genome)
         blueprint = MLPFoodWebControllerBlueprint(self.codec.decode(encoded))
-        returns = tuple(self._run_trial(blueprint, self.config.seed + trial) for trial in range(self.config.trials))
-        return FoodWebEvaluation(encoded, returns, fmean(returns))
+        lifetimes = tuple(self._run_trial(blueprint, self.config.seed + trial) for trial in range(self.config.trials))
+        return FoodWebEvaluation(encoded, lifetimes, fmean(lifetimes))
 
     def _run_trial(self, focal_controller: ControllerBlueprint, seed: int) -> float:
         agents = make_reference_population(
@@ -122,4 +122,4 @@ class FoodWebTaskEvaluator:
             if agent.species is self.config.focal_species:
                 agent.controller = focal_controller
         result = EpisodeRunner(FoodWebEnvironment(self.config.environment, seed=seed)).run(agents, max_steps=self.config.max_steps, seed=seed)
-        return fmean(result.returns[agent_id] for agent_id in focal)
+        return fmean(float(result.behavior[agent_id]["restricted_lifetime"]) for agent_id in focal)

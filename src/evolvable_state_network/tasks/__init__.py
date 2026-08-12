@@ -9,6 +9,7 @@ from .embodied_food_web import (
     EmbodiedFoodWebTaskConfig,
     EmbodiedRuleEvolutionConfig,
     EmbodiedRuleEvolutionRunner,
+    EvolutionTerminated,
     FoodWebCoevolutionEvaluator,
     FoodWebCoevolutionEvaluation,
     FoodWebCoevolutionRunner,
@@ -17,4 +18,4 @@ from .embodied_food_web import (
     FoodWebDemonstration,
 )
 
-__all__ = ["BatchFoodWebCoevolutionRunner", "BatchFoodWebConfig", "ContinuousFoodWebConfig", "ContinuousFoodWebCoevolutionRunner", "EmbodiedFoodWebEvaluation", "EmbodiedFoodWebEvaluator", "EmbodiedFoodWebTaskConfig", "EmbodiedRuleEvolutionConfig", "EmbodiedRuleEvolutionRunner", "FoodWebCoevolutionEvaluation", "FoodWebCoevolutionEvaluator", "FoodWebCoevolutionRunner", "FoodWebDemonstration", "FoodWebEvaluation", "FoodWebTaskConfig", "FoodWebTaskEvaluator", "MLPFoodWebControllerBlueprint"]
+__all__ = ["BatchFoodWebCoevolutionRunner", "BatchFoodWebConfig", "ContinuousFoodWebConfig", "ContinuousFoodWebCoevolutionRunner", "EmbodiedFoodWebEvaluation", "EmbodiedFoodWebEvaluator", "EmbodiedFoodWebTaskConfig", "EmbodiedRuleEvolutionConfig", "EmbodiedRuleEvolutionRunner", "EvolutionTerminated", "FoodWebCoevolutionEvaluation", "FoodWebCoevolutionEvaluator", "FoodWebCoevolutionRunner", "FoodWebDemonstration", "FoodWebEvaluation", "FoodWebTaskConfig", "FoodWebTaskEvaluator", "MLPFoodWebControllerBlueprint"]

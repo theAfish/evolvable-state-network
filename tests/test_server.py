@@ -71,7 +71,7 @@ class FastAPIServerTests(unittest.TestCase):
         report = {
             "ticks": 1, "architecture": asdict(architecture), "edge_architecture": asdict(edge_architecture),
             "prey_best_genome": prey, "predator_best_genome": predator,
-            "prey": {"best_fitness": 0.0}, "predator": {"best_fitness": 0.0},
+            "prey": {"best_lifetime": 0.0}, "predator": {"best_lifetime": 0.0},
             "task_config": {"network": {"nodes": 12, "mean_degree": 0.0, "state_width": 2, "initial_state_scale": .12}, "environment": {}, "prey_count": 2, "predator_count": 1},
         }
         path = root / "embodied_runs" / run_id
@@ -115,10 +115,26 @@ class FastAPIServerTests(unittest.TestCase):
         self.assertIn("Evidence checkpoint", root.text)
         self.assertIn('id="embodied-algorithm"', root.text)
         self.assertIn('id="embodied-training-mode"', root.text)
+        self.assertIn('id="embodied-terminate"', root.text)
         self.assertEqual(redirect.status_code, 307)
         self.assertEqual(redirect.headers["location"], "/")
         self.assertEqual(health.json()["status"], "ok")
         self.assertEqual(docs.status_code, 200)
+
+    def test_embodied_termination_endpoint_marks_only_running_embodied_jobs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with TestClient(create_app(Path(directory))) as client:
+                runtime = client.app.state.runtime
+                job_id = runtime.new_job("embodied_food_web", 3, 50)
+                response = client.post(f"/api/embodied/jobs/{job_id}/terminate")
+                duplicate = client.post(f"/api/embodied/jobs/{job_id}/terminate")
+                unrelated = runtime.new_job("async_training", 4, 50)
+                wrong_kind = client.post(f"/api/embodied/jobs/{unrelated}/terminate")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"job_id": job_id, "termination_requested": True})
+        self.assertTrue(runtime.job_termination_requested(job_id))
+        self.assertEqual(duplicate.status_code, 200)
+        self.assertEqual(wrong_kind.status_code, 404)
 
     def test_typed_experiment_validation_and_execution(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -174,6 +190,9 @@ class FastAPIServerTests(unittest.TestCase):
                         "batch_test_trials": 1, "batch_opponents": 1,
                         "enforce_survival_pressure": False,
                         "prey_count": 1, "predator_count": 1, "nodes": 33, "mean_degree": 0,
+                        "workers": 1,
+                        "max_speed": 12.0, "max_turn": 4.0,
+                        "network_dt": .05, "max_delta": .24, "edge_step_scale": .06,
                     },
                 )
                 job = client.get(f"/api/jobs/{started.json()['job_id']}").json()
@@ -184,8 +203,16 @@ class FastAPIServerTests(unittest.TestCase):
         self.assertEqual(job["result"]["training_mode"], "batch")
         self.assertEqual(job["result"]["prey"]["updates"], 1)
         self.assertGreater(job["result"]["prey"]["evaluations"], 0)
-        self.assertIn("test_fitness", job["result"]["prey"])
-        self.assertIn("vision_masked_fitness", job["result"]["prey"]["baselines"])
+        self.assertIn("test_lifetime", job["result"]["prey"])
+        self.assertIn("vision_masked_lifetime", job["result"]["prey"]["baselines"])
+        self.assertEqual(job["result"]["objective"], "restricted_mean_lifetime")
+        self.assertFalse(job["result"]["task_config"]["reward_shaping"])
+        self.assertFalse(job["result"]["task_config"]["environment"]["respawn_on_death"])
+        self.assertEqual(job["result"]["task_config"]["environment"]["max_speed"], 12.0)
+        self.assertEqual(job["result"]["task_config"]["environment"]["max_turn"], 4.0)
+        self.assertEqual(job["result"]["task_config"]["network"]["dt"], .05)
+        self.assertEqual(job["result"]["task_config"]["network"]["max_delta"], .24)
+        self.assertEqual(job["result"]["task_config"]["network"]["edge_step_scale"], .06)
         self.assertTrue(job["result"]["task_config"]["diagnostics"]["final_test_touched_only_after_selection"])
         self.assertEqual(checkpoint_generation, 1)
 

@@ -5,11 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import tanh
 from random import Random
+from typing import Literal
+
+import torch
 
 from ..graph import Edge, Graph, generate_random_graph
 from ..rules import EdgeRule, NodeRule
 from ..simulation import NetworkState, Simulation, SimulationConfig, TransitionDiagnostics
+from ..simulation.torch_backend import TorchMLPSimulator, resolve_device
 from ..types import zeros
+from ..evolution.candidate import MLPEdgeRule, MLPUpdateRule
 from .adapters import AgentAdapter, bounded
 
 
@@ -27,12 +32,18 @@ class EmbodiedNetworkConfig:
     edge_step_scale: float = .06
     observation_schema: str = "ray_image_v3"
     vision_pixels: int = 9
+    execution_backend: Literal["python", "torch"] = "python"
+    device: Literal["auto", "cpu", "cuda"] = "cpu"
 
     def __post_init__(self) -> None:
         if self.nodes < 3 or self.mean_degree < 0 or self.state_width < 1 or self.vision_pixels < 1:
             raise ValueError("network shape is invalid")
         if self.observation_schema not in {"ray_image_v3", "body_v2"}:
             raise ValueError("unknown embodied observation schema")
+        if self.execution_backend not in {"python", "torch"} or self.device not in {"auto", "cpu", "cuda"}:
+            raise ValueError("unknown embodied execution backend or device")
+        if self.execution_backend == "python" and self.device == "cuda":
+            raise ValueError("the reference Python backend cannot run on CUDA")
         if self.initial_state_scale < 0 or self.dt <= 0 or self.max_delta <= 0 or self.max_abs_state <= 0:
             raise ValueError("network integration parameters are invalid")
 
@@ -90,6 +101,23 @@ class EmbodiedNetwork:
         self.diagnostics = TransitionDiagnostics()
         self._step = 0
         self.state = self._random_initial_state(seed)
+        self._torch_simulator: TorchMLPSimulator | None = None
+        self._torch_node: torch.Tensor | None = None
+        self._torch_edge: torch.Tensor | None = None
+        self._torch_input_nodes: torch.Tensor | None = None
+        self._torch_action_nodes: torch.Tensor | None = None
+        self._torch_input_tags: torch.Tensor | None = None
+        self._torch_action_tags: torch.Tensor | None = None
+        if config.execution_backend == "torch":
+            if not isinstance(node_rule, MLPUpdateRule) or not isinstance(edge_rule, MLPEdgeRule):
+                raise TypeError("the Torch embodied backend requires the standard MLP node and edge rules")
+            self._torch_simulator = TorchMLPSimulator(self.graph, node_rule, edge_rule, resolve_device(config.device))
+            self._torch_node = torch.tensor(self.state.node, dtype=torch.float32, device=self._torch_simulator.device)
+            self._torch_edge = torch.tensor(self.state.edge, dtype=torch.float32, device=self._torch_simulator.device)
+            self._torch_input_nodes = torch.tensor(self.interface.input_nodes, dtype=torch.long, device=self._torch_simulator.device)
+            self._torch_action_nodes = torch.tensor(self.interface.action_nodes, dtype=torch.long, device=self._torch_simulator.device)
+            self._torch_input_tags = torch.tensor(self.interface.input_tags, dtype=torch.float32, device=self._torch_simulator.device)
+            self._torch_action_tags = torch.tensor(self.interface.action_tags, dtype=torch.float32, device=self._torch_simulator.device)
 
     def _random_initial_state(self, seed: int) -> NetworkState:
         random = Random(seed + 1_093)
@@ -108,6 +136,8 @@ class EmbodiedNetwork:
         values = self.adapter.encode_observation(observation)  # type: ignore[arg-type]
         if len(values) != len(self.interface.input_nodes):
             raise ValueError("adapter returned the wrong number of input channels")
+        if self._torch_simulator is not None:
+            return self._act_torch(values)
         for node, value, tag in zip(self.interface.input_nodes, values, self.interface.input_tags, strict=True):
             vector = [0.0] * self.config.state_width
             vector[0] = bounded(value)
@@ -128,3 +158,29 @@ class EmbodiedNetwork:
         self._step += 1
         outputs = tuple(tanh(self.state.node[0][node][0]) for node in self.interface.action_nodes)
         return dict(self.adapter.decode_action(outputs))
+
+    def _act_torch(self, values: tuple[float, ...]) -> dict[str, object]:
+        """Advance a persistent tensor state without trajectory construction or host copies."""
+        assert (
+            self._torch_simulator is not None and self._torch_node is not None and self._torch_edge is not None
+            and self._torch_input_nodes is not None and self._torch_action_nodes is not None
+            and self._torch_input_tags is not None and self._torch_action_tags is not None
+        )
+        device = self._torch_simulator.device
+        with torch.inference_mode():
+            vectors = torch.zeros((len(values), self.config.state_width), dtype=torch.float32, device=device)
+            vectors[:, 0] = torch.tensor(values, dtype=torch.float32, device=device).clamp(-1.0, 1.0)
+            if self.config.state_width > 1:
+                vectors[:, -1] = self._torch_input_tags
+            self._torch_node[0, self._torch_input_nodes] = vectors
+            if self.config.state_width > 1:
+                self._torch_node[0, self._torch_action_nodes, -1] = self._torch_action_tags
+            external = torch.zeros_like(self._torch_node)
+            self._torch_node, self._torch_edge = self._torch_simulator.step_state(
+                self._torch_node, self._torch_edge, external, self._step, self._integration, self.diagnostics,
+            )
+            self._step += 1
+            outputs = torch.tanh(
+                self._torch_node[0, self._torch_action_nodes, 0]
+            ).cpu().tolist()
+        return dict(self.adapter.decode_action(tuple(float(value) for value in outputs)))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from random import Random
 
 from evolvable_state_network.environments import (
     Controller, ControllerBlueprint, FoodWebConfig, FoodWebEnvironment,
@@ -18,6 +19,7 @@ class FoodWebTaskTests(unittest.TestCase):
         )
         self.assertEqual(result.steps, 8)
         self.assertEqual(set(result.returns), {"prey-0", "prey-1", "predator-0"})
+        self.assertTrue(all(value == 0.0 for value in result.returns.values()))
         self.assertEqual(result.final_population, {"prey": 2, "predator": 1})
 
     def test_esn_food_web_task_is_deterministic(self) -> None:
@@ -39,6 +41,19 @@ class FoodWebTaskTests(unittest.TestCase):
         second = make_reference_population(prey_count=3, predator_count=2, seed=11)
         self.assertEqual([agent.position for agent in first], [agent.position for agent in repeated])
         self.assertNotEqual([agent.position for agent in first], [agent.position for agent in second])
+
+    def test_population_seed_stream_is_independent_from_environment_layout(self) -> None:
+        for seed in range(32):
+            layout_random = Random(seed)
+            cluster_centers = {
+                (layout_random.uniform(0.0, 100.0), layout_random.uniform(0.0, 60.0))
+                for _ in range(4)
+            }
+            prey = make_reference_population(
+                prey_count=8, predator_count=0, width=100.0, height=60.0,
+                seed=seed,
+            )
+            self.assertTrue(all((agent.position.x, agent.position.y) not in cluster_centers for agent in prey))
 
     def test_initial_energy_is_configurable_for_natural_lifetime_control(self) -> None:
         agents = make_reference_population(prey_count=1, predator_count=1, prey_initial_energy=18.0, predator_initial_energy=28.0)
@@ -74,7 +89,26 @@ class FoodWebTaskTests(unittest.TestCase):
         self.assertIn("plant_visible_rate", metrics)
         self.assertIn("plant_steering_alignment", metrics)
         self.assertIn("deaths_per_1000_steps", metrics)
+        self.assertEqual(metrics["restricted_lifetime"], 8.0)
+        self.assertEqual(metrics["survived_horizon"], 1.0)
         self.assertIn("final_energy_fraction", metrics)
+
+    def test_restricted_lifetime_scores_survivors_at_horizon_and_deaths_at_age(self) -> None:
+        config = FoodWebConfig(
+            initial_plants=0, max_plants=0, plant_regrowth=0.0,
+            prey_initial_energy=.1,
+        )
+        result = EpisodeRunner(FoodWebEnvironment(config, seed=4)).run(
+            make_reference_population(
+                prey_count=1, predator_count=0, prey_initial_energy=.1, seed=4,
+            ),
+            max_steps=3, seed=4,
+        )
+        metrics = result.behavior[next(iter(result.behavior))]
+        self.assertEqual(metrics["restricted_lifetime"], 1.0)
+        self.assertEqual(metrics["survived_horizon"], 0.0)
+        self.assertEqual(metrics["mean_completed_lifetime"], 1.0)
+        self.assertTrue(all(value == 0.0 for value in result.returns.values()))
 
     def test_clustered_food_regrows_at_persistent_targetable_patches(self) -> None:
         world = FoodWebEnvironment(FoodWebConfig(

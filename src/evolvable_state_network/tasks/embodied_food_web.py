@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
+from concurrent.futures import ProcessPoolExecutor
+from contextlib import nullcontext
+from dataclasses import dataclass, replace
+from multiprocessing import get_context
+import os
 from random import Random
 from statistics import fmean
 from typing import Callable, Literal, Mapping, Sequence
@@ -18,6 +22,36 @@ from ..evolution.candidate import EdgeArchitecture, MLPEdgeRule, MLPUpdateRule, 
 from ..evolution.cmaes import CMAES, CMAESConfig
 from ..evolution.genetic import GeneticAlgorithm, GeneticAlgorithmConfig
 from ..evolution.genome import GenomeCodec
+from ..simulation.torch_backend import resolve_device
+
+
+_WORKER_EVALUATOR: FoodWebCoevolutionEvaluator | None = None
+
+
+def _initialize_evaluation_worker(evaluator: "FoodWebCoevolutionEvaluator") -> None:
+    """Install immutable task state once in each spawned evaluation process."""
+    global _WORKER_EVALUATOR
+    _WORKER_EVALUATOR = evaluator
+    # Tiny MLPs should not create a full BLAS thread team inside every process.
+    try:
+        import torch
+        torch.set_num_threads(1)
+    except ImportError:  # pragma: no cover - Torch is a declared dependency.
+        pass
+
+
+def _evaluate_focal_worker(
+    job: tuple[
+        tuple[float, ...], tuple[tuple[float, ...], ...], Species, tuple[int, ...],
+        Literal["none", "vision"],
+    ],
+) -> tuple[float, tuple[float, ...], dict[str, float]]:
+    if _WORKER_EVALUATOR is None:
+        raise RuntimeError("embodied evaluation worker was not initialized")
+    genome, opponents, species, seeds, observation_mask = job
+    return _WORKER_EVALUATOR.evaluate_focal(
+        genome, opponents, species, seeds, observation_mask=observation_mask,
+    )
 
 
 BEHAVIOR_KEYS = (
@@ -27,8 +61,22 @@ BEHAVIOR_KEYS = (
     "turn_drift", "early_mean_abs_turn", "late_mean_abs_turn", "abs_turn_drift",
     "early_mean_speed", "late_mean_speed", "speed_drift", "turn_saturation_rate",
     "plant_visible_rate", "plant_steering_alignment", "deaths_per_1000_steps",
-    "mean_completed_lifetime", "final_energy_fraction",
+    "mean_completed_lifetime", "restricted_mean_lifetime", "horizon_survival_rate",
+    "final_energy_fraction",
 )
+
+_LIFETIME_TOTAL_KEYS = (
+    "_death_count", "_completed_lifetime_sum", "_exposure_steps",
+    "_first_lifetime_sum", "_first_lifetime_count", "_horizon_survivors",
+)
+_DERIVED_LIFETIME_KEYS = {
+    "deaths_per_1000_steps", "mean_completed_lifetime",
+    "restricted_mean_lifetime", "horizon_survival_rate",
+}
+
+
+class EvolutionTerminated(Exception):
+    """Raised when a caller requests cooperative termination of an evolution run."""
 
 
 def _network_seed(seed: int, species: Species) -> int:
@@ -38,15 +86,38 @@ def _network_seed(seed: int, species: Species) -> int:
 
 
 def _mean_behavior(rows: Sequence[Mapping[str, float]]) -> dict[str, float]:
-    return {
+    result = {
         key: fmean(float(row.get(key, 0.0)) for row in rows) if rows else 0.0
-        for key in BEHAVIOR_KEYS
+        for key in BEHAVIOR_KEYS if key not in _DERIVED_LIFETIME_KEYS
     }
+    totals = {
+        key: sum(float(row.get(key, 0.0)) for row in rows)
+        for key in _LIFETIME_TOTAL_KEYS
+    }
+    deaths = totals["_death_count"]
+    exposure = totals["_exposure_steps"]
+    first_lives = totals["_first_lifetime_count"]
+    result.update({
+        "deaths_per_1000_steps": 1000.0 * deaths / max(exposure, 1.0),
+        "mean_completed_lifetime": totals["_completed_lifetime_sum"] / max(deaths, 1.0),
+        "restricted_mean_lifetime": totals["_first_lifetime_sum"] / max(first_lives, 1.0),
+        "horizon_survival_rate": totals["_horizon_survivors"] / max(first_lives, 1.0),
+        **totals,
+    })
+    return result
+
+
+def _public_behavior(behavior: Mapping[str, float]) -> dict[str, float]:
+    return {key: float(value) for key, value in behavior.items() if not key.startswith("_")}
 
 
 def _species_behavior(result: object, ids: Sequence[AgentId]) -> dict[str, float]:
     behavior = getattr(result, "behavior")
     return _mean_behavior([behavior[agent_id] for agent_id in ids])
+
+
+def _execution_device(config: EmbodiedNetworkConfig) -> str:
+    return resolve_device(config.device).type if config.execution_backend == "torch" else "cpu"
 
 
 class EmbodiedFoodWebController(Controller):
@@ -119,8 +190,8 @@ class EmbodiedFoodWebTaskConfig:
 @dataclass(frozen=True, slots=True)
 class EmbodiedFoodWebEvaluation:
     genome: tuple[float, ...]
-    trial_returns: tuple[float, ...]
-    fitness: float
+    trial_lifetimes: tuple[float, ...]
+    mean_lifetime: float
     behavior: Mapping[str, float]
 
 
@@ -146,8 +217,11 @@ class EmbodiedFoodWebEvaluator:
             self._trial(node_rule, edge_rule, self.config.seed + 10_007 * index)
             for index in range(self.config.trials)
         )
-        returns = tuple(item[0] for item in trials)
-        return EmbodiedFoodWebEvaluation(encoded, returns, fmean(returns), _mean_behavior([item[1] for item in trials]))
+        lifetimes = tuple(item[0] for item in trials)
+        behavior = _mean_behavior([item[1] for item in trials])
+        return EmbodiedFoodWebEvaluation(
+            encoded, lifetimes, fmean(lifetimes), _public_behavior(behavior),
+        )
 
     def evaluate_batch(self, genomes: Sequence[Sequence[float]]) -> tuple[EmbodiedFoodWebEvaluation, ...]:
         return tuple(self.evaluate(genome) for genome in genomes)
@@ -166,7 +240,8 @@ class EmbodiedFoodWebEvaluator:
             if agent.species is self.config.focal_species:
                 agent.controller = focal
         result = EpisodeRunner(FoodWebEnvironment(self.config.environment, seed=seed)).run(agents, max_steps=self.config.max_steps, seed=seed)
-        return fmean(result.returns[agent_id] for agent_id in ids), _species_behavior(result, ids)
+        behavior = _species_behavior(result, ids)
+        return float(behavior["restricted_mean_lifetime"]), behavior
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,18 +250,18 @@ class FoodWebCoevolutionEvaluation:
 
     prey_genome: tuple[float, ...]
     predator_genome: tuple[float, ...]
-    prey_trial_returns: tuple[float, ...]
-    predator_trial_returns: tuple[float, ...]
+    prey_trial_lifetimes: tuple[float, ...]
+    predator_trial_lifetimes: tuple[float, ...]
     prey_behavior: Mapping[str, float]
     predator_behavior: Mapping[str, float]
 
     @property
-    def prey_fitness(self) -> float:
-        return fmean(self.prey_trial_returns)
+    def prey_mean_lifetime(self) -> float:
+        return fmean(self.prey_trial_lifetimes)
 
     @property
-    def predator_fitness(self) -> float:
-        return fmean(self.predator_trial_returns)
+    def predator_mean_lifetime(self) -> float:
+        return fmean(self.predator_trial_lifetimes)
 
 
 class FoodWebCoevolutionEvaluator:
@@ -206,15 +281,15 @@ class FoodWebCoevolutionEvaluator:
     def evaluate(self, prey_genome: Sequence[float], predator_genome: Sequence[float]) -> FoodWebCoevolutionEvaluation:
         prey = tuple(float(value) for value in prey_genome)
         predator = tuple(float(value) for value in predator_genome)
-        trial_returns = tuple(
+        trial_lifetimes = tuple(
             self._trial(prey, predator, self.config.seed + 10_007 * index)
             for index in range(self.config.trials)
         )
         return FoodWebCoevolutionEvaluation(
             prey, predator,
-            tuple(item[0] for item in trial_returns), tuple(item[1] for item in trial_returns),
-            _mean_behavior([item[2] for item in trial_returns]),
-            _mean_behavior([item[3] for item in trial_returns]),
+            tuple(item[0] for item in trial_lifetimes), tuple(item[1] for item in trial_lifetimes),
+            _public_behavior(_mean_behavior([item[2] for item in trial_lifetimes])),
+            _public_behavior(_mean_behavior([item[3] for item in trial_lifetimes])),
         )
 
     def evaluate_focal(
@@ -225,7 +300,7 @@ class FoodWebCoevolutionEvaluator:
         focal = tuple(float(value) for value in genome)
         if not opponents or not seeds:
             raise ValueError("batch evaluation needs at least one opponent and seed")
-        returns: list[float] = []
+        lifetimes: list[float] = []
         behavior: list[Mapping[str, float]] = []
         for opponent_values in opponents:
             opponent = tuple(float(value) for value in opponent_values)
@@ -236,9 +311,10 @@ class FoodWebCoevolutionEvaluator:
                     prey_observation_mask=observation_mask if focal_species is Species.PREY else "none",
                     predator_observation_mask=observation_mask if focal_species is Species.PREDATOR else "none",
                 )
-                returns.append(result[0] if focal_species is Species.PREY else result[1])
+                lifetimes.append(result[0] if focal_species is Species.PREY else result[1])
                 behavior.append(result[2] if focal_species is Species.PREY else result[3])
-        return fmean(returns), tuple(returns), _mean_behavior(behavior)
+        aggregate = _mean_behavior(behavior)
+        return fmean(lifetimes), tuple(lifetimes), _public_behavior(aggregate)
 
     def _blueprint(
         self, genome: tuple[float, ...], seed: int, species: Species,
@@ -271,14 +347,14 @@ class FoodWebCoevolutionEvaluator:
                 agent.controller = predator
                 predator_ids.append(agent.id)
         result = EpisodeRunner(FoodWebEnvironment(self.config.environment, seed=seed)).run(agents, max_steps=self.config.max_steps, seed=seed)
-        prey_return = fmean(result.returns[agent_id] for agent_id in prey_ids)
+        prey_behavior = _species_behavior(result, prey_ids)
+        prey_lifetime = float(prey_behavior["restricted_mean_lifetime"])
         # A prey-only ecology has no predator genome to score.  Keep the
         # evaluator total so shared callers can still construct it safely.
-        predator_return = fmean(result.returns[agent_id] for agent_id in predator_ids) if predator_ids else 0.0
+        predator_behavior = _species_behavior(result, predator_ids) if predator_ids else _mean_behavior([])
+        predator_lifetime = float(predator_behavior["restricted_mean_lifetime"]) if predator_ids else 0.0
         return (
-            prey_return, predator_return,
-            _species_behavior(result, prey_ids),
-            _species_behavior(result, predator_ids) if predator_ids else _mean_behavior([]),
+            prey_lifetime, predator_lifetime, prey_behavior, predator_behavior,
         )
 
 
@@ -288,7 +364,7 @@ class EmbodiedRuleEvolutionConfig:
 
     generations: int = 8
     population_size: int = 8
-    initial_sigma: float = .05
+    initial_sigma: float = .12
     seed: int = 1
     initial_genome: tuple[float, ...] | None = None
     algorithm: Literal["cma_es", "genetic"] = "cma_es"
@@ -333,16 +409,16 @@ class EmbodiedRuleEvolutionRunner:
         for _ in range(self.config.generations):
             population = optimizer.ask()
             evaluations = self.evaluator.evaluate_batch(population)
-            winner = max(evaluations, key=lambda item: item.fitness)
-            if best is None or winner.fitness > best.fitness:
+            winner = max(evaluations, key=lambda item: item.mean_lifetime)
+            if best is None or winner.mean_lifetime > best.mean_lifetime:
                 best = winner
-            optimizer.tell(population, [item.fitness for item in evaluations])
-            row = {"generation": optimizer.generation, "best_fitness": winner.fitness, "mean_fitness": fmean(item.fitness for item in evaluations), "sigma": optimizer.sigma}
+            optimizer.tell(population, [item.mean_lifetime for item in evaluations])
+            row = {"generation": optimizer.generation, "best_lifetime": winner.mean_lifetime, "mean_lifetime": fmean(item.mean_lifetime for item in evaluations), "sigma": optimizer.sigma}
             history.append(row)
             if progress:
                 progress(row)
         assert best is not None
-        return {"task": "food_web", "algorithm": self.config.algorithm, "focal_species": str(self.evaluator.config.focal_species), "best_genome": list(best.genome), "best_fitness": best.fitness, "best_trial_returns": list(best.trial_returns), "history": history}
+        return {"task": "food_web", "algorithm": self.config.algorithm, "objective": "restricted_mean_lifetime", "objective_units": "ticks", "focal_species": str(self.evaluator.config.focal_species), "best_genome": list(best.genome), "best_lifetime": best.mean_lifetime, "best_trial_lifetimes": list(best.trial_lifetimes), "history": history}
 
 
 class FoodWebCoevolutionRunner:
@@ -362,20 +438,20 @@ class FoodWebCoevolutionRunner:
         for _ in range(self.config.generations):
             prey_population, predator_population = prey_optimizer.ask(), predator_optimizer.ask()
             evaluations = tuple(self.evaluator.evaluate(prey, predator) for prey, predator in zip(prey_population, predator_population, strict=True))
-            prey_winner = max(evaluations, key=lambda item: item.prey_fitness)
-            predator_winner = max(evaluations, key=lambda item: item.predator_fitness)
-            if best_prey is None or prey_winner.prey_fitness > best_prey.prey_fitness:
+            prey_winner = max(evaluations, key=lambda item: item.prey_mean_lifetime)
+            predator_winner = max(evaluations, key=lambda item: item.predator_mean_lifetime)
+            if best_prey is None or prey_winner.prey_mean_lifetime > best_prey.prey_mean_lifetime:
                 best_prey = prey_winner
-            if best_predator is None or predator_winner.predator_fitness > best_predator.predator_fitness:
+            if best_predator is None or predator_winner.predator_mean_lifetime > best_predator.predator_mean_lifetime:
                 best_predator = predator_winner
-            prey_optimizer.tell(prey_population, [item.prey_fitness for item in evaluations])
-            predator_optimizer.tell(predator_population, [item.predator_fitness for item in evaluations])
+            prey_optimizer.tell(prey_population, [item.prey_mean_lifetime for item in evaluations])
+            predator_optimizer.tell(predator_population, [item.predator_mean_lifetime for item in evaluations])
             row = {
                 "generation": prey_optimizer.generation,
-                "prey_best_fitness": prey_winner.prey_fitness,
-                "prey_mean_fitness": fmean(item.prey_fitness for item in evaluations),
-                "predator_best_fitness": predator_winner.predator_fitness,
-                "predator_mean_fitness": fmean(item.predator_fitness for item in evaluations),
+                "prey_best_lifetime": prey_winner.prey_mean_lifetime,
+                "prey_mean_lifetime": fmean(item.prey_mean_lifetime for item in evaluations),
+                "predator_best_lifetime": predator_winner.predator_mean_lifetime,
+                "predator_mean_lifetime": fmean(item.predator_mean_lifetime for item in evaluations),
                 "prey_sigma": prey_optimizer.sigma, "predator_sigma": predator_optimizer.sigma,
             }
             history.append(row)
@@ -384,9 +460,9 @@ class FoodWebCoevolutionRunner:
         assert best_prey is not None and best_predator is not None
         return {
             "task": "food_web_coevolution",
-            "algorithm": self.config.algorithm,
-            "prey_best_genome": list(best_prey.prey_genome), "prey_best_fitness": best_prey.prey_fitness,
-            "predator_best_genome": list(best_predator.predator_genome), "predator_best_fitness": best_predator.predator_fitness,
+            "algorithm": self.config.algorithm, "objective": "restricted_mean_lifetime", "objective_units": "ticks",
+            "prey_best_genome": list(best_prey.prey_genome), "prey_best_lifetime": best_prey.prey_mean_lifetime,
+            "predator_best_genome": list(best_predator.predator_genome), "predator_best_lifetime": best_predator.predator_mean_lifetime,
             "history": history,
         }
 
@@ -405,11 +481,13 @@ class BatchFoodWebConfig:
     initial_genome: tuple[float, ...] | None = None
     initial_prey_genome: tuple[float, ...] | None = None
     initial_predator_genome: tuple[float, ...] | None = None
+    workers: int = 1
 
     def __post_init__(self) -> None:
         if (
             self.generations < 1 or self.episode_steps < 1 or self.trials < 1
             or self.validation_trials < 1 or self.test_trials < 1 or self.opponent_pool_size < 1
+            or self.workers < 0
         ):
             raise ValueError("batch food-web configuration is invalid")
 
@@ -421,14 +499,22 @@ class BatchFoodWebCoevolutionRunner:
         self, evaluator: FoodWebCoevolutionEvaluator, evolution: EmbodiedRuleEvolutionConfig,
         config: BatchFoodWebConfig,
     ) -> None:
-        self.evaluator, self.evolution, self.config = evaluator, evolution, config
+        batch_environment = replace(evaluator.config.environment, respawn_on_death=False)
+        batch_task = replace(evaluator.config, environment=batch_environment)
+        self.evaluator = FoodWebCoevolutionEvaluator(
+            evaluator.architecture, evaluator.edge_architecture, batch_task,
+        )
+        self.evolution, self.config = evolution, config
         if evaluator.config.max_steps != config.episode_steps:
             raise ValueError("batch evaluator max_steps must equal episode_steps")
         for genome in (config.initial_genome, config.initial_prey_genome, config.initial_predator_genome):
             if genome is not None and len(genome) != evaluator.codec.dimension:
                 raise ValueError("initial genome does not match the joint rule architecture")
 
-    def run(self, progress: Callable[[dict[str, object]], None] | None = None) -> dict[str, object]:
+    def run(
+        self, progress: Callable[[dict[str, object]], None] | None = None,
+        should_stop: Callable[[], bool] | None = None,
+    ) -> dict[str, object]:
         initial = self.config.initial_genome if self.config.initial_genome is not None else self.evolution.initial_genome
         zero = (0.0,) * self.evaluator.codec.dimension
         prey_initial = self.config.initial_prey_genome if self.config.initial_prey_genome is not None else (initial or zero)
@@ -447,7 +533,7 @@ class BatchFoodWebCoevolutionRunner:
         predator_optimizer = _make_optimizer(self.evaluator.codec.dimension, predator_config)
         prey_hall = [(float("-inf"), tuple(prey_initial))]
         predator_hall = [(float("-inf"), tuple(predator_initial))]
-        empty_behavior = _mean_behavior([])
+        empty_behavior = _public_behavior(_mean_behavior([]))
         prey_best = (float("-inf"), tuple(prey_initial), empty_behavior)
         predator_best = (float("-inf"), tuple(predator_initial), empty_behavior)
         prey_evaluations = predator_evaluations = 0
@@ -464,94 +550,119 @@ class BatchFoodWebCoevolutionRunner:
             self.config.seed + 190_000_033 + trial * 10_007
             for trial in range(self.config.test_trials)
         )
-        # Fixed anchor opponents make validation fitness comparable across
+        # Fixed anchor opponents make validation lifetime comparable across
         # generations.  The training pools below can still coevolve.
         prey_validation_opponents = (tuple(predator_initial),)
         predator_validation_opponents = (tuple(prey_initial),)
 
-        for generation in range(1, self.config.generations + 1):
-            seeds = tuple(self.config.seed + generation * 1_000_003 + trial * 10_007 for trial in range(self.config.trials))
-            predator_pool = tuple(genome for _, genome in predator_hall[:self.config.opponent_pool_size])
-            prey_population = prey_optimizer.ask()
-            prey_rows = tuple(self.evaluator.evaluate_focal(genome, predator_pool, Species.PREY, seeds) for genome in prey_population)
-            prey_scores = tuple(row[0] for row in prey_rows)
-            prey_optimizer.tell(prey_population, prey_scores)
-            prey_index = max(range(len(prey_population)), key=lambda index: prey_scores[index])
-            prey_winner = prey_population[prey_index]
-            prey_evaluations += len(prey_population) * len(predator_pool) * len(seeds)
-            prey_validation = self.evaluator.evaluate_focal(
-                prey_winner, prey_validation_opponents, Species.PREY, validation_seeds
+        workers = self._resolved_workers()
+        executor_context = (
+            ProcessPoolExecutor(
+                max_workers=workers, mp_context=get_context("spawn"),
+                initializer=_initialize_evaluation_worker, initargs=(self.evaluator,),
             )
-            prey_validation_evaluations += len(prey_validation_opponents) * len(validation_seeds)
-            prey_hall = self._validated_archive(prey_hall, prey_validation[0], prey_winner)
-            if prey_validation[0] > prey_best[0]:
-                prey_best = prey_validation[0], prey_winner, prey_validation[2]
-
-            predator_scores: tuple[float, ...] = ()
-            if self.evaluator.config.predator_count:
-                prey_pool = tuple(genome for _, genome in prey_hall[:self.config.opponent_pool_size])
-                predator_population = predator_optimizer.ask()
-                predator_rows = tuple(self.evaluator.evaluate_focal(genome, prey_pool, Species.PREDATOR, seeds) for genome in predator_population)
-                predator_scores = tuple(row[0] for row in predator_rows)
-                predator_optimizer.tell(predator_population, predator_scores)
-                predator_index = max(range(len(predator_population)), key=lambda index: predator_scores[index])
-                predator_winner = predator_population[predator_index]
-                predator_evaluations += len(predator_population) * len(prey_pool) * len(seeds)
-                predator_validation = self.evaluator.evaluate_focal(
-                    predator_winner, predator_validation_opponents, Species.PREDATOR, validation_seeds
-                )
-                predator_validation_evaluations += len(predator_validation_opponents) * len(validation_seeds)
-                predator_hall = self._validated_archive(predator_hall, predator_validation[0], predator_winner)
-                if predator_validation[0] > predator_best[0]:
-                    predator_best = predator_validation[0], predator_winner, predator_validation[2]
-            else:
-                predator_validation = (0.0, (), empty_behavior)
-                predator_best = 0.0, tuple(predator_initial), empty_behavior
-
-            row = {
-                "generation": generation,
-                "prey_best_fitness": prey_scores[prey_index], "prey_mean_fitness": fmean(prey_scores),
-                "prey_validation_fitness": prey_validation[0],
-                "predator_best_fitness": max(predator_scores) if predator_scores else 0.0,
-                "predator_mean_fitness": fmean(predator_scores) if predator_scores else 0.0,
-                "predator_validation_fitness": predator_validation[0],
-                **{f"prey_{key}": value for key, value in prey_validation[2].items()},
-                **{f"predator_{key}": value for key, value in predator_validation[2].items()},
-                "episode_seeds": list(seeds),
-                "validation_seeds": list(validation_seeds),
-            }
-            history.append(row)
-            event = {
-                "phase": "batch_food_web", "training_mode": "batch", "algorithm": self.evolution.algorithm,
-                "generation": generation, "generations": self.config.generations,
-                "prey": self._snapshot(prey_optimizer, prey_best, prey_evaluations, prey_validation_evaluations),
-                "predator": self._snapshot(predator_optimizer, predator_best, predator_evaluations, predator_validation_evaluations, active=bool(self.evaluator.config.predator_count)),
-                "history": list(history),
-            }
-            if progress:
-                progress(event)
-
-        prey_snapshot = self._snapshot(prey_optimizer, prey_best, prey_evaluations, prey_validation_evaluations)
-        predator_snapshot = self._snapshot(predator_optimizer, predator_best, predator_evaluations, predator_validation_evaluations, active=bool(self.evaluator.config.predator_count))
-        prey_test = self._final_test(
-            prey_best[1], tuple(predator_initial), Species.PREY, test_seeds, zero
+            if workers > 1 else nullcontext(None)
         )
-        prey_test["selection_validation_fitness"] = prey_best[0]
-        prey_snapshot.update(prey_test)
-        if self.evaluator.config.predator_count:
-            predator_test = self._final_test(
-                predator_best[1], tuple(prey_initial), Species.PREDATOR, test_seeds, zero
+        with executor_context as executor:
+            for generation in range(1, self.config.generations + 1):
+                if should_stop and should_stop():
+                    raise EvolutionTerminated()
+                seeds = tuple(self.config.seed + generation * 1_000_003 + trial * 10_007 for trial in range(self.config.trials))
+                predator_pool = tuple(genome for _, genome in predator_hall[:self.config.opponent_pool_size])
+                prey_population = prey_optimizer.ask()
+                prey_rows = self._evaluate_population(executor, prey_population, predator_pool, Species.PREY, seeds)
+                prey_scores = tuple(row[0] for row in prey_rows)
+                prey_optimizer.tell(prey_population, prey_scores)
+                prey_index = max(range(len(prey_population)), key=lambda index: prey_scores[index])
+                prey_winner = prey_population[prey_index]
+                prey_evaluations += len(prey_population) * len(predator_pool) * len(seeds)
+                prey_validation = self.evaluator.evaluate_focal(
+                    prey_winner, prey_validation_opponents, Species.PREY, validation_seeds
+                )
+                prey_validation_evaluations += len(prey_validation_opponents) * len(validation_seeds)
+                prey_hall = self._validated_archive(prey_hall, prey_validation[0], prey_winner)
+                if prey_validation[0] > prey_best[0]:
+                    prey_best = prey_validation[0], prey_winner, prey_validation[2]
+
+                predator_scores: tuple[float, ...] = ()
+                if self.evaluator.config.predator_count:
+                    prey_pool = tuple(genome for _, genome in prey_hall[:self.config.opponent_pool_size])
+                    predator_population = predator_optimizer.ask()
+                    predator_rows = self._evaluate_population(
+                        executor, predator_population, prey_pool, Species.PREDATOR, seeds,
+                    )
+                    predator_scores = tuple(row[0] for row in predator_rows)
+                    predator_optimizer.tell(predator_population, predator_scores)
+                    predator_index = max(range(len(predator_population)), key=lambda index: predator_scores[index])
+                    predator_winner = predator_population[predator_index]
+                    predator_evaluations += len(predator_population) * len(prey_pool) * len(seeds)
+                    predator_validation = self.evaluator.evaluate_focal(
+                        predator_winner, predator_validation_opponents, Species.PREDATOR, validation_seeds
+                    )
+                    predator_validation_evaluations += len(predator_validation_opponents) * len(validation_seeds)
+                    predator_hall = self._validated_archive(predator_hall, predator_validation[0], predator_winner)
+                    if predator_validation[0] > predator_best[0]:
+                        predator_best = predator_validation[0], predator_winner, predator_validation[2]
+                else:
+                    predator_validation = (0.0, (), empty_behavior)
+                    predator_best = 0.0, tuple(predator_initial), empty_behavior
+
+                row = {
+                    "generation": generation,
+                    "prey_best_lifetime": prey_scores[prey_index], "prey_mean_lifetime": fmean(prey_scores),
+                    "prey_validation_lifetime": prey_validation[0],
+                    "predator_best_lifetime": max(predator_scores) if predator_scores else 0.0,
+                    "predator_mean_lifetime": fmean(predator_scores) if predator_scores else 0.0,
+                    "predator_validation_lifetime": predator_validation[0],
+                    **{f"prey_{key}": value for key, value in prey_validation[2].items()},
+                    **{f"predator_{key}": value for key, value in predator_validation[2].items()},
+                    "episode_seeds": list(seeds),
+                    "validation_seeds": list(validation_seeds),
+                }
+                history.append(row)
+                event = {
+                    "phase": "batch_food_web", "training_mode": "batch", "algorithm": self.evolution.algorithm,
+                    "objective": "restricted_mean_lifetime", "objective_units": "ticks",
+                    "generation": generation, "generations": self.config.generations,
+                    "workers": workers, "execution_backend": self.evaluator.config.network.execution_backend,
+                    "device": _execution_device(self.evaluator.config.network),
+                    "prey": self._snapshot(prey_optimizer, prey_best, prey_evaluations, prey_validation_evaluations),
+                    "predator": self._snapshot(predator_optimizer, predator_best, predator_evaluations, predator_validation_evaluations, active=bool(self.evaluator.config.predator_count)),
+                    "history": list(history),
+                }
+                if progress:
+                    progress(event)
+
+            if should_stop and should_stop():
+                raise EvolutionTerminated()
+            prey_snapshot = self._snapshot(prey_optimizer, prey_best, prey_evaluations, prey_validation_evaluations)
+            predator_snapshot = self._snapshot(predator_optimizer, predator_best, predator_evaluations, predator_validation_evaluations, active=bool(self.evaluator.config.predator_count))
+            prey_test = self._final_test(
+                prey_best[1], tuple(predator_initial), Species.PREY, test_seeds, zero, executor,
             )
-            predator_test["selection_validation_fitness"] = predator_best[0]
-            predator_snapshot.update(predator_test)
-        else:
-            predator_snapshot.update(self._inactive_test_summary())
+            prey_test["selection_validation_lifetime"] = prey_best[0]
+            prey_snapshot.update(prey_test)
+            if self.evaluator.config.predator_count:
+                predator_test = self._final_test(
+                    predator_best[1], tuple(prey_initial), Species.PREDATOR, test_seeds, zero, executor,
+                )
+                predator_test["selection_validation_lifetime"] = predator_best[0]
+                predator_snapshot.update(predator_test)
+            else:
+                predator_snapshot.update(self._inactive_test_summary())
         return {
             "task": "batch_food_web_coevolution", "training_mode": "batch", "algorithm": self.evolution.algorithm,
+            "objective": "restricted_mean_lifetime", "objective_units": "ticks",
+            "population_size": self.evolution.population_size,
+            "initial_sigma": self.evolution.initial_sigma,
             "generations": self.config.generations, "episode_steps": self.config.episode_steps,
             "trials": self.config.trials, "validation_trials": self.config.validation_trials,
             "test_trials": self.config.test_trials, "test_seeds": list(test_seeds),
             "opponent_pool_size": self.config.opponent_pool_size,
+            "execution": {
+                "workers": workers, "backend": self.evaluator.config.network.execution_backend,
+                "device": _execution_device(self.evaluator.config.network),
+            },
             "prey": prey_snapshot, "predator": predator_snapshot, "history": history,
             "prey_best_genome": list(prey_best[1]), "predator_best_genome": list(predator_best[1]),
         }
@@ -559,39 +670,79 @@ class BatchFoodWebCoevolutionRunner:
     def _final_test(
         self, genome: tuple[float, ...], opponent: tuple[float, ...],
         species: Species, seeds: tuple[int, ...], zero: tuple[float, ...],
+        executor: ProcessPoolExecutor | None,
     ) -> dict[str, object]:
-        selected = self.evaluator.evaluate_focal(genome, (opponent,), species, seeds)
-        neutral = self.evaluator.evaluate_focal(zero, (opponent,), species, seeds)
-        vision_masked = self.evaluator.evaluate_focal(
-            genome, (opponent,), species, seeds, observation_mask="vision"
+        selected, neutral, vision_masked = self._evaluate_jobs(
+            executor,
+            (
+                (genome, (opponent,), species, seeds, "none"),
+                (zero, (opponent,), species, seeds, "none"),
+                (genome, (opponent,), species, seeds, "vision"),
+            ),
         )
         return {
-            "selection_validation_fitness": None,
-            "test_fitness": selected[0],
-            "test_returns": list(selected[1]),
+            "selection_validation_lifetime": None,
+            "test_lifetime": selected[0],
+            "test_lifetimes": list(selected[1]),
             "test_behavior": dict(selected[2]),
             "test_evaluations": 3 * len(seeds),
             "baselines": {
-                "zero_rule_fitness": neutral[0],
-                "zero_rule_returns": list(neutral[1]),
+                "zero_rule_lifetime": neutral[0],
+                "zero_rule_lifetimes": list(neutral[1]),
                 "zero_rule_behavior": dict(neutral[2]),
-                "vision_masked_fitness": vision_masked[0],
-                "vision_masked_returns": list(vision_masked[1]),
+                "vision_masked_lifetime": vision_masked[0],
+                "vision_masked_lifetimes": list(vision_masked[1]),
                 "vision_masked_behavior": dict(vision_masked[2]),
-                "gain_over_zero_rule": selected[0] - neutral[0],
-                "vision_ablation_delta": selected[0] - vision_masked[0],
+                "lifetime_gain_over_zero_rule": selected[0] - neutral[0],
+                "vision_lifetime_delta": selected[0] - vision_masked[0],
             },
         }
+
+    def _resolved_workers(self) -> int:
+        if self.config.workers:
+            workers = self.config.workers
+        else:
+            workers = min(self.evolution.population_size, max(1, (os.cpu_count() or 2) - 1), 8)
+        device = self.evaluator.config.network.device
+        uses_cuda = (
+            self.evaluator.config.network.execution_backend == "torch"
+            and resolve_device(device).type == "cuda"
+        )
+        if uses_cuda:
+            # A single CUDA owner avoids duplicated model/state memory and
+            # context contention. Candidate-level process parallelism is for CPU.
+            return 1
+        return workers
+
+    def _evaluate_population(
+        self, executor: ProcessPoolExecutor | None, population: Sequence[tuple[float, ...]],
+        opponents: tuple[tuple[float, ...], ...], species: Species, seeds: tuple[int, ...],
+    ) -> tuple[tuple[float, tuple[float, ...], dict[str, float]], ...]:
+        jobs = tuple((tuple(genome), opponents, species, seeds, "none") for genome in population)
+        return self._evaluate_jobs(executor, jobs)
+
+    def _evaluate_jobs(
+        self, executor: ProcessPoolExecutor | None,
+        jobs: Sequence[tuple[tuple[float, ...], tuple[tuple[float, ...], ...], Species, tuple[int, ...], Literal["none", "vision"]]],
+    ) -> tuple[tuple[float, tuple[float, ...], dict[str, float]], ...]:
+        if executor is not None:
+            return tuple(executor.map(_evaluate_focal_worker, jobs, chunksize=1))
+        return tuple(
+            self.evaluator.evaluate_focal(
+                genome, opponents, species, seeds, observation_mask=observation_mask,
+            )
+            for genome, opponents, species, seeds, observation_mask in jobs
+        )
 
     @staticmethod
     def _inactive_test_summary() -> dict[str, object]:
         return {
-            "selection_validation_fitness": 0.0, "test_fitness": 0.0,
-            "test_returns": [], "test_behavior": {}, "test_evaluations": 0,
+            "selection_validation_lifetime": 0.0, "test_lifetime": 0.0,
+            "test_lifetimes": [], "test_behavior": {}, "test_evaluations": 0,
             "baselines": {
-                "zero_rule_fitness": 0.0, "zero_rule_returns": [], "zero_rule_behavior": {},
-                "vision_masked_fitness": 0.0, "vision_masked_returns": [], "vision_masked_behavior": {},
-                "gain_over_zero_rule": 0.0, "vision_ablation_delta": 0.0,
+                "zero_rule_lifetime": 0.0, "zero_rule_lifetimes": [], "zero_rule_behavior": {},
+                "vision_masked_lifetime": 0.0, "vision_masked_lifetimes": [], "vision_masked_behavior": {},
+                "lifetime_gain_over_zero_rule": 0.0, "vision_lifetime_delta": 0.0,
             },
         }
 
@@ -603,16 +754,16 @@ class BatchFoodWebCoevolutionRunner:
         return {
             "updates": optimizer.generation if active else 0, "evaluations": evaluations,
             "validation_evaluations": validation_evaluations,
-            "best_fitness": best[0], "best_genome": list(best[1]), "sigma": optimizer.sigma,
+            "best_lifetime": best[0], "best_genome": list(best[1]), "sigma": optimizer.sigma,
             "behavior": dict(best[2]),
         }
 
     @staticmethod
     def _validated_archive(
-        archive: list[tuple[float, tuple[float, ...]]], fitness: float, genome: tuple[float, ...],
+        archive: list[tuple[float, tuple[float, ...]]], lifetime: float, genome: tuple[float, ...],
     ) -> list[tuple[float, tuple[float, ...]]]:
         rows = [item for item in archive if item[1] != genome]
-        rows.append((float(fitness), genome))
+        rows.append((float(lifetime), genome))
         rows.sort(key=lambda item: item[0], reverse=True)
         return rows[:24]
 
@@ -630,7 +781,7 @@ class OnlineRuleBirth(ControllerBlueprint):
 
 
 class OnlineRuleLibrary:
-    """Per-species steady-state optimizer library with an elite reporting archive."""
+    """Per-species steady-state optimizer using completed lifespan alone."""
 
     evaluation_replicates = 2
 
@@ -661,7 +812,7 @@ class OnlineRuleLibrary:
         blueprint = EmbodiedFoodWebControllerBlueprint(node_rule, edge_rule, self.network, self.random.randrange(2**32))
         return OnlineRuleBirth(blueprint, genome, self.cohort_index)
 
-    def observe(self, birth: OnlineRuleBirth, fitness: float) -> None:
+    def observe(self, birth: OnlineRuleBirth, lifetime: float) -> None:
         self.deaths += 1
         if birth.cohort != self.cohort_index:
             return  # A late death from a closed cohort cannot be compared with the current cohort.
@@ -669,7 +820,7 @@ class OnlineRuleLibrary:
             index = self.cohort.index(birth.genome)
         except ValueError:
             return
-        self.scores.setdefault(index, []).append(float(fitness))
+        self.scores.setdefault(index, []).append(float(lifetime))
         if len(self.scores) == len(self.cohort) and all(
             len(self.scores[index]) >= self.evaluation_replicates
             for index in range(len(self.cohort))
@@ -686,7 +837,7 @@ class OnlineRuleLibrary:
         return {
             "algorithm": self.algorithm, "cohort": self.cohort_index, "updates": self.updates, "deaths": self.deaths,
             "evaluated": len(self.scores), "library_size": len(self.cohort),
-            "best_fitness": self.archive[0][0], "best_genome": list(self.archive[0][1]),
+            "best_lifetime": self.archive[0][0], "best_genome": list(self.archive[0][1]),
             "sigma": self.optimizer.sigma, "evaluation_replicates": self.evaluation_replicates,
         }
 
@@ -697,13 +848,13 @@ class OnlineRuleLibrary:
         self.assignments, self.scores = [0] * len(self.cohort), {}
         self.cohort_index += 1
 
-    def _archive(self, fitness: float, genome: tuple[float, ...]) -> None:
+    def _archive(self, lifetime: float, genome: tuple[float, ...]) -> None:
         if not self._has_evaluated_archive:
             # The initial row is only a pre-evaluation fallback and must not
-            # outrank genuinely evaluated negative-fitness rules.
+            # outrank genuinely evaluated lifetimes.
             self.archive.clear()
             self._has_evaluated_archive = True
-        self.archive.append((fitness, genome))
+        self.archive.append((lifetime, genome))
         self.archive.sort(key=lambda item: item[0], reverse=True)
         del self.archive[24:]
 
@@ -735,7 +886,10 @@ class ContinuousFoodWebCoevolutionRunner:
             if genome is not None and len(genome) != evaluator.codec.dimension:
                 raise ValueError("initial genome does not match the joint rule architecture")
 
-    def run(self, progress: Callable[[dict[str, object]], None] | None = None) -> dict[str, object]:
+    def run(
+        self, progress: Callable[[dict[str, object]], None] | None = None,
+        should_stop: Callable[[], bool] | None = None,
+    ) -> dict[str, object]:
         initial = self.config.initial_genome if self.config.initial_genome is not None else self.evolution.initial_genome
         prey_initial = self.config.initial_prey_genome if self.config.initial_prey_genome is not None else initial
         predator_initial = self.config.initial_predator_genome if self.config.initial_predator_genome is not None else initial
@@ -813,6 +967,8 @@ class ContinuousFoodWebCoevolutionRunner:
 
         telemetry: deque[dict[str, object]] = deque(maxlen=240)
         for tick in range(1, self.config.ticks + 1):
+            if should_stop and should_stop():
+                raise EvolutionTerminated()
             for agent_id, observation in observations.items():
                 species = str(population[agent_id].species)
                 body_totals[species]["hunger"] += float(observation.get("hunger", 0.0))
@@ -831,7 +987,7 @@ class ContinuousFoodWebCoevolutionRunner:
                 birth = organism.controller
                 if not isinstance(birth, OnlineRuleBirth):
                     raise RuntimeError("continuous world lost its inherited rule blueprint")
-                libraries[organism.species].observe(birth, float(record["fitness"]))
+                libraries[organism.species].observe(birth, float(record["age"]))
                 controllers[agent_id].end_episode()
                 organism.controller = libraries[organism.species].birth()
                 controllers[agent_id] = organism.controller.build(seed=random.randrange(2**32))
@@ -855,10 +1011,10 @@ class ContinuousFoodWebCoevolutionRunner:
                 ),
             })
             if progress and (tick == 1 or tick % 4 == 0 or tick == self.config.ticks):
-                progress({"tick": tick, "ticks": self.config.ticks, "phase": "continuous_food_web", "population": world.snapshot()["population"], "ecology": ecology, "prey": library_snapshot(Species.PREY), "predator": library_snapshot(Species.PREDATOR), "telemetry": list(telemetry)})
+                progress({"tick": tick, "ticks": self.config.ticks, "phase": "continuous_food_web", "objective": "completed_lifetime", "objective_units": "ticks", "population": world.snapshot()["population"], "ecology": ecology, "execution_backend": self.evaluator.config.network.execution_backend, "device": _execution_device(self.evaluator.config.network), "prey": library_snapshot(Species.PREY), "predator": library_snapshot(Species.PREDATOR), "telemetry": list(telemetry)})
         for controller in controllers.values():
             controller.end_episode()
-        return {"task": "continuous_food_web_coevolution", "algorithm": self.evolution.algorithm, "ticks": self.config.ticks, "population": world.snapshot()["population"], "ecology": ecology, "prey": library_snapshot(Species.PREY), "predator": library_snapshot(Species.PREDATOR), "telemetry": list(telemetry), "prey_best_genome": list(prey_library.archive[0][1]), "predator_best_genome": list(predator_library.archive[0][1])}
+        return {"task": "continuous_food_web_coevolution", "algorithm": self.evolution.algorithm, "objective": "completed_lifetime", "objective_units": "ticks", "population_size": self.evolution.population_size, "initial_sigma": self.evolution.initial_sigma, "ticks": self.config.ticks, "execution": {"workers": 1, "backend": self.evaluator.config.network.execution_backend, "device": _execution_device(self.evaluator.config.network)}, "population": world.snapshot()["population"], "ecology": ecology, "prey": library_snapshot(Species.PREY), "predator": library_snapshot(Species.PREDATOR), "telemetry": list(telemetry), "prey_best_genome": list(prey_library.archive[0][1]), "predator_best_genome": list(predator_library.archive[0][1])}
 
 
 class FoodWebDemonstration:

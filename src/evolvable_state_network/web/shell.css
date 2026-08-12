@@ -286,6 +286,11 @@ main {
   background: #1b5b4f;
 }
 
+.form-panel > .terminate-button {
+  background: #762f3f;
+  border-color: #b35d70;
+}
+
 .form-panel output {
   grid-column: span 2;
   align-self: center;

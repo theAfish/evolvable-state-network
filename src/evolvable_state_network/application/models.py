@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from math import ceil, pi
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -86,23 +87,31 @@ class EmbodiedFoodWebTrainingPayload(StrictModel):
     seed: int | None = Field(None, ge=0, lt=2**32)
     training_mode: Literal["batch", "continuous"] = "batch"
     algorithm: Literal["cma_es", "genetic"] = "cma_es"
-    population_size: int = Field(16, ge=2, le=64)
+    execution_backend: Literal["python", "torch"] = "torch"
+    device: Literal["auto", "cpu", "cuda"] = "cpu"
+    workers: int = Field(0, ge=0, le=32)
+    population_size: int = Field(24, ge=2, le=64)
     prey_count: int = Field(5, ge=1, le=64)
     predator_count: int = Field(2, ge=0, le=64)
     nodes: int = Field(64, ge=33, le=400)
     mean_degree: float = Field(6.0, ge=0, le=40)
     initial_state_scale: float = Field(.12, ge=0, le=1)
+    network_dt: float = Field(.05, gt=0, le=.25)
+    max_delta: float = Field(.12, gt=0, le=.5)
+    edge_step_scale: float = Field(.06, gt=0, le=.5)
     initial_energy_scale: float = Field(1.0, gt=0, le=20)
     max_food: int = Field(80, ge=0, le=10_000)
     food_growth_rate: float = Field(24.0, ge=0, le=10_000)
+    max_speed: float = Field(20.0, gt=0, le=100)
+    max_turn: float = Field(2 * pi, gt=0, le=8 * pi)
     plant_cluster_count: int = Field(4, ge=0, le=64)
     plant_cluster_radius: float = Field(5.0, ge=0, le=100)
     ticks: int = Field(600, ge=1, le=100_000)
-    batch_generations: int = Field(16, ge=1, le=200)
+    batch_generations: int = Field(48, ge=1, le=200)
     batch_episode_steps: int = Field(256, ge=8, le=5000)
     batch_trials: int = Field(4, ge=1, le=32)
-    batch_validation_trials: int = Field(4, ge=1, le=32)
-    batch_test_trials: int = Field(8, ge=1, le=64)
+    batch_validation_trials: int = Field(8, ge=1, le=32)
+    batch_test_trials: int = Field(16, ge=1, le=64)
     batch_opponents: int = Field(2, ge=1, le=16)
     enforce_survival_pressure: bool = True
 
@@ -112,14 +121,25 @@ class EmbodiedFoodWebTrainingPayload(StrictModel):
             raise ValueError("mean_degree cannot exceed nodes - 1")
         if self.model_id and self.continue_run_id:
             raise ValueError("choose either a basic model or a prior embodied run, not both")
+        if self.execution_backend == "python" and self.device == "cuda":
+            raise ValueError("the reference Python backend cannot run on CUDA")
         natural_lifetime_steps = self.initial_energy_scale * 9.0 / (3.6 * .125)
+        minimum_survival_horizon = ceil(3.0 * natural_lifetime_steps)
         if (
             self.training_mode == "batch" and self.enforce_survival_pressure
-            and self.batch_episode_steps < natural_lifetime_steps
+            and self.batch_episode_steps < minimum_survival_horizon
         ):
             raise ValueError(
-                "batch_episode_steps must reach the no-food starvation lifetime; "
-                "lower initial_energy_scale, lengthen the episode, or explicitly disable survival-pressure enforcement"
+                f"set batch_episode_steps to at least {minimum_survival_horizon} "
+                f"for initial_energy_scale={self.initial_energy_scale:g}; "
+                "or lower initial_energy_scale or explicitly disable survival-pressure enforcement"
+            )
+        prey_supply = self.food_growth_rate * 2.0 if self.max_food > 0 else 0.0
+        prey_demand = self.prey_count * 3.6
+        if self.enforce_survival_pressure and prey_supply < prey_demand:
+            raise ValueError(
+                "plant regrowth cannot sustain the configured prey population even under perfect collection; "
+                "increase food_growth_rate, lower prey_count, or explicitly disable survival-pressure enforcement"
             )
         return self
 

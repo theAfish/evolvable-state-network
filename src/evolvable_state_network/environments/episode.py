@@ -59,6 +59,7 @@ class EpisodeRunner:
                 "turn_saturated": 0.0, "plant_visible": 0.0,
                 "plant_directional": 0.0, "plant_aligned": 0.0,
                 "deaths": 0.0, "completed_lifetime_sum": 0.0,
+                "first_death_age": 0.0, "first_death_observed": 0.0,
             }
             for agent_id in controllers
         }
@@ -127,6 +128,9 @@ class EpisodeRunner:
                 if agent_id in behavior:
                     behavior[agent_id]["deaths"] += 1.0
                     behavior[agent_id]["completed_lifetime_sum"] += float(record["age"])
+                    if not behavior[agent_id]["first_death_observed"]:
+                        behavior[agent_id]["first_death_age"] = float(record["age"])
+                        behavior[agent_id]["first_death_observed"] = 1.0
             # A reused ecology slot is a new organism.  Its controller must
             # start with fresh graph/state randomness, while the blueprint
             # keeps the inherited update rules.  Environments that do not
@@ -200,6 +204,21 @@ class EpisodeRunner:
                 "plant_steering_alignment": row["plant_aligned"] / max(1.0, row["plant_directional"]),
                 "deaths_per_1000_steps": 1000.0 * row["deaths"] / samples,
                 "mean_completed_lifetime": row["completed_lifetime_sum"] / max(1.0, row["deaths"]),
+                # First-life restricted survival time is the direct evolution
+                # objective. A life still active at the horizon is censored at
+                # the observed episode length rather than incorrectly scored 0.
+                "restricted_lifetime": (
+                    row["first_death_age"] if row["first_death_observed"] else float(step)
+                ),
+                "survived_horizon": 0.0 if row["first_death_observed"] else 1.0,
+                "_death_count": row["deaths"],
+                "_completed_lifetime_sum": row["completed_lifetime_sum"],
+                "_exposure_steps": samples,
+                "_first_lifetime_sum": (
+                    row["first_death_age"] if row["first_death_observed"] else float(step)
+                ),
+                "_first_lifetime_count": 1.0,
+                "_horizon_survivors": 0.0 if row["first_death_observed"] else 1.0,
                 "final_energy_fraction": final_energy_fraction,
             }
         return EpisodeResult(step, terminated, returns, counts, summaries)
