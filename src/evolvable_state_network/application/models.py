@@ -107,7 +107,7 @@ class EmbodiedFoodWebTrainingPayload(StrictModel):
     plant_cluster_count: int = Field(4, ge=0, le=64)
     plant_cluster_radius: float = Field(5.0, ge=0, le=100)
     ticks: int = Field(600, ge=1, le=100_000)
-    batch_generations: int = Field(48, ge=1, le=200)
+    batch_generations: int = Field(48, ge=1)
     batch_episode_steps: int = Field(256, ge=8, le=5000)
     batch_trials: int = Field(4, ge=1, le=32)
     batch_validation_trials: int = Field(8, ge=1, le=32)

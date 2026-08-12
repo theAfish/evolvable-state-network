@@ -5,7 +5,7 @@
     "increment_fraction": 0.8,
     "state_width": 2
   },
-  "checkpoint_generation": 200,
+  "checkpoint_generation": 4,
   "edge_architecture": {
     "gate_index": 0,
     "hidden_width": 12,
@@ -16,7 +16,7 @@
   "generations": 200,
   "initialization": {
     "kind": "embodied_run",
-    "run_id": "3feb15d90b32494a84af1faa4b40bafc"
+    "run_id": "e46dac2eb5cc4046b7d4762f302c9dbc"
   },
   "predator": {
     "behavior": {
@@ -535,33 +535,33 @@
   ],
   "prey": {
     "behavior": {
-      "abs_turn_drift": -0.13258702470942202,
+      "abs_turn_drift": -0.1333419415570764,
       "adaptation_delta": 0.0,
-      "deaths_per_1000_steps": 6.196668021129622,
-      "early_mean_abs_turn": 0.14643279287696714,
-      "early_mean_speed": 0.5372489757719389,
-      "early_mean_turn": 0.08332381689771258,
+      "deaths_per_1000_steps": 6.432246998284734,
+      "early_mean_abs_turn": 0.14865551706502325,
+      "early_mean_speed": 0.5421974817054404,
+      "early_mean_turn": 0.07810327573766093,
       "early_return_rate": 0.0,
-      "final_energy_fraction": 0.016736111111109446,
-      "horizon_survival_rate": 0.046875,
-      "late_mean_abs_turn": 0.013845768167545127,
-      "late_mean_speed": 0.055651141643011215,
-      "late_mean_turn": 0.010679787840587474,
+      "final_energy_fraction": 0.03416666666666477,
+      "horizon_survival_rate": 0.0625,
+      "late_mean_abs_turn": 0.015313575507946856,
+      "late_mean_speed": 0.061290342174373416,
+      "late_mean_turn": 0.009174229476629988,
       "late_return_rate": 0.0,
-      "meal_rate": 0.05668533924346382,
-      "meals": 12.484375,
-      "mean_abs_energy_change": 0.011310340127753503,
-      "mean_abs_turn": 0.14454243952251913,
-      "mean_action_change": 0.17257379010940965,
-      "mean_completed_lifetime": 146.62295081967213,
-      "mean_hunger": 0.47556893086251856,
-      "mean_speed": 0.5417709506785481,
-      "mean_turn": 0.09388507087503656,
-      "plant_steering_alignment": 0.482011419599211,
-      "plant_visible_rate": 0.6483062471452523,
-      "restricted_mean_lifetime": 153.8125,
-      "speed_drift": -0.4815978341289277,
-      "turn_drift": -0.07264402905712511,
+      "meal_rate": 0.05095440474766989,
+      "meals": 11.0625,
+      "mean_abs_energy_change": 0.011165888899156672,
+      "mean_abs_turn": 0.14666585304100627,
+      "mean_action_change": 0.17406175779106678,
+      "mean_completed_lifetime": 135.46666666666667,
+      "mean_hunger": 0.4730414934142552,
+      "mean_speed": 0.5472891499840116,
+      "mean_turn": 0.09038449387727679,
+      "plant_steering_alignment": 0.5327846676149408,
+      "plant_visible_rate": 0.6461174228195602,
+      "restricted_mean_lifetime": 145.75,
+      "speed_drift": -0.4809071395310669,
+      "turn_drift": -0.06892904626103094,
       "turn_saturation_rate": 0.0
     },
     "best_genome": [
@@ -803,11 +803,11 @@
       -1.0553453838461764,
       0.8095164717367361
     ],
-    "best_lifetime": 153.8125,
-    "evaluations": 19200,
+    "best_lifetime": 145.75,
+    "evaluations": 384,
     "sigma": 0.12,
-    "updates": 200,
-    "validation_evaluations": 1600
+    "updates": 4,
+    "validation_evaluations": 32
   },
   "prey_best_genome": [
     -0.031416916847655435,
@@ -1119,7 +1119,7 @@
     "predator_count": 0,
     "prey_count": 8,
     "reward_shaping": false,
-    "seed": 2152792132,
+    "seed": 2318933712,
     "training_mode": "batch",
     "workers": 0
   },
