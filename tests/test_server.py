@@ -72,7 +72,7 @@ class FastAPIServerTests(unittest.TestCase):
             "ticks": 1, "architecture": asdict(architecture), "edge_architecture": asdict(edge_architecture),
             "prey_best_genome": prey, "predator_best_genome": predator,
             "prey": {"best_lifetime": 0.0}, "predator": {"best_lifetime": 0.0},
-            "task_config": {"network": {"nodes": 12, "mean_degree": 0.0, "state_width": 2, "initial_state_scale": .12}, "environment": {}, "prey_count": 2, "predator_count": 1},
+            "task_config": {"embodied_interface": "ray_image_v3_sparse_multichannel_v1", "network": {"nodes": 34, "mean_degree": 0.0, "state_width": 2, "initial_state_scale": .12, "vision_pixels": 9}, "environment": {}, "prey_count": 2, "predator_count": 1},
         }
         path = root / "embodied_runs" / run_id
         path.mkdir(parents=True)
@@ -115,6 +115,7 @@ class FastAPIServerTests(unittest.TestCase):
         self.assertIn("Evidence checkpoint", root.text)
         self.assertIn('id="embodied-algorithm"', root.text)
         self.assertIn('id="embodied-training-mode"', root.text)
+        self.assertIn('id="embodied-state-width"', root.text)
         self.assertIn('id="embodied-terminate"', root.text)
         self.assertEqual(redirect.status_code, 307)
         self.assertEqual(redirect.headers["location"], "/")
@@ -162,7 +163,7 @@ class FastAPIServerTests(unittest.TestCase):
                 invalid = client.post("/api/embodied/food-web/train", json={"model_id": "x", "continue_run_id": "previousrun"})
                 started = client.post(
                     "/api/embodied/food-web/train",
-                    json={"continue_run_id": "previousrun", "training_mode": "continuous", "algorithm": "genetic", "seed": 4, "population_size": 2, "ticks": 1, "prey_count": 1, "predator_count": 1, "nodes": 33, "mean_degree": 0},
+                    json={"continue_run_id": "previousrun", "training_mode": "continuous", "algorithm": "genetic", "seed": 4, "population_size": 2, "ticks": 1, "prey_count": 1, "predator_count": 1, "hidden_nodes": 1, "mean_degree": 0},
                 )
                 job = client.get(f"/api/jobs/{started.json()['job_id']}").json()
                 checkpoint = root / "embodied_runs" / started.json()["job_id"] / "checkpoint.json"
@@ -189,7 +190,7 @@ class FastAPIServerTests(unittest.TestCase):
                         "batch_episode_steps": 8, "batch_trials": 2, "batch_validation_trials": 1,
                         "batch_test_trials": 1, "batch_opponents": 1,
                         "enforce_survival_pressure": False,
-                        "prey_count": 1, "predator_count": 1, "nodes": 33, "mean_degree": 0,
+                        "prey_count": 1, "predator_count": 1, "hidden_nodes": 1, "state_width": 3, "mean_degree": 0,
                         "workers": 1,
                         "max_speed": 12.0, "max_turn": 4.0,
                         "network_dt": .05, "max_delta": .24, "edge_step_scale": .06,
@@ -213,6 +214,9 @@ class FastAPIServerTests(unittest.TestCase):
         self.assertEqual(job["result"]["task_config"]["network"]["dt"], .05)
         self.assertEqual(job["result"]["task_config"]["network"]["max_delta"], .24)
         self.assertEqual(job["result"]["task_config"]["network"]["edge_step_scale"], .06)
+        self.assertEqual(job["result"]["task_config"]["network"]["state_width"], 3)
+        self.assertEqual(job["result"]["task_config"]["network"]["nodes"], 34)
+        self.assertEqual(job["result"]["task_config"]["diagnostics"]["hidden_nodes"], 1)
         self.assertTrue(job["result"]["task_config"]["diagnostics"]["final_test_touched_only_after_selection"])
         self.assertEqual(checkpoint_generation, 1)
 
@@ -231,6 +235,28 @@ class FastAPIServerTests(unittest.TestCase):
         self.assertEqual(len(state["plants"]), 11)
         self.assertEqual(state["plant_capacity"], 30)
 
+    def test_embodied_demo_exposes_selected_individual_network_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_embodied_run(root, "inspectrun")
+            with TestClient(create_app(root)) as client:
+                session = client.post(
+                    "/api/embodied/sessions",
+                    json={"run_id": "inspectrun", "seed": 4, "prey_count": 1, "predator_count": 0, "max_food": 30},
+                ).json()
+                individual_id = session["state"]["organisms"][0]["id"]
+                response = client.get(
+                    f"/api/embodied/sessions/{session['session_id']}/individuals/{individual_id}"
+                )
+        self.assertEqual(response.status_code, 200, response.text)
+        snapshot = response.json()
+        self.assertEqual(snapshot["individual"]["id"], individual_id)
+        self.assertGreater(snapshot["network"]["nodes"], 0)
+        self.assertEqual(len(snapshot["network"]["node_state"]), snapshot["network"]["nodes"])
+        self.assertEqual(snapshot["network"]["state_width"], 2)
+        self.assertGreaterEqual(snapshot["network"]["vision_pixels"], 1)
+        self.assertEqual(snapshot["network"]["input_signal_channels"][:4], [1, 1, 1, 1])
+
     def test_embodied_demo_uses_current_checkpoint_before_run_completes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -248,6 +274,7 @@ class FastAPIServerTests(unittest.TestCase):
         selected = next(run for run in runs if run["id"] == "checkpointed")
         self.assertFalse(selected["complete"])
         self.assertEqual(selected["source"], "current_checkpoint")
+        self.assertEqual(selected["state_width"], 2)
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["model_source"], "current_checkpoint")
 

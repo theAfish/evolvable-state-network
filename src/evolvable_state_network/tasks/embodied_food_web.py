@@ -134,8 +134,6 @@ class EmbodiedFoodWebController(Controller):
     def _adapter(self) -> FoodWebAgentAdapter:
         return FoodWebAgentAdapter(
             vision_pixels=self._config.vision_pixels,
-            schema=self._config.observation_schema,
-            directional=self._config.nodes >= 15,
         )
 
     def begin_episode(self, *, seed: int | None = None) -> None:
@@ -150,6 +148,9 @@ class EmbodiedFoodWebController(Controller):
         if self._observation_mask == "vision":
             observation = {**observation, "vision": ()}
         return self._network.act(observation)
+
+    def inspection_snapshot(self) -> dict[str, object]:
+        return self._network.inspection_snapshot()
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,6 +186,8 @@ class EmbodiedFoodWebTaskConfig:
     def __post_init__(self) -> None:
         if self.prey_count < 1 or self.predator_count < 0 or self.max_steps < 1 or self.trials < 1:
             raise ValueError("population, step, and trial counts must be positive")
+        if self.network.state_width < 2:
+            raise ValueError("food-web embodiment needs channel 0 for vision and channel 1 for interoception")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1059,3 +1062,22 @@ class FoodWebDemonstration:
 
     def snapshot(self) -> dict[str, object]:
         return {"tick": self.tick, "state": self.world.snapshot(), "events": self.last_events}
+
+    def individual_snapshot(self, agent_id: AgentId) -> dict[str, object]:
+        """Return one living organism's private recurrent network for display."""
+        controller = self.controllers.get(agent_id)
+        if not isinstance(controller, EmbodiedFoodWebController):
+            raise KeyError(agent_id)
+        population = self.world.population()
+        organism = population.get(agent_id)
+        if organism is None:
+            raise KeyError(agent_id)
+        return {
+            "tick": self.tick,
+            "individual": {
+                "id": organism.id,
+                "species": organism.species.value,
+                "energy": organism.energy,
+            },
+            "network": controller.inspection_snapshot(),
+        }

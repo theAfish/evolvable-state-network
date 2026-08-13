@@ -17,6 +17,14 @@ main { max-width:1500px; margin:auto; padding:28px 22px 42px; } .view { display:
 .embodied-charts canvas { display:block; width:100%; height:auto; border:1px solid #273448; border-radius:5px; background:#0d131d; }
 #ecology-canvas { display:block; width:100%; height:auto; border:1px solid #526174; border-radius:8px; background:#101a24; }
 .demo-events { margin-top:12px; color:var(--muted); font:12px ui-monospace,monospace; }
+.demo-inspector { margin-top:28px; }
+.demo-inspector-grid { display:grid; grid-template-columns:minmax(0,1.1fr) minmax(320px,.9fr); gap:18px; margin-top:16px; }
+#demo-network,#demo-node-chart { display:block; width:100%; border:1px solid #35455b; border-radius:7px; background:#101621; }
+#demo-network { min-height:360px; }
+.demo-inspector-grid article { min-width:0; }
+.demo-inspector-grid article > label { display:flex; width:max-content; max-width:100%; margin:0 0 10px; }
+.demo-inspector-grid select { max-width:220px; }
+@media (max-width:1050px) { .demo-inspector-grid { grid-template-columns:1fr; } }
 @media (max-width:1050px) { body { min-width:0; } header { grid-template-columns:1fr; position:static; } nav,.load-controls { justify-self:start; } .workspace,.evolution-layout,.evolution-results,.embodied-charts { grid-template-columns:1fr; } .controls { grid-template-columns:repeat(4,max-content) 1fr; } } @media (max-width:700px) { main { padding:18px 12px; } .summary-grid { grid-template-columns:1fr; } .page-heading { align-items:start; flex-direction:column; } .form-panel,.evolution-form { display:flex; } #fitness-chart { min-width:0; } }
 
 /* Flat asynchronous workspace. The older tools remain available as secondary views. */

@@ -31,7 +31,7 @@ class EmbodiedArchitectureTests(unittest.TestCase):
         self.edge_architecture = EdgeArchitecture(node_state_width=2, latent_width=2, hidden_width=2)
         self.node = MLPUpdateRule(self.architecture, (0.0,) * self.architecture.parameter_count)
         self.edge = MLPEdgeRule(self.edge_architecture, (0.0,) * self.edge_architecture.parameter_count)
-        self.config = EmbodiedNetworkConfig(nodes=33, mean_degree=0.0, state_width=2)
+        self.config = EmbodiedNetworkConfig(nodes=34, mean_degree=0.0, state_width=2)
 
     def test_adapter_preserves_ordered_ray_pixels_without_angles(self) -> None:
         values = FoodWebAgentAdapter(vision_pixels=3).encode_observation({
@@ -48,9 +48,12 @@ class EmbodiedArchitectureTests(unittest.TestCase):
         for actual, wanted in zip(values[4:], expected, strict=True):
             self.assertAlmostEqual(actual, wanted)
 
-    def test_legacy_adapter_keeps_old_compact_width(self) -> None:
-        self.assertEqual(FoodWebAgentAdapter(schema="body_v2", directional=True).input_count, 13)
-        self.assertEqual(FoodWebAgentAdapter(schema="body_v2", directional=False).input_count, 7)
+    def test_interoception_and_vision_use_distinct_sparse_node_channels(self) -> None:
+        network = EmbodiedNetwork(self.node, self.edge, FoodWebAgentAdapter(), self.config, seed=5)
+        network.act({"hunger": .75, "energy_change": -.1, "ate": True, "time_since_meal": .25, "vision": ()})
+        hunger_node, first_vision_node = network.interface.input_nodes[0], network.interface.input_nodes[4]
+        self.assertEqual(network.state.node[0][hunger_node], (0.0, .5))
+        self.assertEqual(network.state.node[0][first_vision_node], (0.0, 0.0))
 
     def test_online_library_tells_cma_the_population_it_asked_for(self) -> None:
         config = EmbodiedRuleEvolutionConfig(population_size=2, initial_sigma=.25, seed=13)
@@ -85,22 +88,34 @@ class EmbodiedArchitectureTests(unittest.TestCase):
     def test_adapter_nodes_are_connected_and_actions_are_bounded(self) -> None:
         network = EmbodiedNetwork(self.node, self.edge, FoodWebAgentAdapter(), self.config, seed=5)
         pairs = {(edge.source, edge.target) for edge in network.graph.edges}
-        self.assertTrue(all(any(source == node for source, _ in pairs) for node in network.interface.input_nodes))
-        self.assertTrue(all(any(target == node for _, target in pairs) for node in network.interface.action_nodes))
+        inputs, actions = set(network.interface.input_nodes), set(network.interface.action_nodes)
+        hidden = set(range(network.config.nodes)) - inputs - actions
+        self.assertTrue(hidden)
+        self.assertTrue(all(source in inputs | hidden and target in hidden | actions for source, target in pairs))
+        self.assertTrue(all(source not in actions and target not in inputs for source, target in pairs))
+        self.assertTrue(all(any(source == node for source, _ in pairs) for node in inputs))
+        self.assertTrue(all(any(target == node for _, target in pairs) for node in actions))
         action = network.act({"energy": 9.0, "heading": 0.0, "age": 0, "vision": ()})
         self.assertGreaterEqual(float(action["turn"]), -1.0)
         self.assertLessEqual(float(action["turn"]), 1.0)
         self.assertGreaterEqual(float(action["speed"]), 0.0)
         self.assertLessEqual(float(action["speed"]), 1.0)
-        self.assertEqual(
-            network.state.node[0][network.interface.input_nodes[0]][-1],
-            network.interface.input_tags[0],
-        )
-        self.assertEqual(
-            network.state.node[0][network.interface.action_nodes[0]][-1],
-            network.interface.action_tags[0],
-        )
+        self.assertTrue(all(
+            all(value == 0.0 for index, value in enumerate(network.state.node[0][node]) if index != channel)
+            for node, channel in zip(network.interface.input_nodes, network.adapter.input_signal_channels, strict=True)
+        ))
+        self.assertTrue(all(network.state.node[0][node][1:] == (0.0,) for node in actions))
         self.assertEqual(EmbodiedFoodWebController.learn, Controller.learn)
+
+    def test_boundary_nodes_keep_only_their_signal_coordinate(self) -> None:
+        active_node = MLPUpdateRule(self.architecture, (.1,) * self.architecture.parameter_count)
+        network = EmbodiedNetwork(active_node, self.edge, FoodWebAgentAdapter(), self.config, seed=8)
+        network.act({"hunger": .6, "energy_change": -.1, "ate": False, "time_since_meal": .25, "vision": ()})
+        self.assertTrue(all(
+            all(value == 0.0 for index, value in enumerate(network.state.node[0][node]) if index != channel)
+            for node, channel in zip(network.interface.input_nodes, network.adapter.input_signal_channels, strict=True)
+        ))
+        self.assertTrue(all(network.state.node[0][node][1:] == (0.0,) for node in network.interface.action_nodes))
 
     def test_torch_embodied_backend_matches_reference_actions(self) -> None:
         reference = EmbodiedNetwork(self.node, self.edge, FoodWebAgentAdapter(), self.config, seed=5)
@@ -119,7 +134,7 @@ class EmbodiedArchitectureTests(unittest.TestCase):
 
     def test_batch_coevolution_runs_candidates_in_spawned_workers(self) -> None:
         network = replace(
-            self.config, nodes=33, execution_backend="torch", device="cpu",
+            self.config, nodes=34, execution_backend="torch", device="cpu",
         )
         task = EmbodiedFoodWebTaskConfig(
             network=network, prey_count=1, predator_count=0, max_steps=8, trials=1, seed=17,
@@ -161,7 +176,6 @@ class EmbodiedArchitectureTests(unittest.TestCase):
     def test_each_network_has_independent_random_node_state(self) -> None:
         first = EmbodiedNetwork(self.node, self.edge, FoodWebAgentAdapter(), self.config, seed=3)
         second = EmbodiedNetwork(self.node, self.edge, FoodWebAgentAdapter(), self.config, seed=4)
-        self.assertNotEqual(first.graph, second.graph)
         self.assertNotEqual(first.state.node, second.state.node)
 
     def test_actuators_start_neutral_while_other_state_remains_random(self) -> None:
@@ -188,7 +202,7 @@ class EmbodiedArchitectureTests(unittest.TestCase):
         self.assertEqual(first._network.state.node, masked._network.state.node)
         different_scenario = evaluator._blueprint(zero, 124, Species.PREY).build(seed=17)
         different_scenario.begin_episode(seed=19)
-        self.assertNotEqual(first._network.graph, different_scenario._network.graph)
+        self.assertNotEqual(first._network.state.node, different_scenario._network.state.node)
 
     def test_joint_rules_are_the_only_evolutionary_genome(self) -> None:
         task = EmbodiedFoodWebTaskConfig(

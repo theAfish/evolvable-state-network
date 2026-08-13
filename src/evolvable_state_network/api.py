@@ -32,7 +32,7 @@ from .evolution.evaluation import CandidateEvaluator
 from .evolution import EvolutionConfig, EvolutionRunner, random_search_smoke_test
 from .experiment import ExperimentRequest, run_experiment
 from .storage import application_data_dir
-from .embodied import EmbodiedNetworkConfig
+from .embodied import EmbodiedNetworkConfig, FoodWebAgentAdapter
 from .environments import FoodWebConfig
 from .tasks import (
     BatchFoodWebCoevolutionRunner,
@@ -145,8 +145,8 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         initial_prey_genome: tuple[float, ...] | None = None
         initial_predator_genome: tuple[float, ...] | None = None
         initialization: dict[str, str] = {"kind": "fresh"}
-        architecture = RuleArchitecture(state_width=2)
-        edge_architecture = EdgeArchitecture(node_state_width=2)
+        architecture = RuleArchitecture(state_width=payload.state_width)
+        edge_architecture = EdgeArchitecture(node_state_width=payload.state_width)
         if payload.model_id:
             document = runtime.load_trained_rule(payload.model_id)
             if document.get("target") != "joint" or not document.get("edge_architecture"):
@@ -165,12 +165,21 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             except (KeyError, TypeError, ValueError) as error:
                 raise HTTPException(400, "selected embodied run cannot be continued") from error
             initialization = {"kind": "embodied_run", "run_id": payload.continue_run_id}
+        if architecture.state_width < 2:
+            raise HTTPException(400, "the embodied ray/body interface requires a rule with at least 2 node-state channels")
+        if architecture.state_width != payload.state_width:
+            raise HTTPException(
+                400,
+                f"selected rule uses {architecture.state_width} node-state channels; set Node state channels to {architecture.state_width}",
+            )
+        boundary_nodes = FoodWebAgentAdapter(vision_pixels=9).input_count + FoodWebAgentAdapter(vision_pixels=9).action_count
+        total_nodes = payload.hidden_nodes + boundary_nodes
         network = EmbodiedNetworkConfig(
-            nodes=payload.nodes, mean_degree=payload.mean_degree,
+            nodes=total_nodes, mean_degree=payload.mean_degree,
             state_width=architecture.state_width, initial_state_scale=payload.initial_state_scale,
             dt=payload.network_dt, max_delta=payload.max_delta,
             edge_step_scale=payload.edge_step_scale,
-            observation_schema="ray_image_v3", vision_pixels=9,
+            vision_pixels=9,
             execution_backend=payload.execution_backend, device=payload.device,
         )
         task = EmbodiedFoodWebTaskConfig(
@@ -229,7 +238,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             "initial_sigma": evolution.initial_sigma,
             "execution_backend": payload.execution_backend, "device": payload.device,
             "workers": payload.workers,
-            "observation_schema": "ray_image_v3",
+            "embodied_interface": "ray_image_v3_sparse_multichannel_v1",
             "network": asdict(network), "environment": asdict(task.environment),
             "prey_count": task.prey_count, "predator_count": task.predator_count,
             "batch_generations": payload.batch_generations, "batch_episode_steps": payload.batch_episode_steps,
@@ -237,8 +246,9 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             "batch_test_trials": payload.batch_test_trials, "batch_opponents": payload.batch_opponents,
             "enforce_survival_pressure": payload.enforce_survival_pressure,
             "diagnostics": {
-                "boundary_nodes": 33,
-                "hidden_nodes": max(0, payload.nodes - 33),
+                "boundary_nodes": boundary_nodes,
+                "hidden_nodes": payload.hidden_nodes,
+                "total_nodes": total_nodes,
                 "no_food_lifetime_steps": 20.0 * payload.initial_energy_scale,
                 "survival_horizon_multiple": (
                     payload.batch_episode_steps / max(20.0 * payload.initial_energy_scale, 1e-12)
@@ -327,6 +337,13 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             return runtime.advance_embodied_session(session_id, payload.ticks)
         except KeyError as error:
             raise HTTPException(404, "embodied demonstration session is unavailable") from error
+
+    @application.get("/api/embodied/sessions/{session_id}/individuals/{individual_id}")
+    def embodied_individual(session_id: str, individual_id: str) -> dict[str, object]:
+        try:
+            return runtime.embodied_individual_snapshot(session_id, individual_id)
+        except KeyError as error:
+            raise HTTPException(404, "embodied demonstration individual is unavailable") from error
 
     @application.get("/api/async/latest")
     def latest_async() -> dict[str, object]:

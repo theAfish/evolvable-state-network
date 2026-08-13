@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from math import cos, sin
 from typing import Sequence
 
 from ..environments import Action, Observation
@@ -29,6 +28,11 @@ class AgentAdapter(ABC):
     @abstractmethod
     def action_count(self) -> int: ...
 
+    @property
+    @abstractmethod
+    def input_signal_channels(self) -> tuple[int, ...]:
+        """Chemical-state coordinate assigned to each sensory port."""
+
     @abstractmethod
     def encode_observation(self, observation: Observation) -> tuple[float, ...]:
         """Return exactly ``input_count`` bounded input-node values."""
@@ -48,19 +52,17 @@ class FoodWebAgentAdapter(AgentAdapter):
     # turn in [-1, 1], throttle translated from [-1, 1] to [0, 1].
     action_count = 2
 
-    def __init__(
-        self, *, vision_pixels: int = 9, schema: str = "ray_image_v3",
-        directional: bool = True,
-    ) -> None:
+    def __init__(self, *, vision_pixels: int = 9) -> None:
         if vision_pixels < 1:
             raise ValueError("vision_pixels must be positive")
-        if schema not in {"ray_image_v3", "body_v2"}:
-            raise ValueError(f"unknown food-web observation schema: {schema}")
-        self.vision_pixels, self.schema = vision_pixels, schema
-        self.directional = directional
-        # body_v2 is retained only so old saved 7/13-channel controllers can
-        # still be demonstrated. New evolution always uses ray_image_v3.
-        self.input_count = 4 + 3 * vision_pixels if schema == "ray_image_v3" else (13 if directional else 7)
+        self.vision_pixels = vision_pixels
+        self.input_count = 4 + 3 * vision_pixels
+
+    @property
+    def input_signal_channels(self) -> tuple[int, ...]:
+        # Interoception uses a distinct chemical signal from exteroceptive ray
+        # vision.  The port remains sparse: only this coordinate is nonzero.
+        return (1, 1, 1, 1) + (0,) * (3 * self.vision_pixels)
 
     def encode_observation(self, observation: Observation) -> tuple[float, ...]:
         fallback_hunger = 1.0 - float(observation.get("energy", 0.0)) / 9.0
@@ -69,22 +71,7 @@ class FoodWebAgentAdapter(AgentAdapter):
         ate = 1.0 if bool(observation.get("ate", False)) else -1.0
         time_since_meal = bounded(2.0 * float(observation.get("time_since_meal", 0.0)) - 1.0)
         body = (hunger, energy_change, ate, time_since_meal)
-        if self.schema == "ray_image_v3":
-            return body + self._ray_image(observation)
-
-        kinds = {"plant": (0.0, 0.0, 0.0), "prey": (0.0, 0.0, 0.0), "predator": (0.0, 0.0, 0.0)}
-        for ray in observation.get("vision", ()):
-            distance, ray_range = ray.get("distance"), float(ray.get("range", 1.0))
-            if distance is None or ray_range <= 0:
-                continue
-            kind = str(ray.get("kind"))
-            proximity = bounded(1.0 - float(distance) / ray_range)
-            if kind in kinds and proximity > kinds[kind][0]:
-                angle = float(ray.get("angle", 0.0))
-                kinds[kind] = (proximity, proximity * bounded(sin(angle)), proximity * bounded(cos(angle)))
-        if not self.directional:
-            return body + (kinds["plant"][0], kinds["prey"][0], kinds["predator"][0])
-        return body + (*kinds["plant"], *kinds["prey"], *kinds["predator"])
+        return body + self._ray_image(observation)
 
     def _ray_image(self, observation: Observation) -> tuple[float, ...]:
         rays = tuple(observation.get("vision", ()))

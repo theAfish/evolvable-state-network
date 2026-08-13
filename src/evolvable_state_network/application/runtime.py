@@ -76,10 +76,12 @@ class ApplicationRuntime:
                 else:
                     with self.embodied_checkpoint_lock:
                         report = json.loads(path.read_text(encoding="utf-8"))
+                if report.get("task_config", {}).get("embodied_interface") != "ray_image_v3_sparse_multichannel_v1":
+                    continue
                 mode = report.get("training_mode", report.get("task_config", {}).get("training_mode", "continuous"))
                 total = report.get("generations", 0) if mode == "batch" else report.get("ticks", 0)
                 checkpoint = report.get("checkpoint_generation", total) if mode == "batch" else report.get("checkpoint_tick", total)
-                runs.append({"id": directory.name, "training_mode": mode, "algorithm": report.get("algorithm", report.get("task_config", {}).get("algorithm", "cma_es")), "objective": report.get("objective", report.get("task_config", {}).get("objective", "legacy_fitness")), "ticks": total, "checkpoint_tick": checkpoint, "complete": completed, "source": "completed_report" if completed else "current_checkpoint", "prey_best_lifetime": report["prey"].get("best_lifetime", report["prey"].get("best_fitness", 0.0)), "predator_best_lifetime": report["predator"].get("best_lifetime", report["predator"].get("best_fitness", 0.0)), "prey_count": report["task_config"]["prey_count"], "predator_count": report["task_config"]["predator_count"]})
+                runs.append({"id": directory.name, "training_mode": mode, "algorithm": report.get("algorithm", report.get("task_config", {}).get("algorithm", "cma_es")), "objective": report.get("objective", report.get("task_config", {}).get("objective", "legacy_fitness")), "ticks": total, "checkpoint_tick": checkpoint, "complete": completed, "source": "completed_report" if completed else "current_checkpoint", "prey_best_lifetime": report["prey"].get("best_lifetime", report["prey"].get("best_fitness", 0.0)), "predator_best_lifetime": report["predator"].get("best_lifetime", report["predator"].get("best_fitness", 0.0)), "prey_count": report["task_config"]["prey_count"], "predator_count": report["task_config"]["predator_count"], "state_width": report["architecture"]["state_width"]})
             except (OSError, KeyError, TypeError, ValueError):
                 continue
         return sorted(runs, key=lambda item: item["id"], reverse=True)
@@ -94,11 +96,17 @@ class ApplicationRuntime:
         if root not in directory.parents:
             raise ValueError("selected embodied run is unavailable")
         if report_path.is_file():
-            return json.loads(report_path.read_text(encoding="utf-8")), "completed_report"
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            if report.get("task_config", {}).get("embodied_interface") != "ray_image_v3_sparse_multichannel_v1":
+                raise ValueError("selected run uses the removed legacy embodied interface")
+            return report, "completed_report"
         with self.embodied_checkpoint_lock:
             if not checkpoint_path.is_file():
                 raise ValueError("selected embodied run is unavailable")
-            return json.loads(checkpoint_path.read_text(encoding="utf-8")), "current_checkpoint"
+            report = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+            if report.get("task_config", {}).get("embodied_interface") != "ray_image_v3_sparse_multichannel_v1":
+                raise ValueError("selected run uses the removed legacy embodied interface")
+            return report, "current_checkpoint"
 
     def load_embodied_report(self, run_id: str) -> dict[str, object]:
         """Load a completed report or the latest usable training checkpoint."""
@@ -149,10 +157,8 @@ class ApplicationRuntime:
         # worlds and therefore always replace deaths with the learned rule.
         environment_data["respawn_on_death"] = True
         network_data = dict(task_data["network"])
-        # Reports written before ray_image_v3 used the compact 7/13-channel
-        # adapter and often have fewer than 33 nodes.
-        network_data.setdefault("observation_schema", task_data.get("observation_schema", "body_v2"))
         network_data.setdefault("vision_pixels", 9)
+        network_data["nodes"] = max(34, int(network_data["nodes"]))
         task = EmbodiedFoodWebTaskConfig(
             network=EmbodiedNetworkConfig(**network_data), environment=FoodWebConfig(**environment_data),
             prey_count=payload.prey_count if payload.prey_count is not None else int(task_data["prey_count"]),
@@ -177,6 +183,13 @@ class ApplicationRuntime:
             if session is None:
                 raise KeyError(session_id)
             return {"session_id": session_id, **session.advance(ticks)}
+
+    def embodied_individual_snapshot(self, session_id: str, individual_id: str) -> dict[str, object]:
+        with self.embodied_lock:
+            session = self.embodied_sessions.get(session_id)
+            if session is None:
+                raise KeyError(session_id)
+            return {"session_id": session_id, **session.individual_snapshot(individual_id)}
 
     def update_job(self, job_id: str, event: dict[str, object]) -> None:
         with self.jobs_lock:

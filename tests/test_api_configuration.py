@@ -80,12 +80,13 @@ class ApiConfigurationTests(unittest.TestCase):
         self.assertEqual(training.training_mode, "batch")
         self.assertEqual(training.batch_validation_trials, 8)
         self.assertEqual(training.batch_test_trials, 16)
-        self.assertEqual(training.nodes, 64)
+        self.assertEqual(training.hidden_nodes, 31)
         self.assertEqual(training.population_size, 24)
         self.assertEqual(training.network_dt, .05)
         self.assertEqual(training.max_delta, .24)
         self.assertEqual(training.edge_step_scale, .06)
         self.assertTrue(training.enforce_survival_pressure)
+        self.assertEqual(training.state_width, 2)
         self.assertEqual(
             EmbodiedFoodWebTrainingPayload(max_food=0, enforce_survival_pressure=False).max_food,
             0,
@@ -97,6 +98,8 @@ class ApiConfigurationTests(unittest.TestCase):
             EmbodiedFoodWebTrainingPayload(algorithm="unknown")
         with self.assertRaises(ValidationError):
             EmbodiedFoodWebTrainingPayload(training_mode="unknown")
+        with self.assertRaises(ValidationError):
+            EmbodiedFoodWebTrainingPayload(state_width=1)
         with self.assertRaises(ValidationError):
             EmbodiedFoodWebTrainingPayload(max_delta=0)
         with self.assertRaises(ValidationError) as horizon_error:

@@ -93,7 +93,8 @@ class EmbodiedFoodWebTrainingPayload(StrictModel):
     population_size: int = Field(24, ge=2, le=64)
     prey_count: int = Field(5, ge=1, le=64)
     predator_count: int = Field(2, ge=0, le=64)
-    nodes: int = Field(64, ge=33, le=400)
+    hidden_nodes: int = Field(31, ge=1, le=367)
+    state_width: int = Field(2, ge=2, le=8)
     mean_degree: float = Field(6.0, ge=0, le=40)
     initial_state_scale: float = Field(.12, ge=0, le=1)
     network_dt: float = Field(.05, gt=0, le=.25)
@@ -117,8 +118,9 @@ class EmbodiedFoodWebTrainingPayload(StrictModel):
 
     @model_validator(mode="after")
     def validate_degree(self) -> "EmbodiedFoodWebTrainingPayload":
-        if self.mean_degree > self.nodes - 1:
-            raise ValueError("mean_degree cannot exceed nodes - 1")
+        # The food-web interface has 31 sensory and 2 action boundary nodes.
+        if self.mean_degree > self.hidden_nodes + 33 - 1:
+            raise ValueError("mean_degree cannot exceed total network nodes - 1")
         if self.model_id and self.continue_run_id:
             raise ValueError("choose either a basic model or a prior embodied run, not both")
         if self.execution_backend == "python" and self.device == "cuda":
