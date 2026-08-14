@@ -158,7 +158,10 @@ class ApplicationRuntime:
         environment_data["respawn_on_death"] = True
         network_data = dict(task_data["network"])
         network_data.setdefault("vision_pixels", 9)
-        network_data["nodes"] = max(34, int(network_data["nodes"]))
+        # Reports produced before input ablations had all four body ports but
+        # no explicit layout field. Preserve that historical interpretation.
+        network_data.setdefault("body_inputs", ("hunger", "energy_change", "ate", "time_since_meal"))
+        network_data["nodes"] = max(30, int(network_data["nodes"]))
         task = EmbodiedFoodWebTaskConfig(
             network=EmbodiedNetworkConfig(**network_data), environment=FoodWebConfig(**environment_data),
             prey_count=payload.prey_count if payload.prey_count is not None else int(task_data["prey_count"]),

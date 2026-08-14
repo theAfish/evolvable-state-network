@@ -31,12 +31,15 @@ class EmbodiedNetworkConfig:
     max_abs_state: float = 4.0
     edge_step_scale: float = .06
     vision_pixels: int = 9
+    body_inputs: tuple[Literal["hunger", "energy_change", "ate", "time_since_meal"], ...] = ("hunger",)
     execution_backend: Literal["python", "torch"] = "python"
     device: Literal["auto", "cpu", "cuda"] = "cpu"
 
     def __post_init__(self) -> None:
         if self.nodes < 3 or self.mean_degree < 0 or self.state_width < 1 or self.vision_pixels < 1:
             raise ValueError("network shape is invalid")
+        if not self.body_inputs or any(item not in {"hunger", "energy_change", "ate", "time_since_meal"} for item in self.body_inputs) or len(set(self.body_inputs)) != len(self.body_inputs):
+            raise ValueError("body_inputs must be a non-empty selection of unique known body channels")
         if self.execution_backend not in {"python", "torch"} or self.device not in {"auto", "cpu", "cuda"}:
             raise ValueError("unknown embodied execution backend or device")
         if self.execution_backend == "python" and self.device == "cuda":

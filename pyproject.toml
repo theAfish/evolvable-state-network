@@ -16,13 +16,15 @@ dependencies = [
     "torch>=2.13",
     "fastapi>=0.116,<1",
     "uvicorn>=0.35,<1",
-    "httpx>=0.28,<1"
+    "httpx>=0.28,<1",
+    "PyYAML>=6.0,<7"
 ]
 
 [project.scripts]
 esn-experiment = "evolvable_state_network.cli:main"
 esn-dashboard = "evolvable_state_network.server:main"
 esn-evolve = "evolvable_state_network.evolution_cli:main"
+esn-embodied = "evolvable_state_network.embodied_cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

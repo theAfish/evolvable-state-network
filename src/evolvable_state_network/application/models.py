@@ -90,6 +90,7 @@ class EmbodiedFoodWebTrainingPayload(StrictModel):
     execution_backend: Literal["python", "torch"] = "torch"
     device: Literal["auto", "cpu", "cuda"] = "cpu"
     workers: int = Field(0, ge=0, le=32)
+    body_inputs: tuple[Literal["hunger", "energy_change", "ate", "time_since_meal"], ...] = Field(("hunger",), min_length=1)
     population_size: int = Field(24, ge=2, le=64)
     prey_count: int = Field(5, ge=1, le=64)
     predator_count: int = Field(2, ge=0, le=64)
@@ -118,9 +119,11 @@ class EmbodiedFoodWebTrainingPayload(StrictModel):
 
     @model_validator(mode="after")
     def validate_degree(self) -> "EmbodiedFoodWebTrainingPayload":
-        # The food-web interface has 31 sensory and 2 action boundary nodes.
-        if self.mean_degree > self.hidden_nodes + 33 - 1:
+        # One port per selected body input, 27 ray-image ports, and two actions.
+        if self.mean_degree > self.hidden_nodes + len(self.body_inputs) + 29 - 1:
             raise ValueError("mean_degree cannot exceed total network nodes - 1")
+        if len(set(self.body_inputs)) != len(self.body_inputs):
+            raise ValueError("body_inputs cannot contain duplicates")
         if self.model_id and self.continue_run_id:
             raise ValueError("choose either a basic model or a prior embodied run, not both")
         if self.execution_backend == "python" and self.device == "cuda":

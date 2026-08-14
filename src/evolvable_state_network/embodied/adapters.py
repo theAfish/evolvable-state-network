@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Sequence
+from typing import Literal, Sequence
 
 from ..environments import Action, Observation
 
@@ -45,24 +45,35 @@ class AgentAdapter(ABC):
 class FoodWebAgentAdapter(AgentAdapter):
     """Food-web body plus an ordered, ego-relative one-dimensional ray image."""
 
-    # Four body channels followed by three proximity channels per ray pixel:
+    # Selected body channels followed by three proximity channels per ray pixel:
     # plant, prey, predator.  Pixel order is left-to-right in the agent's
     # current field of view, so no absolute or relative angle scalar is needed.
-    input_count = 31
+    BODY_INPUTS = ("hunger", "energy_change", "ate", "time_since_meal")
     # turn in [-1, 1], throttle translated from [-1, 1] to [0, 1].
     action_count = 2
 
-    def __init__(self, *, vision_pixels: int = 9) -> None:
+    def __init__(
+        self,
+        *,
+        vision_pixels: int = 9,
+        body_inputs: Sequence[Literal["hunger", "energy_change", "ate", "time_since_meal"]] = ("hunger",),
+    ) -> None:
         if vision_pixels < 1:
             raise ValueError("vision_pixels must be positive")
+        if not body_inputs or any(item not in self.BODY_INPUTS for item in body_inputs) or len(set(body_inputs)) != len(body_inputs):
+            raise ValueError("body_inputs must be a non-empty selection of unique known body channels")
         self.vision_pixels = vision_pixels
-        self.input_count = 4 + 3 * vision_pixels
+        self.body_inputs = tuple(body_inputs)
+
+    @property
+    def input_count(self) -> int:
+        return len(self.body_inputs) + 3 * self.vision_pixels
 
     @property
     def input_signal_channels(self) -> tuple[int, ...]:
         # Interoception uses a distinct chemical signal from exteroceptive ray
         # vision.  The port remains sparse: only this coordinate is nonzero.
-        return (1, 1, 1, 1) + (0,) * (3 * self.vision_pixels)
+        return (1,) * len(self.body_inputs) + (0,) * (3 * self.vision_pixels)
 
     def encode_observation(self, observation: Observation) -> tuple[float, ...]:
         fallback_hunger = 1.0 - float(observation.get("energy", 0.0)) / 9.0
@@ -70,7 +81,8 @@ class FoodWebAgentAdapter(AgentAdapter):
         energy_change = bounded(float(observation.get("energy_change", 0.0)))
         ate = 1.0 if bool(observation.get("ate", False)) else -1.0
         time_since_meal = bounded(2.0 * float(observation.get("time_since_meal", 0.0)) - 1.0)
-        body = (hunger, energy_change, ate, time_since_meal)
+        values = {"hunger": hunger, "energy_change": energy_change, "ate": ate, "time_since_meal": time_since_meal}
+        body = tuple(values[name] for name in self.body_inputs)
         return body + self._ray_image(observation)
 
     def _ray_image(self, observation: Observation) -> tuple[float, ...]:

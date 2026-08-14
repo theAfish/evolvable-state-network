@@ -172,7 +172,8 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 400,
                 f"selected rule uses {architecture.state_width} node-state channels; set Node state channels to {architecture.state_width}",
             )
-        boundary_nodes = FoodWebAgentAdapter(vision_pixels=9).input_count + FoodWebAgentAdapter(vision_pixels=9).action_count
+        adapter = FoodWebAgentAdapter(vision_pixels=9, body_inputs=payload.body_inputs)
+        boundary_nodes = adapter.input_count + adapter.action_count
         total_nodes = payload.hidden_nodes + boundary_nodes
         network = EmbodiedNetworkConfig(
             nodes=total_nodes, mean_degree=payload.mean_degree,
@@ -180,6 +181,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             dt=payload.network_dt, max_delta=payload.max_delta,
             edge_step_scale=payload.edge_step_scale,
             vision_pixels=9,
+            body_inputs=payload.body_inputs,
             execution_backend=payload.execution_backend, device=payload.device,
         )
         task = EmbodiedFoodWebTaskConfig(
@@ -238,6 +240,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             "initial_sigma": evolution.initial_sigma,
             "execution_backend": payload.execution_backend, "device": payload.device,
             "workers": payload.workers,
+            "body_inputs": list(payload.body_inputs),
             "embodied_interface": "ray_image_v3_sparse_multichannel_v1",
             "network": asdict(network), "environment": asdict(task.environment),
             "prey_count": task.prey_count, "predator_count": task.predator_count,
@@ -247,6 +250,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             "enforce_survival_pressure": payload.enforce_survival_pressure,
             "diagnostics": {
                 "boundary_nodes": boundary_nodes,
+                "body_inputs": list(payload.body_inputs),
                 "hidden_nodes": payload.hidden_nodes,
                 "total_nodes": total_nodes,
                 "no_food_lifetime_steps": 20.0 * payload.initial_energy_scale,

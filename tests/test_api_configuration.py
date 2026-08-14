@@ -85,6 +85,7 @@ class ApiConfigurationTests(unittest.TestCase):
         self.assertEqual(training.network_dt, .05)
         self.assertEqual(training.max_delta, .24)
         self.assertEqual(training.edge_step_scale, .06)
+        self.assertEqual(training.body_inputs, ("hunger",))
         self.assertTrue(training.enforce_survival_pressure)
         self.assertEqual(training.state_width, 2)
         self.assertEqual(
@@ -100,6 +101,10 @@ class ApiConfigurationTests(unittest.TestCase):
             EmbodiedFoodWebTrainingPayload(training_mode="unknown")
         with self.assertRaises(ValidationError):
             EmbodiedFoodWebTrainingPayload(state_width=1)
+        with self.assertRaises(ValidationError):
+            EmbodiedFoodWebTrainingPayload(body_inputs=())
+        with self.assertRaises(ValidationError):
+            EmbodiedFoodWebTrainingPayload(body_inputs=("hunger", "hunger"))
         with self.assertRaises(ValidationError):
             EmbodiedFoodWebTrainingPayload(max_delta=0)
         with self.assertRaises(ValidationError) as horizon_error:

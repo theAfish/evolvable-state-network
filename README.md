@@ -30,8 +30,9 @@ random worlds, and
 can start CMA-ES from an exported joint rule genome via
 `EmbodiedRuleEvolutionConfig(initial_genome=...)`.
 
-Food-web agents sense hunger, signed energy change, whether they ate on the
-previous world tick, and elapsed starvation time as ordinary body channels.
+Food-web agents can receive hunger, signed energy change, whether they ate on
+the previous world tick, and elapsed starvation time as ordinary body channels;
+the default input ablation supplies hunger only.
 No optimizer reward or previous action is injected into the network; retaining
 action or body history is the job of recurrent node and edge state. Immutable
 boundary-role tags distinguish sensor and actuator meanings without becoming
@@ -144,6 +145,31 @@ The CLI evolves node and edge rule parameters jointly by default. Use
 `--evolve node`, `--evolve edge`, or `--evolve joint` to select a parameter
 group explicitly. Newly exported replay data shows each edge's unit base
 weight, its current smooth communication strength, and their effective product.
+
+### Headless embodied food-web jobs (Slurm)
+
+The embodied food-web trainer can run directly without the dashboard. It reads
+the same setting names as the Embodied UI and validates them with the same
+request model. Use the CPU-oriented template or generate a fresh commented one:
+
+```bash
+esn-embodied --config examples/embodied-cpu.yaml --data-dir "$SCRATCH/esn-results"
+esn-embodied --write-template my-embodied-job.yaml
+```
+
+For a Slurm allocation, adapt
+[`examples/train_embodied_cpu.sbatch`](examples/train_embodied_cpu.sbatch).
+Set `execution_backend: torch`, `device: cpu`, and set `workers` to the number
+of candidate-worker processes requested from Slurm (or `0` to use the automatic
+limit of eight). The command writes dashboard-compatible checkpoints to
+`<data-dir>/embodied_runs/<run-id>/checkpoint.json` and a final `report.json`.
+It catches Slurm's `SIGTERM`, stops at the next safe runner boundary, and leaves
+the checkpoint available for a later UI or CLI continuation via
+`continue_run_id`.
+
+`body_inputs` selects the interoceptive signals supplied to the embodied rule.
+It defaults to `[hunger]`; add any of `energy_change`, `ate`, and
+`time_since_meal` for a controlled input ablation. Ray vision is always present.
 
 The older fixed-horizon generation runner is retained only for comparison via
 `--legacy-generational`. It uses the tensorized Torch backend for the standard MLP

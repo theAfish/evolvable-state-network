@@ -34,7 +34,9 @@ class EmbodiedArchitectureTests(unittest.TestCase):
         self.config = EmbodiedNetworkConfig(nodes=34, mean_degree=0.0, state_width=2)
 
     def test_adapter_preserves_ordered_ray_pixels_without_angles(self) -> None:
-        values = FoodWebAgentAdapter(vision_pixels=3).encode_observation({
+        values = FoodWebAgentAdapter(
+            vision_pixels=3, body_inputs=("hunger", "energy_change", "ate", "time_since_meal"),
+        ).encode_observation({
             "hunger": .75, "energy_change": -.1, "ate": True, "time_since_meal": .25,
             "vision": (
                 {"kind": "plant", "distance": 2.0, "range": 10.0, "angle": 123.0},
@@ -48,10 +50,17 @@ class EmbodiedArchitectureTests(unittest.TestCase):
         for actual, wanted in zip(values[4:], expected, strict=True):
             self.assertAlmostEqual(actual, wanted)
 
+    def test_adapter_can_expose_hunger_without_other_body_channels(self) -> None:
+        adapter = FoodWebAgentAdapter(vision_pixels=3, body_inputs=("hunger",))
+        values = adapter.encode_observation({"hunger": .75, "energy_change": -.1, "ate": True, "time_since_meal": .25, "vision": ()})
+        self.assertEqual(adapter.input_signal_channels, (1,) + (0,) * 9)
+        self.assertEqual(len(values), 10)
+        self.assertEqual(values[0], .5)
+
     def test_interoception_and_vision_use_distinct_sparse_node_channels(self) -> None:
         network = EmbodiedNetwork(self.node, self.edge, FoodWebAgentAdapter(), self.config, seed=5)
         network.act({"hunger": .75, "energy_change": -.1, "ate": True, "time_since_meal": .25, "vision": ()})
-        hunger_node, first_vision_node = network.interface.input_nodes[0], network.interface.input_nodes[4]
+        hunger_node, first_vision_node = network.interface.input_nodes[0], network.interface.input_nodes[1]
         self.assertEqual(network.state.node[0][hunger_node], (0.0, .5))
         self.assertEqual(network.state.node[0][first_vision_node], (0.0, 0.0))
 

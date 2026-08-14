@@ -134,6 +134,7 @@ class EmbodiedFoodWebController(Controller):
     def _adapter(self) -> FoodWebAgentAdapter:
         return FoodWebAgentAdapter(
             vision_pixels=self._config.vision_pixels,
+            body_inputs=self._config.body_inputs,
         )
 
     def begin_episode(self, *, seed: int | None = None) -> None:
