@@ -37,6 +37,10 @@ predator_count: 2
 hidden_nodes: 31
 state_width: 2
 mean_degree: 6.0
+# Default topology: input -> hidden -> output; inputs cannot connect to each other.
+allow_input_output_connections: false
+# Direct sensor-to-action ablation example (replace the preceding value):
+# allow_input_output_connections: true
 initial_state_scale: 0.12
 network_dt: 0.05
 max_delta: 0.12
@@ -105,7 +109,7 @@ def _build_runner(payload: EmbodiedFoodWebTrainingPayload, runtime: ApplicationR
 
     adapter = FoodWebAgentAdapter(vision_pixels=9, body_inputs=payload.body_inputs)
     boundary_nodes = adapter.input_count + adapter.action_count
-    network = EmbodiedNetworkConfig(nodes=payload.hidden_nodes + boundary_nodes, mean_degree=payload.mean_degree, state_width=architecture.state_width, initial_state_scale=payload.initial_state_scale, dt=payload.network_dt, max_delta=payload.max_delta, edge_step_scale=payload.edge_step_scale, vision_pixels=9, body_inputs=payload.body_inputs, execution_backend=payload.execution_backend, device=payload.device)
+    network = EmbodiedNetworkConfig(nodes=payload.hidden_nodes + boundary_nodes, mean_degree=payload.mean_degree, state_width=architecture.state_width, initial_state_scale=payload.initial_state_scale, dt=payload.network_dt, max_delta=payload.max_delta, edge_step_scale=payload.edge_step_scale, vision_pixels=9, body_inputs=payload.body_inputs, allow_input_output_connections=payload.allow_input_output_connections, execution_backend=payload.execution_backend, device=payload.device)
     task = EmbodiedFoodWebTaskConfig(network=network, environment=FoodWebConfig(prey_initial_energy=9.0 * payload.initial_energy_scale, predator_initial_energy=14.0 * payload.initial_energy_scale, initial_plants=min(24, payload.max_food), max_plants=payload.max_food, plant_regrowth=payload.food_growth_rate, max_speed=payload.max_speed, max_turn=payload.max_turn, plant_cluster_count=payload.plant_cluster_count, plant_cluster_radius=payload.plant_cluster_radius, respawn_on_death=payload.training_mode != "batch"), prey_count=payload.prey_count, predator_count=payload.predator_count, max_steps=payload.batch_episode_steps if payload.training_mode == "batch" else 1, trials=1, seed=seed)
     evaluator = FoodWebCoevolutionEvaluator(architecture, edge_architecture, task)
     evolution = EmbodiedRuleEvolutionConfig(generations=payload.batch_generations if payload.training_mode == "batch" else 1, population_size=payload.population_size, seed=seed, initial_genome=initial_genome, algorithm=payload.algorithm)

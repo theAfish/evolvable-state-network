@@ -57,6 +57,14 @@ class EmbodiedArchitectureTests(unittest.TestCase):
         self.assertEqual(len(values), 10)
         self.assertEqual(values[0], .5)
 
+    def test_inspection_snapshot_reports_selected_body_inputs(self) -> None:
+        network = EmbodiedNetwork(
+            self.node, self.edge, FoodWebAgentAdapter(vision_pixels=3, body_inputs=("hunger",)),
+            self.config, seed=5,
+        )
+        snapshot = network.inspection_snapshot()
+        self.assertEqual(snapshot["body_inputs"], ["hunger"])
+
     def test_interoception_and_vision_use_distinct_sparse_node_channels(self) -> None:
         network = EmbodiedNetwork(self.node, self.edge, FoodWebAgentAdapter(), self.config, seed=5)
         network.act({"hunger": .75, "energy_change": -.1, "ate": True, "time_since_meal": .25, "vision": ()})
@@ -115,6 +123,25 @@ class EmbodiedArchitectureTests(unittest.TestCase):
         ))
         self.assertTrue(all(network.state.node[0][node][1:] == (0.0,) for node in actions))
         self.assertEqual(EmbodiedFoodWebController.learn, Controller.learn)
+
+    def test_input_to_action_edges_are_disabled_by_default_and_optional(self) -> None:
+        adapter = FoodWebAgentAdapter()
+        blocked = EmbodiedNetwork(self.node, self.edge, adapter, self.config, seed=5)
+        blocked_pairs = {(edge.source, edge.target) for edge in blocked.graph.edges}
+        self.assertFalse(any(
+            source in blocked.interface.input_nodes and target in blocked.interface.action_nodes
+            for source, target in blocked_pairs
+        ))
+
+        enabled = EmbodiedNetwork(
+            self.node, self.edge, adapter,
+            replace(self.config, mean_degree=100.0, allow_input_output_connections=True), seed=5,
+        )
+        enabled_pairs = {(edge.source, edge.target) for edge in enabled.graph.edges}
+        self.assertTrue(any(
+            source in enabled.interface.input_nodes and target in enabled.interface.action_nodes
+            for source, target in enabled_pairs
+        ))
 
     def test_boundary_nodes_keep_only_their_signal_coordinate(self) -> None:
         active_node = MLPUpdateRule(self.architecture, (.1,) * self.architecture.parameter_count)

@@ -137,24 +137,6 @@ class FastAPIServerTests(unittest.TestCase):
         self.assertEqual(duplicate.status_code, 200)
         self.assertEqual(wrong_kind.status_code, 404)
 
-    def test_typed_experiment_validation_and_execution(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            with TestClient(create_app(Path(directory))) as client:
-                invalid = client.post("/api/experiment", json={"nodes": 999})
-                response = client.post(
-                    "/api/experiment",
-                    json={
-                        "seed": 3, "nodes": 5, "mean_degree": 2, "steps": 8,
-                        "batch_size": 1, "dt": .1, "baseline": "fixed_rnn",
-                    },
-                )
-        self.assertEqual(invalid.status_code, 422)
-        self.assertEqual(response.status_code, 200)
-        document = response.json()
-        self.assertEqual(set(document["runs"]), {"fixed_rnn"})
-        self.assertEqual(document["graph"]["nodes"], 5)
-        self.assertEqual(document["simulation_config"]["dt"], .1)
-
     def test_embodied_training_can_continue_a_completed_run(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -228,13 +210,19 @@ class FastAPIServerTests(unittest.TestCase):
             with TestClient(create_app(root)) as client:
                 response = client.post(
                     "/api/embodied/sessions",
-                    json={"run_id": "demorun", "seed": 4, "prey_count": 4, "predator_count": 3, "initial_food": 11, "max_food": 30, "food_growth_rate": 5.5},
+                    json={"run_id": "demorun", "seed": 4, "network_hidden_nodes": 42, "network_mean_degree": 7.5, "prey_count": 4, "predator_count": 3, "initial_food": 11, "max_food": 30, "food_growth_rate": 5.5},
                 )
+                session = response.json()
+                individual_id = session["state"]["organisms"][0]["id"]
+                network = client.get(
+                    f"/api/embodied/sessions/{session['session_id']}/individuals/{individual_id}"
+                ).json()["network"]
         self.assertEqual(response.status_code, 200, response.text)
         state = response.json()["state"]
         self.assertEqual(state["population"], {"prey": 4, "predator": 3})
         self.assertEqual(len(state["plants"]), 11)
         self.assertEqual(state["plant_capacity"], 30)
+        self.assertEqual(network["nodes"], 42 + len(network["input_nodes"]) + len(network["action_nodes"]))
 
     def test_embodied_demo_exposes_selected_individual_network_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

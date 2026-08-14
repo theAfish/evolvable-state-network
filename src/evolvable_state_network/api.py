@@ -20,7 +20,6 @@ from .application.models import (
     EmbodiedDemoPayload,
     EmbodiedDemoStepPayload,
     EvolutionPayload,
-    ExperimentPayload,
     LiveSessionPayload,
     LiveStepPayload,
 )
@@ -30,7 +29,6 @@ from .evolution.candidate import EdgeArchitecture, RuleArchitecture
 from .dashboard import dashboard_document
 from .evolution.evaluation import CandidateEvaluator
 from .evolution import EvolutionConfig, EvolutionRunner, random_search_smoke_test
-from .experiment import ExperimentRequest, run_experiment
 from .storage import application_data_dir
 from .embodied import EmbodiedNetworkConfig, FoodWebAgentAdapter
 from .environments import FoodWebConfig
@@ -65,12 +63,6 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     @application.get("/api/health")
     def health() -> dict[str, object]:
         return {"status": "ok", "storage": str(runtime.root)}
-
-    @application.post("/api/experiment")
-    def experiment(payload: ExperimentPayload) -> dict[str, object]:
-        request = ExperimentRequest(**payload.model_dump())
-        result = run_experiment(request)
-        return dashboard_document(result.graph, result.runs, result.config)
 
     @application.get("/api/jobs/{job_id}")
     def job(job_id: str) -> dict[str, object]:
@@ -182,6 +174,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             edge_step_scale=payload.edge_step_scale,
             vision_pixels=9,
             body_inputs=payload.body_inputs,
+            allow_input_output_connections=payload.allow_input_output_connections,
             execution_backend=payload.execution_backend, device=payload.device,
         )
         task = EmbodiedFoodWebTaskConfig(

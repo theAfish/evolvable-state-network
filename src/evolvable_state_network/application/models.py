@@ -14,22 +14,6 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class ExperimentPayload(StrictModel):
-    seed: int = Field(7, ge=0, lt=2**32)
-    nodes: int = Field(24, ge=2, le=200)
-    mean_degree: float = Field(5.0, ge=0)
-    steps: int = Field(300, ge=1, le=5000)
-    batch_size: int = Field(4, ge=1, le=64)
-    dt: float = Field(.05, gt=0, le=1)
-    baseline: Literal["both", "fixed_rnn", "homeostatic"] = "both"
-
-    @model_validator(mode="after")
-    def validate_degree(self) -> "ExperimentPayload":
-        if self.mean_degree > self.nodes - 1:
-            raise ValueError("mean_degree cannot exceed nodes - 1")
-        return self
-
-
 class EvolutionPayload(StrictModel):
     seed: int | None = Field(None, ge=0, lt=2**32)
     samples: int = Field(16, ge=4, le=64)
@@ -97,6 +81,7 @@ class EmbodiedFoodWebTrainingPayload(StrictModel):
     hidden_nodes: int = Field(31, ge=1, le=367)
     state_width: int = Field(2, ge=2, le=8)
     mean_degree: float = Field(6.0, ge=0, le=40)
+    allow_input_output_connections: bool = False
     initial_state_scale: float = Field(.12, ge=0, le=1)
     network_dt: float = Field(.05, gt=0, le=.25)
     max_delta: float = Field(.12, gt=0, le=.5)
@@ -152,6 +137,18 @@ class EmbodiedFoodWebTrainingPayload(StrictModel):
 class EmbodiedDemoPayload(StrictModel):
     run_id: str
     seed: int = Field(7, ge=0, lt=2**32)
+    network_hidden_nodes: int | None = Field(
+        None,
+        ge=1,
+        le=367,
+        description="Anonymous recurrent nodes in each newly sampled demonstration network",
+    )
+    network_mean_degree: float | None = Field(
+        None,
+        ge=0,
+        le=400,
+        description="Requested mean degree for each newly sampled demonstration network",
+    )
     prey_count: int | None = Field(None, ge=1, le=64)
     predator_count: int | None = Field(None, ge=0, le=64)
     initial_food: int | None = Field(None, ge=0, le=10_000)

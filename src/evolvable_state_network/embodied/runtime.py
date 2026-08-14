@@ -32,6 +32,7 @@ class EmbodiedNetworkConfig:
     edge_step_scale: float = .06
     vision_pixels: int = 9
     body_inputs: tuple[Literal["hunger", "energy_change", "ate", "time_since_meal"], ...] = ("hunger",)
+    allow_input_output_connections: bool = False
     execution_backend: Literal["python", "torch"] = "python"
     device: Literal["auto", "cpu", "cuda"] = "cpu"
 
@@ -69,10 +70,10 @@ class NetworkInterface:
 def generate_embodied_graph(config: EmbodiedNetworkConfig, interface: NetworkInterface, seed: int) -> Graph:
     """Sample a directed sensory → recurrent → action graph.
 
-    Boundary nodes are ports, not recurrent tissue: sensory nodes only emit,
-    action nodes only receive, and every path crosses at least one anonymous
-    recurrent node.  This intentionally rules out input-input, output-output,
-    output-input, and direct input-output connections.
+    Boundary nodes are ports, not recurrent tissue: sensory nodes only emit
+    and action nodes only receive.  By default every path crosses at least one
+    anonymous recurrent node; ``allow_input_output_connections`` additionally
+    permits direct sensory-to-action edges.
     """
     inputs, actions = set(interface.input_nodes), set(interface.action_nodes)
     hidden = tuple(node for node in range(config.nodes) if node not in inputs | actions)
@@ -82,7 +83,7 @@ def generate_embodied_graph(config: EmbodiedNetworkConfig, interface: NetworkInt
         (source, target)
         for source in (*interface.input_nodes, *hidden)
         for target in (*hidden, *interface.action_nodes)
-        if source != target
+        if source != target and (source not in inputs or target not in actions or config.allow_input_output_connections)
     ]
     random = Random(seed + 7_919)
     probability = min(1.0, config.mean_degree * config.nodes / max(1, len(candidates)))
@@ -153,6 +154,7 @@ class EmbodiedNetwork:
             "state_width": self.config.state_width,
             "nodes": self.config.nodes,
             "vision_pixels": self.config.vision_pixels,
+            "body_inputs": list(self.config.body_inputs),
             "input_signal_channels": list(self.adapter.input_signal_channels),
             "edges": [
                 {

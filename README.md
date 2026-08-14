@@ -171,6 +171,18 @@ the checkpoint available for a later UI or CLI continuation via
 It defaults to `[hunger]`; add any of `energy_change`, `ate`, and
 `time_since_meal` for a controlled input ablation. Ray vision is always present.
 
+`allow_input_output_connections` defaults to `false`, so sensory inputs connect
+only to hidden nodes and never directly to action outputs (inputs never connect
+to one another). For a direct sensor-to-action ablation, set it to `true`:
+
+```yaml
+# Strict recurrent-interface topology (default)
+allow_input_output_connections: false
+
+# Direct sensor-to-action ablation
+# allow_input_output_connections: true
+```
+
 The older fixed-horizon generation runner is retained only for comparison via
 `--legacy-generational`. It uses the tensorized Torch backend for the standard MLP
 node/edge rules, selecting CUDA when it is available. The generic Python
@@ -261,15 +273,9 @@ fixed 80-step validation window. The older **Legacy comparison** view retains
 its generation-based plots but no longer supplies the interactive replay chooser.
 
 The dashboard supports wall-clock playback, stepping, speed and loop controls,
-baseline/batch/coordinate choices, and click-to-inspect node and edge state,
-external input, graph connections, metrics, and active disturbances. The **New experiment** panel runs a fresh
-parameterized simulation through this local server and loads it directly into
-the replay view. It can also load any compatible
-replay JSON through its file picker.
-
-To generate a fixed-rule comparison from the command line, run `esn-experiment`.
-It also stores its metrics, plots, and replay JSON in application data without
-requiring an output argument.
+batch/coordinate choices, and click-to-inspect node and edge state, external
+input, graph connections, metrics, and active disturbances. It can load any
+compatible replay JSON through its file picker.
 
 ## Extending the substrate
 
@@ -295,7 +301,6 @@ evolvable_state_network/
 ├── evolution/         candidates, genomes, evaluation, CMA-ES, search runners
 ├── simulation/        reference engine and optimized Torch backend
 ├── api.py             HTTP route composition
-├── experiment.py      fixed-rule experiment use case
 └── web/               packaged browser assets
 ```
 

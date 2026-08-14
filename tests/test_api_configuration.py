@@ -11,7 +11,6 @@ from evolvable_state_network.application.models import (
     AsyncTrainingPayload,
     EmbodiedDemoPayload,
     EmbodiedFoodWebTrainingPayload,
-    ExperimentPayload,
 )
 
 
@@ -60,10 +59,6 @@ class ApiConfigurationTests(unittest.TestCase):
     def test_request_models_reject_cross_field_and_unknown_values(self) -> None:
         with self.assertRaises(ValidationError):
             AsyncTrainingPayload(stage_1_lifetime=40, stage_2_lifetime=20)
-        with self.assertRaises(ValidationError):
-            ExperimentPayload(nodes=4, mean_degree=5)
-        with self.assertRaises(ValidationError):
-            ExperimentPayload(unsupported=True)
 
     def test_embodied_food_and_demo_ecology_controls_are_validated(self) -> None:
         training = EmbodiedFoodWebTrainingPayload(
@@ -71,7 +66,7 @@ class ApiConfigurationTests(unittest.TestCase):
             max_speed=12.0, max_turn=4.0,
             network_dt=.05, max_delta=.24, edge_step_scale=.06,
         )
-        demo = EmbodiedDemoPayload(run_id="run", prey_count=4, predator_count=3, initial_food=20, max_food=90, food_growth_rate=7.5)
+        demo = EmbodiedDemoPayload(run_id="run", network_hidden_nodes=48, network_mean_degree=7.5, prey_count=4, predator_count=3, initial_food=20, max_food=90, food_growth_rate=7.5)
         self.assertEqual(training.max_food, 120)
         self.assertEqual(training.food_growth_rate, 9.5)
         self.assertEqual(training.max_speed, 12.0)
@@ -86,6 +81,8 @@ class ApiConfigurationTests(unittest.TestCase):
         self.assertEqual(training.max_delta, .24)
         self.assertEqual(training.edge_step_scale, .06)
         self.assertEqual(training.body_inputs, ("hunger",))
+        self.assertFalse(training.allow_input_output_connections)
+        self.assertTrue(EmbodiedFoodWebTrainingPayload(allow_input_output_connections=True).allow_input_output_connections)
         self.assertTrue(training.enforce_survival_pressure)
         self.assertEqual(training.state_width, 2)
         self.assertEqual(
@@ -93,8 +90,12 @@ class ApiConfigurationTests(unittest.TestCase):
             0,
         )
         self.assertEqual(demo.max_food, 90)
+        self.assertEqual(demo.network_hidden_nodes, 48)
+        self.assertEqual(demo.network_mean_degree, 7.5)
         with self.assertRaises(ValidationError):
             EmbodiedDemoPayload(run_id="run", initial_food=91, max_food=90)
+        with self.assertRaises(ValidationError):
+            EmbodiedDemoPayload(run_id="run", network_hidden_nodes=0)
         with self.assertRaises(ValidationError):
             EmbodiedFoodWebTrainingPayload(algorithm="unknown")
         with self.assertRaises(ValidationError):

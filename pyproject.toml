@@ -21,7 +21,6 @@ dependencies = [
 ]
 
 [project.scripts]
-esn-experiment = "evolvable_state_network.cli:main"
 esn-dashboard = "evolvable_state_network.server:main"
 esn-evolve = "evolvable_state_network.evolution_cli:main"
 esn-embodied = "evolvable_state_network.embodied_cli:main"
