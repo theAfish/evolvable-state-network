@@ -8,6 +8,13 @@ from evolvable_state_network.plot_data import embodied_plot_rows, evolution_plot
 
 
 class PlotDataTests(unittest.TestCase):
+    def test_embodied_batch_rows_are_available_before_the_final_report(self) -> None:
+        rows = embodied_plot_rows(
+            {"training_mode": "batch"},
+            ({"history": [{"generation": 1, "prey_best_lifetime": 12.0}]},),
+        )
+        self.assertEqual(rows, [{"generation": 1, "prey_best_lifetime": 12.0}])
+
     def test_embodied_continuous_rows_keep_all_ticks_seen_in_overlapping_events(self) -> None:
         rows = embodied_plot_rows(
             {"training_mode": "continuous"},

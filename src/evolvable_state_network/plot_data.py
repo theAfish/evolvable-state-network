@@ -40,6 +40,13 @@ def embodied_plot_rows(
 ) -> list[dict[str, object]]:
     """Return complete, de-duplicated curve records from an embodied CLI run."""
     if report.get("training_mode") == "batch":
+        # The CLI receives the complete history in every progress event, while
+        # the final report is not written until training ends. Prefer that live
+        # source so ``training_curves.txt`` is useful during a long batch job.
+        for event in reversed(list(events)):
+            history = event.get("history", [])
+            if isinstance(history, list):
+                return [dict(row) for row in history if isinstance(row, Mapping)]
         history = report.get("history", [])
         return [dict(row) for row in history if isinstance(row, Mapping)]
 
