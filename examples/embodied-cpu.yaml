@@ -26,6 +26,8 @@ max_turn: 9.0
 plant_cluster_count: 4
 plant_cluster_radius: 5.0
 
+allow_input_output_connections: false
+
 # Batch mode parameters.
 batch_generations: 2000
 batch_episode_steps: 300

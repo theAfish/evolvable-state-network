@@ -162,7 +162,11 @@ For a Slurm allocation, adapt
 Set `execution_backend: torch`, `device: cpu`, and set `workers` to the number
 of candidate-worker processes requested from Slurm (or `0` to use the automatic
 limit of eight). The command writes dashboard-compatible checkpoints to
-`<data-dir>/embodied_runs/<run-id>/checkpoint.json` and a final `report.json`.
+`<data-dir>/embodied_runs/<run-id>/checkpoint.json`, a final `report.json`,
+and `training_curves.txt`. The latter is a headered tab-separated table with
+one row per generation for batch runs or one row per simulation tick for
+continuous runs; it is refreshed at every CLI progress checkpoint. Load it
+with `pandas.read_csv("training_curves.txt", sep="\\t", comment="#")`.
 It catches Slurm's `SIGTERM`, stops at the next safe runner boundary, and leaves
 the checkpoint available for a later UI or CLI continuation via
 `continue_run_id`.

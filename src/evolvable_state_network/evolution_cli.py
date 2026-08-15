@@ -15,6 +15,7 @@ from .evolution import (
     run_diagnostic_experiment,
 )
 from .storage import new_run_directory
+from .plot_data import evolution_plot_row, write_plot_table
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -41,6 +42,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     edge_architecture = EdgeArchitecture(node_state_width=architecture.state_width) if args.evolve in {"edge", "joint"} else None
     if not args.legacy_generational:
         output = new_run_directory("async_runs")
+        curve_rows: dict[int, dict[str, object]] = {}
+        def record_progress(event: dict[str, object]) -> None:
+            row = evolution_plot_row(event)
+            if row is not None:
+                curve_rows[int(row["tick"])] = row
+                write_plot_table(
+                    output / "training_curves.txt", (curve_rows[tick] for tick in sorted(curve_rows)),
+                    description="Asynchronous evolution training curves (one row per scheduler tick).",
+                )
         report = AsyncEvolutionRunner(
             AsyncEvolutionConfig(
                 seed=args.seed,
@@ -52,16 +62,37 @@ def main(argv: Sequence[str] | None = None) -> int:
                 edge_architecture=edge_architecture,
                 target=args.evolve,
             )
-        ).run(output)
+        ).run(output, progress=record_progress)
+        curves_path = output / "training_curves.txt"
+        write_plot_table(
+            curves_path, (curve_rows[tick] for tick in sorted(curve_rows)),
+            description="Asynchronous evolution training curves (one row per scheduler tick).",
+        )
         print(f"Wrote {output / 'candidate_archive.json'}")
         print(f"Wrote {output / 'living_censored.json'}")
+        print(f"Wrote {curves_path}")
         print(f"Completed candidates: {report['completed_candidates']}")
         return 0
     output = new_run_directory("evolution_runs")
     runner = EvolutionRunner(EvolutionConfig(seed=args.seed, generations=args.generations, population_size=args.population, smoke_samples=args.smoke_samples, architecture=architecture, edge_architecture=edge_architecture, target=args.evolve))
-    report = runner.run(output)
+    curve_rows: list[dict[str, object]] = []
+    def record_progress(event: dict[str, object]) -> None:
+        row = evolution_plot_row(event)
+        if row is not None:
+            curve_rows.append(row)
+            write_plot_table(
+                output / "training_curves.txt", curve_rows,
+                description="Generational evolution training curves (one row per generation).",
+            )
+    report = runner.run(output, progress=record_progress)
+    curves_path = output / "training_curves.txt"
+    write_plot_table(
+        curves_path, curve_rows,
+        description="Generational evolution training curves (one row per generation).",
+    )
     print(f"Wrote {output / 'random_search_smoke.json'}")
     print(f"Wrote {output / 'best_genome.json'}")
+    print(f"Wrote {curves_path}")
     print(f"Best train fitness: {report['best']['fitness']:.6f}")
     return 0
 

@@ -20,6 +20,7 @@ from .application.runtime import ApplicationRuntime
 from .embodied import EmbodiedNetworkConfig, FoodWebAgentAdapter
 from .environments import FoodWebConfig
 from .evolution.candidate import EdgeArchitecture, RuleArchitecture
+from .plot_data import embodied_plot_rows, write_plot_table
 from .tasks import BatchFoodWebCoevolutionRunner, BatchFoodWebConfig, ContinuousFoodWebConfig, ContinuousFoodWebCoevolutionRunner, EmbodiedFoodWebTaskConfig, EmbodiedRuleEvolutionConfig, EvolutionTerminated, FoodWebCoevolutionEvaluator
 
 
@@ -168,9 +169,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Checkpoint saved: {root / 'embodied_runs' / run_id / 'checkpoint.json'}", flush=True)
 
     output = root / "embodied_runs" / run_id
+    progress_events: list[dict[str, object]] = []
     print(f"Starting embodied run {run_id} (seed {seed}); results: {output}", flush=True)
     try:
-        report = runner.run(progress=checkpoint, should_stop=stop_requested.is_set)
+        def record_progress(event: dict[str, object]) -> None:
+            progress_events.append(event)
+            checkpoint(event)
+            rows = embodied_plot_rows({"training_mode": payload.training_mode}, progress_events)
+            write_plot_table(
+                output / "training_curves.txt", rows,
+                description="Embodied training curves (one row per generation or simulation tick).",
+            )
+
+        report = runner.run(progress=record_progress, should_stop=stop_requested.is_set)
     except EvolutionTerminated:
         print(f"Run stopped safely; latest checkpoint: {output / 'checkpoint.json'}", flush=True)
         return 143
@@ -178,7 +189,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     output.mkdir(parents=True, exist_ok=True)
     report_path = output / "report.json"
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    curves_path = output / "training_curves.txt"
+    write_plot_table(
+        curves_path, embodied_plot_rows(report, progress_events),
+        description="Embodied training curves (one row per generation or simulation tick).",
+    )
     print(f"Completed. Wrote {report_path}", flush=True)
+    print(f"Completed. Wrote {curves_path}", flush=True)
     return 0
 
 
