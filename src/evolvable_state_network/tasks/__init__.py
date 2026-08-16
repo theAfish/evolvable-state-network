@@ -17,5 +17,6 @@ from .embodied_food_web import (
     ContinuousFoodWebCoevolutionRunner,
     FoodWebDemonstration,
 )
+from .embodied_population_layouts import BatchPopulationMode
 
-__all__ = ["BatchFoodWebCoevolutionRunner", "BatchFoodWebConfig", "ContinuousFoodWebConfig", "ContinuousFoodWebCoevolutionRunner", "EmbodiedFoodWebEvaluation", "EmbodiedFoodWebEvaluator", "EmbodiedFoodWebTaskConfig", "EmbodiedRuleEvolutionConfig", "EmbodiedRuleEvolutionRunner", "EvolutionTerminated", "FoodWebCoevolutionEvaluation", "FoodWebCoevolutionEvaluator", "FoodWebCoevolutionRunner", "FoodWebDemonstration", "FoodWebEvaluation", "FoodWebTaskConfig", "FoodWebTaskEvaluator", "MLPFoodWebControllerBlueprint"]
+__all__ = ["BatchFoodWebCoevolutionRunner", "BatchFoodWebConfig", "BatchPopulationMode", "ContinuousFoodWebConfig", "ContinuousFoodWebCoevolutionRunner", "EmbodiedFoodWebEvaluation", "EmbodiedFoodWebEvaluator", "EmbodiedFoodWebTaskConfig", "EmbodiedRuleEvolutionConfig", "EmbodiedRuleEvolutionRunner", "EvolutionTerminated", "FoodWebCoevolutionEvaluation", "FoodWebCoevolutionEvaluator", "FoodWebCoevolutionRunner", "FoodWebDemonstration", "FoodWebEvaluation", "FoodWebTaskConfig", "FoodWebTaskEvaluator", "MLPFoodWebControllerBlueprint"]

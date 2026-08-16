@@ -78,26 +78,35 @@ class TorchMLPSimulator:
         self.target_matrix = torch.zeros((len(self.graph.edges), self.graph.n_nodes), dtype=_DTYPE, device=self.device)
         if len(self.graph.edges):
             self.target_matrix[torch.arange(len(self.graph.edges), device=self.device), self.target] = 1.0
-        self._node_parameters = self._parameters(self.node_rule.parameters, self.node_rule.architecture.hidden_width, self.node_rule.architecture.input_width, self.width)
+        self._node_parameters = self._parameters(self.node_rule.parameters, self.node_rule.architecture.input_width, self.node_rule.architecture.layers + (self.width,))
         if self.edge_rule is not None:
-            self._edge_parameters = self._parameters(self.edge_rule.parameters, self.edge_rule.architecture.hidden_width, self.edge_rule.architecture.input_width, self.edge_width)
+            self._edge_parameters = self._parameters(self.edge_rule.parameters, self.edge_rule.architecture.input_width, self.edge_rule.architecture.layers + (self.edge_width,))
             self.projection = torch.tensor(self.edge_rule.architecture.projection, dtype=_DTYPE, device=self.device)
 
-    def _parameters(self, values: tuple[float, ...], hidden: int, inputs: int, outputs: int) -> tuple[torch.Tensor, ...]:
+    def _parameters(self, values: tuple[float, ...], inputs: int, widths: tuple[int, ...]) -> tuple[tuple[torch.Tensor, torch.Tensor], ...]:
         flat = torch.tensor(values, dtype=_DTYPE, device=self.device)
         cursor = 0
-        first = flat[cursor : cursor + hidden * inputs].reshape(hidden, inputs)
-        cursor += hidden * inputs
-        hidden_bias = flat[cursor : cursor + hidden]
-        cursor += hidden
-        second = flat[cursor : cursor + outputs * hidden].reshape(outputs, hidden)
-        cursor += outputs * hidden
-        return first, hidden_bias, second, flat[cursor : cursor + outputs]
+        result = []
+        previous = inputs
+        for width in widths:
+            weights = flat[cursor : cursor + width * previous].reshape(width, previous)
+            cursor += width * previous
+            bias = flat[cursor : cursor + width]
+            cursor += width
+            result.append((weights, bias))
+            previous = width
+        return tuple(result)
 
     @staticmethod
-    def _mlp(features: torch.Tensor, parameters: tuple[torch.Tensor, ...]) -> torch.Tensor:
-        first, hidden_bias, second, output_bias = parameters
-        return torch.tanh(torch.matmul(torch.tanh(torch.matmul(features, first.T) + hidden_bias), second.T) + output_bias)
+    def _mlp(features: torch.Tensor, parameters: tuple[tuple[torch.Tensor, torch.Tensor], ...], activation: str) -> torch.Tensor:
+        value = features
+        for index, (weights, bias) in enumerate(parameters):
+            value = torch.matmul(value, weights.T) + bias
+            if index < len(parameters) - 1:
+                value = {"tanh": torch.tanh, "relu": torch.relu, "gelu": torch.nn.functional.gelu, "silu": torch.nn.functional.silu}[activation](value)
+        # The caller applies output scaling and tanh. Keeping this layer raw is
+        # essential for saturation telemetry and matches the Python rule path.
+        return value
 
     def run(
         self,
@@ -193,7 +202,10 @@ class TorchMLPSimulator:
                 next_edge = edge
             else:
                 features = torch.cat((edge, source_state, target_state, current_message, torch.ones((*edge.shape[:2], 1), dtype=_DTYPE, device=self.device)), dim=-1)
-                next_edge = edge + config.edge_step_scale * (config.dt / .05) * self._mlp(features, self._edge_parameters)
+                edge_raw = self._mlp(features, self._edge_parameters, self.edge_rule.architecture.activation)
+                diagnostics.record_rule_outputs("edge", edge_raw.detach().flatten().cpu().tolist())
+                edge_limit = config.edge_step_scale * (config.dt / .05)
+                next_edge = edge + edge_limit * torch.tanh(edge_raw * self.edge_rule.output_scale)
             next_edge = torch.where(torch.isfinite(next_edge), next_edge, edge)
             next_edge = torch.where(valid_edge[None, :, None], next_edge, edge)
             messages = self._edge_message(next_edge, source_state)
@@ -210,10 +222,18 @@ class TorchMLPSimulator:
             counts = target_matrix.sum(dim=0)
             aggregate = aggregate / counts.clamp_min(1.0)[None, :, None]
         features = torch.cat((node, aggregate, torch.ones((*node.shape[:2], 1), dtype=_DTYPE, device=self.device)), dim=-1)
-        proposed = node + config.max_delta * self.node_rule.architecture.increment_fraction * (config.dt / .05) * self._mlp(features, self._node_parameters)
+        node_raw = self._mlp(features, self._node_parameters, self.node_rule.architecture.activation)
+        diagnostics.record_rule_outputs("node", node_raw.detach().flatten().cpu().tolist())
+        node_increment_limit = config.max_delta * self.node_rule.architecture.increment_fraction * (config.dt / .05)
+        proposed = node + node_increment_limit * torch.tanh(node_raw * self.node_rule.output_scale)
         proposed = torch.where(torch.isfinite(proposed), proposed, torch.zeros_like(proposed))
         delta = proposed - node
         next_node = torch.clamp(node + torch.clamp(delta, -config.max_delta, config.max_delta), -config.max_abs_state, config.max_abs_state)
+        diagnostics.node_update_limit = config.max_delta
+        diagnostics.node_applied_deltas.extend((next_node - node).detach().flatten().cpu().tolist())
+        if self.edge_rule is not None:
+            diagnostics.edge_update_limit = config.edge_step_scale * (config.dt / .05)
+            diagnostics.edge_applied_deltas.extend((next_edge - edge).detach().flatten().cpu().tolist())
         if lesions:
             lesion_tensor = torch.tensor(sorted(lesions), dtype=torch.long, device=self.device)
             next_node[:, lesion_tensor] = 0.0

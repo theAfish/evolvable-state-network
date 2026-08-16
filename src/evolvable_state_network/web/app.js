@@ -4,9 +4,10 @@
   const ui = {
     run: $('run-select'), batch: $('batch-select'), coordinate: $('coordinate-select'), rate: $('rate-select'), slider: $('frame-slider'), label: $('frame-label'), play: $('play'), prev: $('previous'), next: $('next'), loop: $('loop'), svg: $('network'), status: $('load-status'), file: $('file-input'), frameInfo: $('frame-info'), selection: $('selection-info'), metrics: $('metrics'), events: $('events'),
     liveForm: $('live-form'), liveModel: $('live-model-select'), liveModelDetail: $('live-model-detail'), liveRefresh: $('refresh-live-models'), liveStatus: $('live-status'), livePlay: $('live-play'), liveStep: $('live-step'), liveRate: $('live-rate'), liveLabel: $('live-frame-label'), workspace: $('shared-workspace'), replayHost: $('replay-workspace-host'), liveHost: $('live-workspace-host'),
-    asyncForm: $('async-form'), asyncSeed: $('async-seed'), asyncRun: $('async-run'), asyncDiagnostic: $('async-diagnostic'), asyncRefresh: $('async-refresh'), asyncStatus: $('async-status'), asyncProgress: $('async-progress'), asyncProgressLabel: $('async-progress-label'), asyncMetrics: $('async-metrics'), asyncValidation: $('async-validation'), asyncSlots: $('async-slots'), asyncCauses: $('async-causes'), asyncCurriculum: $('async-curriculum'), asyncCurriculumCopy: $('async-curriculum-copy'), asyncCandidates: $('async-candidates'), asyncDetail: $('async-detail'), asyncArtifacts: $('async-artifacts'), asyncLearningState: $('async-learning-state'), asyncLearningCopy: $('async-learning-copy'), asyncRunFacts: $('async-run-facts'), asyncEstimate: $('async-work-estimate'), asyncCandidateBudget: $('async-candidates-budget'), asyncSlotsInput: $('async-slots-input'), asyncReplicasInput: $('async-replicas-input'), asyncStablePopulation: $('async-stable-population'), asyncBatchInput: $('async-batch-input'), asyncStateWidth: $('async-state-width'), asyncInitialStateScale: $('async-initial-state-scale'), asyncTicksInput: $('async-ticks-input'),
-    embodiedForm: $('embodied-form'), embodiedModel: $('embodied-model'), embodiedContinueRun: $('embodied-continue-run'), embodiedRefresh: $('embodied-refresh'), embodiedAlgorithm: $('embodied-algorithm'), embodiedTrainingMode: $('embodied-training-mode'), embodiedExecutionBackend: $('embodied-execution-backend'), embodiedDevice: $('embodied-device'), embodiedWorkers: $('embodied-workers'), embodiedPopulation: $('embodied-population'), embodiedTicks: $('embodied-ticks'), embodiedBatchGenerations: $('embodied-batch-generations'), embodiedBatchSteps: $('embodied-batch-steps'), embodiedHorizonSuggestion: $('embodied-horizon-suggestion'), embodiedBatchTrials: $('embodied-batch-trials'), embodiedBatchValidationTrials: $('embodied-batch-validation-trials'), embodiedBatchTestTrials: $('embodied-batch-test-trials'), embodiedBatchOpponents: $('embodied-batch-opponents'), embodiedPreyCount: $('embodied-prey-count'), embodiedPredatorCount: $('embodied-predator-count'), embodiedMaxFood: $('embodied-max-food'), embodiedFoodGrowthRate: $('embodied-food-growth-rate'), embodiedMaxSpeed: $('embodied-max-speed'), embodiedMaxTurn: $('embodied-max-turn'), embodiedPlantClusters: $('embodied-plant-clusters'), embodiedPlantClusterRadius: $('embodied-plant-cluster-radius'), embodiedNodes: $('embodied-nodes'), embodiedStateWidth: $('embodied-state-width'), embodiedDegree: $('embodied-degree'), embodiedAllowInputOutputConnections: $('embodied-allow-input-output-connections'), embodiedStateScale: $('embodied-state-scale'), embodiedNetworkDt: $('embodied-network-dt'), embodiedMaxDelta: $('embodied-max-delta'), embodiedEdgeStepScale: $('embodied-edge-step-scale'), embodiedEnergyScale: $('embodied-energy-scale'), embodiedSurvivalPressure: $('embodied-survival-pressure'), embodiedSeed: $('embodied-seed'), embodiedRun: $('embodied-run'), embodiedTerminate: $('embodied-terminate'), embodiedStatus: $('embodied-status'), embodiedProgress: $('embodied-progress'), embodiedResult: $('embodied-result'), embodiedDeathsChart: $('embodied-deaths-chart'), embodiedMealsChart: $('embodied-meals-chart'), embodiedChartOneLabel: $('embodied-chart-one-label'), embodiedChartTwoLabel: $('embodied-chart-two-label'),
-    demoForm: $('demo-form'), demoRun: $('demo-run'), demoRefresh: $('demo-refresh'), demoSeed: $('demo-seed'), demoHiddenNodes: $('demo-hidden-nodes'), demoNetworkDegree: $('demo-network-degree'), demoPreyCount: $('demo-prey-count'), demoPredatorCount: $('demo-predator-count'), demoInitialFood: $('demo-initial-food'), demoMaxFood: $('demo-max-food'), demoFoodGrowthRate: $('demo-food-growth-rate'), demoRate: $('demo-rate'), demoStart: $('demo-start'), demoStatus: $('demo-status'), demoPlay: $('demo-play'), demoStep: $('demo-step'), demoRecord: $('demo-record'), demoLabel: $('demo-label'), demoCanvas: $('ecology-canvas'), demoEvents: $('demo-events'), demoNetwork: $('demo-network'), demoColorChannel: $('demo-color-channel'), demoChannel: $('demo-channel'), demoNodeChart: $('demo-node-chart'), demoIndividualTitle: $('demo-individual-title'), demoIndividualSummary: $('demo-individual-summary')
+    asyncForm: $('async-form'), asyncSeed: $('async-seed'), asyncRun: $('async-run'), asyncDiagnostic: $('async-diagnostic'), asyncRefresh: $('async-refresh'), asyncStatus: $('async-status'), asyncProgress: $('async-progress'), asyncProgressLabel: $('async-progress-label'), asyncMetrics: $('async-metrics'), asyncValidation: $('async-validation'), asyncSlots: $('async-slots'), asyncCauses: $('async-causes'), asyncCurriculum: $('async-curriculum'), asyncCurriculumCopy: $('async-curriculum-copy'), asyncCandidates: $('async-candidates'), asyncDetail: $('async-detail'), asyncArtifacts: $('async-artifacts'), asyncLearningState: $('async-learning-state'), asyncLearningCopy: $('async-learning-copy'), asyncRunFacts: $('async-run-facts'), asyncEstimate: $('async-work-estimate'), asyncCandidateBudget: $('async-candidates-budget'), asyncSlotsInput: $('async-slots-input'), asyncReplicasInput: $('async-replicas-input'), asyncStablePopulation: $('async-stable-population'), asyncBatchInput: $('async-batch-input'), asyncStateWidth: $('async-state-width'), asyncInitialStateScale: $('async-initial-state-scale'), asyncTicksInput: $('async-ticks-input'), networkForm: $('network-form'), networkNodeLayers: $('network-node-layers'), networkNodeActivation: $('network-node-activation'), networkEdgeLayers: $('network-edge-layers'), networkEdgeActivation: $('network-edge-activation'), networkEdgeLatentWidth: $('network-edge-latent-width'), networkSummary: $('network-summary'),
+    embodiedForm: $('embodied-form'), embodiedModel: $('embodied-model'), embodiedContinueRun: $('embodied-continue-run'), embodiedRefresh: $('embodied-refresh'), embodiedAlgorithm: $('embodied-algorithm'), embodiedTrainingMode: $('embodied-training-mode'), embodiedBatchPopulationMode: $('embodied-batch-population-mode'), embodiedExecutionBackend: $('embodied-execution-backend'), embodiedDevice: $('embodied-device'), embodiedWorkers: $('embodied-workers'), embodiedPopulation: $('embodied-population'), embodiedMutationSigma: $('embodied-mutation-sigma'), embodiedEliteFraction: $('embodied-elite-fraction'), embodiedImmigrantFraction: $('embodied-immigrant-fraction'), embodiedImmigrantMode: $('embodied-immigrant-mode'), embodiedImmigrantSigma: $('embodied-immigrant-sigma'), embodiedMaxGenomeNorm: $('embodied-max-genome-norm'), embodiedMaxParameterMagnitude: $('embodied-max-parameter-magnitude'), embodiedTicks: $('embodied-ticks'), embodiedBatchGenerations: $('embodied-batch-generations'), embodiedBatchSteps: $('embodied-batch-steps'), embodiedHorizonSuggestion: $('embodied-horizon-suggestion'), embodiedBatchTrials: $('embodied-batch-trials'), embodiedBatchValidationTrials: $('embodied-batch-validation-trials'), embodiedBatchTestTrials: $('embodied-batch-test-trials'), embodiedBatchOpponents: $('embodied-batch-opponents'), embodiedPreyCount: $('embodied-prey-count'), embodiedPredatorCount: $('embodied-predator-count'), embodiedMaxFood: $('embodied-max-food'), embodiedFoodGrowthRate: $('embodied-food-growth-rate'), embodiedMaxSpeed: $('embodied-max-speed'), embodiedMaxTurn: $('embodied-max-turn'), embodiedPlantClusters: $('embodied-plant-clusters'), embodiedPlantClusterRadius: $('embodied-plant-cluster-radius'), embodiedNodes: $('embodied-nodes'), embodiedStateWidth: $('embodied-state-width'), embodiedDegree: $('embodied-degree'), embodiedAllowInputOutputConnections: $('embodied-allow-input-output-connections'), embodiedStateScale: $('embodied-state-scale'), embodiedNetworkDt: $('embodied-network-dt'), embodiedRuleOutputScale: $('embodied-rule-output-scale'), embodiedMaxDelta: $('embodied-max-delta'), embodiedEdgeStepScale: $('embodied-edge-step-scale'), embodiedEnergyScale: $('embodied-energy-scale'), embodiedSurvivalPressure: $('embodied-survival-pressure'), embodiedSeed: $('embodied-seed'), embodiedRun: $('embodied-run'), embodiedTerminate: $('embodied-terminate'), embodiedStatus: $('embodied-status'), embodiedProgress: $('embodied-progress'), embodiedResult: $('embodied-result'), embodiedDeathsChart: $('embodied-deaths-chart'), embodiedMealsChart: $('embodied-meals-chart'), embodiedChartOneLabel: $('embodied-chart-one-label'), embodiedChartTwoLabel: $('embodied-chart-two-label'),
+    demoForm: $('demo-form'), demoRun: $('demo-run'), demoRefresh: $('demo-refresh'), demoSeed: $('demo-seed'), demoHiddenNodes: $('demo-hidden-nodes'), demoNetworkDegree: $('demo-network-degree'), demoPreyCount: $('demo-prey-count'), demoPredatorCount: $('demo-predator-count'), demoInitialFood: $('demo-initial-food'), demoMaxFood: $('demo-max-food'), demoFoodGrowthRate: $('demo-food-growth-rate'), demoRate: $('demo-rate'), demoStart: $('demo-start'), demoStatus: $('demo-status'), demoPlay: $('demo-play'), demoStep: $('demo-step'), demoRecord: $('demo-record'), demoLabel: $('demo-label'), demoCanvas: $('ecology-canvas'), demoEvents: $('demo-events'), demoNetwork: $('demo-network'), demoColorChannel: $('demo-color-channel'), demoChannel: $('demo-channel'), demoNodeChart: $('demo-node-chart'), demoIndividualTitle: $('demo-individual-title'), demoIndividualSummary: $('demo-individual-summary'),
+    diagnosticsForm: $('diagnostics-form'), diagnosticsRunId: $('diagnostics-run-id'), diagnosticsLoadServer: $('diagnostics-load-server'), diagnosticsReportFile: $('diagnostics-report-file'), diagnosticsCheckpointFile: $('diagnostics-checkpoint-file'), diagnosticsLoadFiles: $('diagnostics-load-files'), diagnosticsSampleCount: $('diagnostics-sample-count'), diagnosticsSeed: $('diagnostics-seed'), diagnosticsRunRandomGraphs: $('diagnostics-run-random-graphs'), diagnosticsCompareLeft: $('diagnostics-compare-left'), diagnosticsCompareRight: $('diagnostics-compare-right'), diagnosticsEvaluationSamples: $('diagnostics-evaluation-samples'), diagnosticsParameterScales: $('diagnostics-parameter-scales'), diagnosticsCompareRuns: $('diagnostics-compare-runs'), diagnosticsStatus: $('diagnostics-status'), diagnosticsTitle: $('diagnostics-title'), diagnosticsCopy: $('diagnostics-copy'), diagnosticsSummary: $('diagnostics-summary'), diagnosticsRandomGraphs: $('diagnostics-random-graphs'), diagnosticsComparison: $('diagnostics-comparison'), diagnosticsFlags: $('diagnostics-flags'), diagnosticsCoverage: $('diagnostics-coverage'), diagnosticsSpecies: $('diagnostics-species')
   };
   const state = { data: null, runName: '', frame: 0, batch: 0, coordinate: 0, selected: null, playing: false, lastTick: 0, layout: [], job: null, jobTimer: null, live: null, liveModels: [], demo: null, demoLastTick: 0, demoIndividual: null, demoHistory: [], demoRecorder: null, demoRecordingChunks: [], embodiedCheckpointVersion: '', embodiedJobId: '', embodiedModelWidths: {}, embodiedRunWidths: {} };
   const NS = 'http://www.w3.org/2000/svg';
@@ -16,15 +17,35 @@
     ? data.detail.map((item) => item.msg).join('; ')
     : (data?.detail || data?.error || fallback);
   const viewTitles = {
-    survival: 'Survival training',
+    survival: 'Survival training', network: 'Network architecture',
     embodied: 'Embodied learning',
     'ecology-demo': 'Ecology demo',
-    replay: 'Trajectory replay',
+    replay: 'Trajectory replay', diagnostics: 'Run diagnostics',
     live: 'Live graph',
     evolution: 'Evolution search',
   };
-  const visibleViews = new Set(['embodied', 'ecology-demo']);
-  const preferenceForms = ['async-form', 'embodied-form', 'demo-form', 'live-form'];
+  const visibleViews = new Set(['network', 'embodied', 'ecology-demo', 'diagnostics']);
+  const preferenceForms = ['network-form', 'async-form', 'embodied-form', 'demo-form', 'live-form', 'diagnostics-form'];
+
+  // `step` is a validity constraint, not merely the increment used by spinner
+  // buttons.  Decimal fields with a fractional minimum were therefore rejecting
+  // otherwise valid values and suggesting nearby, arbitrary-looking numbers.
+  // The API owns the real integer and range constraints; the UI must allow every
+  // finite decimal within a field's stated range.  Apply this to inserted inputs
+  // as well, so adding a new control cannot reintroduce step-grid validation.
+  function allowArbitraryNumberPrecision(root = document) {
+    const inputs = root instanceof HTMLInputElement
+      ? [root]
+      : [...root.querySelectorAll('input[type="number"]')];
+    inputs.forEach((input) => { input.step = 'any'; });
+  }
+
+  allowArbitraryNumberPrecision();
+  new MutationObserver((records) => {
+    records.forEach((record) => record.addedNodes.forEach((node) => {
+      if (node.nodeType === Node.ELEMENT_NODE) allowArbitraryNumberPrecision(node);
+    }));
+  }).observe(document.body, {childList:true, subtree:true});
 
   function restorePreferences() {
     preferenceForms.forEach((formId) => {
@@ -52,7 +73,7 @@
   }
 
   function activate(view, updateUrl = true) {
-    if (!visibleViews.has(view)) view = 'embodied';
+    if (!visibleViews.has(view)) view = 'network';
     if (view === 'live') ui.liveHost.append(ui.workspace); else ui.replayHost.append(ui.workspace);
     document.body.dataset.view = view;
     document.querySelectorAll('.view').forEach((item) => {
@@ -564,13 +585,22 @@
     ui.embodiedTerminate.disabled = true;
     const bodyInputs = [...document.querySelectorAll('input[name="embodied-body-input"]:checked')].map((input) => input.value);
     if (!bodyInputs.length) { ui.embodiedStatus.textContent = 'Select at least one internal-state input.'; return; }
-    const payload = {training_mode:ui.embodiedTrainingMode.value, algorithm:ui.embodiedAlgorithm.value, execution_backend:ui.embodiedExecutionBackend.value, device:ui.embodiedDevice.value, workers:Number(ui.embodiedWorkers.value), body_inputs:bodyInputs, population_size:Number(ui.embodiedPopulation.value), ticks:Number(ui.embodiedTicks.value), batch_generations:Number(ui.embodiedBatchGenerations.value), batch_episode_steps:Number(ui.embodiedBatchSteps.value), batch_trials:Number(ui.embodiedBatchTrials.value), batch_validation_trials:Number(ui.embodiedBatchValidationTrials.value), batch_test_trials:Number(ui.embodiedBatchTestTrials.value), batch_opponents:Number(ui.embodiedBatchOpponents.value), prey_count:Number(ui.embodiedPreyCount.value), predator_count:Number(ui.embodiedPredatorCount.value), max_food:Number(ui.embodiedMaxFood.value), food_growth_rate:Number(ui.embodiedFoodGrowthRate.value), max_speed:Number(ui.embodiedMaxSpeed.value), max_turn:Number(ui.embodiedMaxTurn.value), plant_cluster_count:Number(ui.embodiedPlantClusters.value), plant_cluster_radius:Number(ui.embodiedPlantClusterRadius.value), hidden_nodes:Number(ui.embodiedNodes.value), state_width:Number(ui.embodiedStateWidth.value), mean_degree:Number(ui.embodiedDegree.value), allow_input_output_connections:ui.embodiedAllowInputOutputConnections.checked, initial_state_scale:Number(ui.embodiedStateScale.value), network_dt:Number(ui.embodiedNetworkDt.value), max_delta:Number(ui.embodiedMaxDelta.value), edge_step_scale:Number(ui.embodiedEdgeStepScale.value), initial_energy_scale:Number(ui.embodiedEnergyScale.value), enforce_survival_pressure:ui.embodiedSurvivalPressure.checked};
+    const parseLayers = (value) => value.split(',').map((item) => Number(item.trim())).filter((width) => Number.isInteger(width) && width > 0);
+    const nodeLayers = parseLayers(ui.networkNodeLayers.value), edgeLayers = parseLayers(ui.networkEdgeLayers.value);
+    if (!nodeLayers.length || !edgeLayers.length) { ui.embodiedStatus.textContent = 'Set positive comma-separated hidden-layer widths in the Network tab.'; return; }
+    const payload = {training_mode:ui.embodiedTrainingMode.value, batch_population_mode:ui.embodiedBatchPopulationMode.value, algorithm:ui.embodiedAlgorithm.value, execution_backend:ui.embodiedExecutionBackend.value, device:ui.embodiedDevice.value, workers:Number(ui.embodiedWorkers.value), body_inputs:bodyInputs, population_size:Number(ui.embodiedPopulation.value), elite_fraction:Number(ui.embodiedEliteFraction.value), immigrant_fraction:Number(ui.embodiedImmigrantFraction.value), immigrant_mode:ui.embodiedImmigrantMode.value, ticks:Number(ui.embodiedTicks.value), batch_generations:Number(ui.embodiedBatchGenerations.value), batch_episode_steps:Number(ui.embodiedBatchSteps.value), batch_trials:Number(ui.embodiedBatchTrials.value), batch_validation_trials:Number(ui.embodiedBatchValidationTrials.value), batch_test_trials:Number(ui.embodiedBatchTestTrials.value), batch_opponents:Number(ui.embodiedBatchOpponents.value), prey_count:Number(ui.embodiedPreyCount.value), predator_count:Number(ui.embodiedPredatorCount.value), max_food:Number(ui.embodiedMaxFood.value), food_growth_rate:Number(ui.embodiedFoodGrowthRate.value), max_speed:Number(ui.embodiedMaxSpeed.value), max_turn:Number(ui.embodiedMaxTurn.value), plant_cluster_count:Number(ui.embodiedPlantClusters.value), plant_cluster_radius:Number(ui.embodiedPlantClusterRadius.value), hidden_nodes:Number(ui.embodiedNodes.value), state_width:Number(ui.embodiedStateWidth.value), mean_degree:Number(ui.embodiedDegree.value), allow_input_output_connections:ui.embodiedAllowInputOutputConnections.checked, initial_state_scale:Number(ui.embodiedStateScale.value), network_dt:Number(ui.embodiedNetworkDt.value), rule_output_scale:Number(ui.embodiedRuleOutputScale.value), max_delta:Number(ui.embodiedMaxDelta.value), edge_step_scale:Number(ui.embodiedEdgeStepScale.value), initial_energy_scale:Number(ui.embodiedEnergyScale.value), enforce_survival_pressure:ui.embodiedSurvivalPressure.checked};
+    for (const [key, control] of Object.entries({mutation_sigma:ui.embodiedMutationSigma, immigrant_sigma:ui.embodiedImmigrantSigma, max_genome_norm:ui.embodiedMaxGenomeNorm, max_parameter_magnitude:ui.embodiedMaxParameterMagnitude})) if (control.value.trim()) payload[key] = Number(control.value);
+    payload.node_hidden_layers = nodeLayers; payload.node_activation = ui.networkNodeActivation.value;
+    payload.edge_hidden_layers = edgeLayers; payload.edge_activation = ui.networkEdgeActivation.value;
+    payload.edge_latent_width = Number(ui.networkEdgeLatentWidth.value);
     if (ui.embodiedModel.value) payload.model_id = ui.embodiedModel.value;
     if (ui.embodiedContinueRun.value) payload.continue_run_id = ui.embodiedContinueRun.value;
     if (ui.embodiedSeed.value.trim()) payload.seed = Number(ui.embodiedSeed.value);
     ui.embodiedRun.disabled = true; ui.embodiedStatus.textContent = payload.training_mode === 'batch' ? 'Preparing common episode seeds and frozen opponent pools…' : 'Starting the persistent world and assigning its first random networks…';
     try {
-      const response = await fetch('/api/embodied/food-web/train', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}), data = await response.json();
+      const response = await fetch('/api/embodied/food-web/train', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+      const raw = await response.text(); let data;
+      try { data = raw ? JSON.parse(raw) : {}; } catch (_) { data = {detail: raw || `HTTP ${response.status}`}; }
       if (!response.ok) throw new Error(apiError(data, 'could not start embodied evolution'));
       state.embodiedJobId = data.job_id; ui.embodiedTerminate.disabled = false; pollEmbodiedJob(data.job_id);
     } catch (error) { ui.embodiedStatus.textContent = `Could not start embodied evolution: ${error.message}`; ui.embodiedRun.disabled = false; ui.embodiedTerminate.disabled = true; }
@@ -681,13 +711,161 @@
     recorder.start(1000); ui.demoRecord.textContent = 'Stop recording'; ui.demoStatus.textContent = 'Recording the ecology canvas. Playback can continue; press Stop recording to download the video.';
   }
 
+  function diagnosticNumber(value, digits = 4) { return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '—'; }
+  function validDiagnosticRunId(value) { return /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(value); }
+  function diagnosticSeries(history, key) { return history.map((entry) => Number(entry?.[key])).filter(Number.isFinite); }
+  function diagnosticStats(values) {
+    if (!values.length) return null;
+    const tailSize = Math.min(values.length, Math.max(10, Math.ceil(values.length / 10))), tail = values.slice(-tailSize), mean = (items) => items.reduce((sum, value) => sum + value, 0) / items.length, average = mean(tail);
+    return {count: values.length, current: values.at(-1), minimum: Math.min(...values), maximum: Math.max(...values), tailSize, tailMean: average, tailSd: Math.sqrt(mean(tail.map((value) => (value - average) ** 2)))};
+  }
+  function diagnosticGenome(document, species) {
+    if (!document || typeof document !== 'object') return [];
+    const nested = document[species]?.best_genome;
+    const values = nested ?? document[`${species}_best_genome`];
+    return Array.isArray(values) ? values.map(Number).filter(Number.isFinite) : [];
+  }
+  function diagnosticArchitecture(document) { return document?.architecture || {}; }
+  function nodeParameterCount(architecture) {
+    const stateWidth = Number(architecture.state_width), layers = Array.isArray(architecture.hidden_layers) ? architecture.hidden_layers.map(Number) : [Number(architecture.hidden_width)];
+    if (!Number.isFinite(stateWidth) || layers.some((width) => !Number.isFinite(width))) return null;
+    const widths = [...layers, stateWidth]; return widths.reduce((total, width, index) => total + width * ((index ? widths[index - 1] : 2 * stateWidth + 1) + 1), 0);
+  }
+  function edgeParameterCount(architecture) {
+    const nodeWidth = Number(architecture.node_state_width), latentWidth = Number(architecture.latent_width), layers = Array.isArray(architecture.hidden_layers) ? architecture.hidden_layers.map(Number) : [Number(architecture.hidden_width)];
+    if (![nodeWidth, latentWidth, ...layers].every(Number.isFinite)) return null;
+    const widths = [...layers, latentWidth]; return widths.reduce((total, width, index) => total + width * ((index ? widths[index - 1] : latentWidth + 3 * nodeWidth + 1) + 1), 0);
+  }
+  function diagnosticItem(code, text, level = 'warn') { const item = document.createElement('div'), title = document.createElement('strong'), copy = document.createElement('span'); item.className = `diagnostic-item ${level}`; title.textContent = code; copy.textContent = text; item.append(title, copy); return item; }
+  function renderDiagnosticSpecies(history, report, checkpoint, species) {
+    const prefix = `${species}_`, fitness = diagnosticStats(diagnosticSeries(history, `${prefix}best_lifetime`)), action = diagnosticStats(diagnosticSeries(history, `${prefix}mean_action_change`)), speed = diagnosticStats(diagnosticSeries(history, `${prefix}mean_speed`)), turn = diagnosticStats(diagnosticSeries(history, `${prefix}mean_turn`));
+    const genome = diagnosticGenome(checkpoint, species).length ? diagnosticGenome(checkpoint, species) : diagnosticGenome(report, species), allZero = genome.length && genome.every((value) => Math.abs(value) <= 1e-12);
+    const cards = [statCard(`${species} final selected lifetime`, diagnosticNumber(report?.[species]?.best_lifetime ?? fitness?.current)), statCard(`${species} lifetime tail σ`, diagnosticNumber(fitness?.tailSd)), statCard(`${species} action change tail mean`, diagnosticNumber(action?.tailMean)), statCard(`${species} speed tail mean`, diagnosticNumber(speed?.tailMean)), statCard(`${species} turn tail mean`, diagnosticNumber(turn?.tailMean)), statCard(`${species} final genome`, genome.length ? `${genome.length} parameters${allZero ? ' · all zero' : ''}` : 'not recorded')];
+    return {cards, fitness, action, speed, turn, allZero};
+  }
+  function renderDiagnostics(report, checkpoint = {}) {
+    if (!report || !Array.isArray(report.history)) throw new Error('Expected an embodied batch report with a history array.');
+    const history = report.history, source = Object.keys(checkpoint).length ? checkpoint : report, prey = renderDiagnosticSpecies(history, report, source, 'prey'), predator = renderDiagnosticSpecies(history, report, source, 'predator');
+    const nodeCount = nodeParameterCount(diagnosticArchitecture(source)), edgeCount = edgeParameterCount(source?.edge_architecture || {}), firstGenome = diagnosticGenome(source, 'prey'), genomeRms = firstGenome.length ? Math.sqrt(firstGenome.reduce((sum, value) => sum + value ** 2, 0) / firstGenome.length) : null;
+    const flags = [], coverage = [];
+    if (predator.allZero) flags.push(diagnosticItem('PREDATOR_RULE_ZERO', 'The saved predator joint genome is exactly zero. Its reported action, speed, and lifetime are therefore all zero; this is a direct loss of behavior, not a subtle convergence signal.'));
+    [['prey', prey], ['predator', predator]].forEach(([species, data]) => {
+      if (data.action && Math.abs(data.action.tailMean) <= 1e-8) flags.push(diagnosticItem('ACTION_NEAR_CONSTANT', `${species} mean action change is effectively zero across the final ${data.action.tailSize} generations.`));
+      if (data.fitness && data.fitness.maximum > data.fitness.minimum && data.fitness.tailSd <= Math.max(.001, Math.abs(data.fitness.tailMean) * .002)) flags.push(diagnosticItem('FITNESS_PLATEAU', `${species} selected lifetime has very low variation in the final ${data.fitness.tailSize} generations.`));
+    });
+    if (!flags.length) flags.push(diagnosticItem('NO_HARD_COLLAPSE_IN_RECORDED_SUMMARIES', 'The saved aggregate action and lifetime fields do not meet the conservative static-policy thresholds. Runtime-level metrics are still required to locate a hidden saturation or connectivity failure.', 'good'));
+    const movingGenomes = history.some((entry) => Array.isArray(entry.prey_best_genome) || Number.isFinite(Number(entry.prey_genome_l2_distance)));
+    coverage.push(diagnosticItem('GENOME_MOVEMENT', movingGenomes ? 'Per-generation genome information is present.' : 'Not recorded: this file holds only final genomes, so best-genome movement and population diversity cannot be reconstructed.'));
+    const hasRawRules = history.some((entry) => entry.node_rule_raw_output || entry.edge_rule_raw_output || entry.diagnostics?.node_rule_raw_output);
+    const hasUpdates = history.some((entry) => entry.node_update || entry.edge_update || entry.diagnostics?.node_update);
+    const hasStates = history.some((entry) => entry.hidden_state || entry.diagnostics?.hidden_state);
+    const hasGraph = history.some((entry) => entry.connectivity || entry.diagnostics?.connectivity);
+    const hasLatency = history.some((entry) => entry.sensor_action_latency || entry.diagnostics?.sensor_action_latency);
+    coverage.push(diagnosticItem('RAW RULE OUTPUTS', hasRawRules ? 'Recorded.' : 'Not recorded: node/edge MLP pre-tanh outputs and saturation fractions need an instrumented rerun.'));
+    coverage.push(diagnosticItem('EFFECTIVE UPDATES / HIDDEN STATE', hasUpdates || hasStates ? 'At least some runtime update or state metrics are recorded.' : 'Not recorded: applied node/edge deltas, clipping, hidden-state variance, and synchronization need an instrumented rerun.'));
+    coverage.push(diagnosticItem('CONNECTIVITY / LATENCY', hasGraph || hasLatency ? 'At least one topology or sensor-response diagnostic is recorded.' : 'Not recorded: sensor-to-action paths and perturbation latency cannot be inferred from a final genome alone.'));
+    coverage.push(diagnosticItem('MULTI-INSTANCE / ABLATION', report.diagnostics?.ablations || report.diagnostics?.random_instance_fitness ? 'Recorded.' : 'Not recorded: matched random-brain trials, rule ablations, and edge-state interventions require a diagnostic evaluation run.'));
+    const preyAction = prey.action?.tailMean, predatorAction = predator.action?.tailMean;
+    ui.diagnosticsTitle.textContent = predator.allZero ? 'Predator policy collapsed to the zero genome' : 'Historical run analyzed; runtime cause remains unobserved';
+    ui.diagnosticsCopy.textContent = predator.allZero ? `The report records ${history.length} generations. Prey retains action motion (${diagnosticNumber(preyAction)} mean change in the tail), while the saved predator genome and behavior are both zero. The exact stage that erased variation cannot be assigned without raw-output and state-update logging.` : `The report contains ${history.length} generations of aggregate fitness and behavior. It can characterize output-level stability, but it cannot attribute it to genome movement, local-rule saturation, graph reachability, or runtime state dynamics.`;
+    ui.diagnosticsSummary.replaceChildren(statCard('Recorded generations', String(history.length)), statCard('Training mode', report.training_mode || 'not recorded'), statCard('Prey best lifetime', diagnosticNumber(report.prey?.best_lifetime)), statCard('Predator best lifetime', diagnosticNumber(report.predator?.best_lifetime)), statCard('Node / edge parameters', nodeCount && edgeCount ? `${nodeCount} / ${edgeCount}` : 'architecture incomplete'), statCard('Prey genome RMS', diagnosticNumber(genomeRms)));
+    ui.diagnosticsFlags.replaceChildren(...flags); ui.diagnosticsCoverage.replaceChildren(...coverage);
+    const speciesCards = [...prey.cards, ...predator.cards]; ui.diagnosticsSpecies.replaceChildren(...speciesCards);
+  }
+  async function loadDiagnosticsFromServer() {
+    const runId = ui.diagnosticsRunId.value.trim();
+    if (!validDiagnosticRunId(runId)) { ui.diagnosticsStatus.textContent = 'Run ID may contain letters, digits, hyphens, and underscores.'; return; }
+    ui.diagnosticsLoadServer.disabled = true; ui.diagnosticsStatus.textContent = `Loading report and checkpoint for ${runId}…`;
+    try {
+      const base = `/artifacts/embodied_runs/${encodeURIComponent(runId)}`, responses = await Promise.all([fetch(`${base}/report.json`), fetch(`${base}/checkpoint.json`)]);
+      if (!responses[0].ok) throw new Error(`report.json could not be loaded (${responses[0].status})`);
+      const report = await responses[0].json(), checkpoint = responses[1].ok ? await responses[1].json() : {};
+      renderDiagnostics(report, checkpoint); ui.diagnosticsStatus.textContent = `Analyzed server run ${runId}${responses[1].ok ? ' with checkpoint' : ' (report only)'}.`; activate('diagnostics');
+    } catch (error) { ui.diagnosticsStatus.textContent = `Could not load artifacts: ${error.message}`; } finally { ui.diagnosticsLoadServer.disabled = false; }
+  }
+  async function loadDiagnosticsFromFiles() {
+    const reportFile = ui.diagnosticsReportFile.files[0], checkpointFile = ui.diagnosticsCheckpointFile.files[0];
+    if (!reportFile) { ui.diagnosticsStatus.textContent = 'Choose a report.json file first.'; return; }
+    ui.diagnosticsLoadFiles.disabled = true;
+    try { renderDiagnostics(JSON.parse(await reportFile.text()), checkpointFile ? JSON.parse(await checkpointFile.text()) : {}); ui.diagnosticsStatus.textContent = `Analyzed ${reportFile.name}${checkpointFile ? ` with ${checkpointFile.name}` : ' (report only)'}.`; activate('diagnostics'); } catch (error) { ui.diagnosticsStatus.textContent = `Could not analyze files: ${error.message}`; } finally { ui.diagnosticsLoadFiles.disabled = false; }
+  }
+  function renderRandomGraphDiagnostic(result) {
+    const cards = [];
+    ['prey', 'predator'].forEach((species) => {
+      const data = result[species] || {}, fitness = data.fitness || {}, behavior = data.behavior || {}, prefix = species[0].toUpperCase() + species.slice(1);
+      cards.push(statCard(`${prefix} fitness mean ± σ`, `${diagnosticNumber(fitness.mean)} ± ${diagnosticNumber(fitness.standard_deviation)}`), statCard(`${prefix} fitness p10 – p90`, `${diagnosticNumber(fitness.p10)} – ${diagnosticNumber(fitness.p90)}`), statCard(`${prefix} fitness range`, `${diagnosticNumber(fitness.minimum)} – ${diagnosticNumber(fitness.maximum)}`), statCard(`${prefix} mean action change`, diagnosticNumber(behavior.mean_action_change)), statCard(`${prefix} mean speed`, diagnosticNumber(behavior.mean_speed)));
+    });
+    ui.diagnosticsRandomGraphs.replaceChildren(...cards);
+    const prey = result.prey?.fitness || {}, predator = result.predator?.fitness || {};
+    const unstable = (fitness) => Number(fitness.standard_deviation || 0) > .25 * Math.max(1, Math.abs(Number(fitness.mean || 0)));
+    if (unstable(prey) || unstable(predator)) ui.diagnosticsFlags.prepend(diagnosticItem('RANDOM_BRAIN_FITNESS_VARIANCE_HIGH', 'At least one saved rule has large fitness variation across newly sampled graph/state instances. Inspect its p10–p90 interval before treating the mean as reliable.'));
+  }
+  async function runRandomGraphDiagnostic() {
+    const runId = ui.diagnosticsRunId.value.trim(), sampleCount = Number(ui.diagnosticsSampleCount.value);
+    if (!validDiagnosticRunId(runId)) { ui.diagnosticsStatus.textContent = 'Run ID may contain letters, digits, hyphens, and underscores.'; return; }
+    if (!Number.isInteger(sampleCount) || sampleCount < 1 || sampleCount > 256) { ui.diagnosticsStatus.textContent = 'Fresh graph samples must be an integer from 1 to 256.'; return; }
+    const payload = {sample_count: sampleCount}; if (ui.diagnosticsSeed.value.trim()) payload.seed = Number(ui.diagnosticsSeed.value);
+    ui.diagnosticsRunRandomGraphs.disabled = true; ui.diagnosticsStatus.textContent = `Evaluating ${sampleCount} fresh graph/state instances…`;
+    try {
+      const response = await fetch(`/api/embodied/runs/${encodeURIComponent(runId)}/diagnostics/random-graphs`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}), data = await response.json();
+      if (!response.ok) throw new Error(apiError(data, 'could not start random-graph diagnostics'));
+      const poll = async () => {
+        const statusResponse = await fetch(`/api/jobs/${data.job_id}`), job = await statusResponse.json();
+        if (!statusResponse.ok) throw new Error(apiError(job, 'diagnostic job disappeared'));
+        if (job.status === 'complete') { renderRandomGraphDiagnostic(job.result); ui.diagnosticsStatus.textContent = `Random-graph diagnostic complete: ${job.result.sample_count} matched fresh instances, seed ${job.result.seed}.`; ui.diagnosticsRunRandomGraphs.disabled = false; return; }
+        if (job.status === 'failed') throw new Error(job.error || 'random-graph diagnostic failed');
+        window.setTimeout(() => { poll().catch((error) => { ui.diagnosticsStatus.textContent = `Random-graph diagnostic failed: ${error.message}`; ui.diagnosticsRunRandomGraphs.disabled = false; }); }, 400);
+      };
+      await poll();
+    } catch (error) { ui.diagnosticsStatus.textContent = `Could not run random-graph diagnostics: ${error.message}`; ui.diagnosticsRunRandomGraphs.disabled = false; }
+  }
+  function renderRunComparison(comparison) {
+    const cards = [];
+    const left = comparison.checkpoint_a || {}, right = comparison.checkpoint_b || {}, differences = comparison.differences || {};
+    cards.push(statCard('Fitness A / B', `${diagnosticNumber(left.fitness?.mean)} / ${diagnosticNumber(right.fitness?.mean)}`), statCard('Fitness difference B − A', diagnosticNumber(differences.fitness)), statCard('Speed difference B − A', diagnosticNumber(differences.mean_speed)), statCard('Turn difference B − A', diagnosticNumber(differences.mean_turn)), statCard('Action-change difference B − A', diagnosticNumber(differences.mean_action_change)), statCard('Mean / max action trajectory Δ', `${diagnosticNumber(differences.mean_absolute_action_difference)} / ${diagnosticNumber(differences.maximum_action_difference)}`));
+    [['A', left], ['B', right]].forEach(([label, data]) => {
+      const nodeRaw = data.node_rule_raw_output || {}, edgeRaw = data.edge_rule_raw_output || {}, nodeUpdate = data.node_update || {}, edgeUpdate = data.edge_update || {};
+      cards.push(statCard(`Node raw p99 ${label}`, diagnosticNumber(nodeRaw.p99)), statCard(`Edge raw p99 ${label}`, diagnosticNumber(edgeRaw.p99)), statCard(`Node / edge raw |x|>3 ${label}`, `${(100 * Number(nodeRaw.abs_gt_3_fraction || 0)).toFixed(1)}% / ${(100 * Number(edgeRaw.abs_gt_3_fraction || 0)).toFixed(1)}%`), statCard(`Node Δ mean / max ${label}`, `${diagnosticNumber(nodeUpdate.mean_absolute_delta)} / ${diagnosticNumber(nodeUpdate.maximum_absolute_delta)}`), statCard(`Edge Δ mean / max ${label}`, `${diagnosticNumber(edgeUpdate.mean_absolute_delta)} / ${diagnosticNumber(edgeUpdate.maximum_absolute_delta)}`));
+      if (Number(nodeRaw.abs_gt_3_fraction || 0) > .10) ui.diagnosticsFlags.prepend(diagnosticItem('NODE_RULE_SATURATED', `Checkpoint ${label} has more than 10% of real episode pre-tanh node-rule outputs beyond |3|.`));
+      if (Number(edgeRaw.abs_gt_3_fraction || 0) > .10) ui.diagnosticsFlags.prepend(diagnosticItem('EDGE_RULE_SATURATED', `Checkpoint ${label} has more than 10% of real episode pre-tanh edge-rule outputs beyond |3|.`));
+    });
+    Object.entries(comparison.parameter_scaling?.results || {}).forEach(([scale, data]) => cards.push(statCard(`B × ${scale} fitness`, diagnosticNumber(data.fitness?.mean)), statCard(`B × ${scale} node |x|>3`, `${(100 * Number(data.node_rule_raw_output?.abs_gt_3_fraction || 0)).toFixed(1)}%`)));
+    ui.diagnosticsComparison.replaceChildren(...cards);
+  }
+  async function compareSavedRuns() {
+    const leftRunId = ui.diagnosticsCompareLeft.value.trim(), rightRunId = ui.diagnosticsCompareRight.value.trim(), evaluationSamples = Number(ui.diagnosticsEvaluationSamples.value), scales = ui.diagnosticsParameterScales.value.split(',').map((value) => Number(value.trim())).filter(Number.isFinite);
+    if (!validDiagnosticRunId(leftRunId) || !validDiagnosticRunId(rightRunId)) { ui.diagnosticsStatus.textContent = 'Run IDs may contain letters, digits, hyphens, and underscores.'; return; }
+    if (!Number.isInteger(evaluationSamples) || evaluationSamples < 1 || evaluationSamples > 32 || !scales.length || scales.some((scale) => scale <= 0 || scale > 10)) { ui.diagnosticsStatus.textContent = 'Use 1–32 matched episodes and comma-separated parameter scales in (0, 10].'; return; }
+    const payload = {left_run_id: leftRunId, right_run_id: rightRunId, evaluation_samples: evaluationSamples, parameter_scales: scales}; if (ui.diagnosticsSeed.value.trim()) payload.seed = Number(ui.diagnosticsSeed.value);
+    ui.diagnosticsCompareRuns.disabled = true; ui.diagnosticsStatus.textContent = `Evaluating ${leftRunId} and ${rightRunId} on ${evaluationSamples} matched random worlds…`;
+    try {
+      const response = await fetch('/api/embodied/diagnostics/checkpoints/evaluate', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}), data = await response.json();
+      if (!response.ok) throw new Error(apiError(data, 'could not start checkpoint evaluation'));
+      const poll = async () => {
+        const statusResponse = await fetch(`/api/jobs/${data.job_id}`), job = await statusResponse.json();
+        if (!statusResponse.ok) throw new Error(apiError(job, 'checkpoint diagnostic disappeared'));
+        if (job.status === 'complete') { renderRunComparison(job.result); ui.diagnosticsStatus.textContent = `Checkpoint evaluation complete on ${job.result.evaluation_seeds.length} matched seeds. JSON report: ${job.result.output_url}`; ui.diagnosticsCompareRuns.disabled = false; activate('diagnostics'); return; }
+        if (job.status === 'failed') throw new Error(job.error || 'checkpoint evaluation failed');
+        window.setTimeout(() => { poll().catch((error) => { ui.diagnosticsStatus.textContent = `Checkpoint evaluation failed: ${error.message}`; ui.diagnosticsCompareRuns.disabled = false; }); }, 500);
+      };
+      await poll();
+    } catch (error) { ui.diagnosticsStatus.textContent = `Could not evaluate checkpoints: ${error.message}`; ui.diagnosticsCompareRuns.disabled = false; }
+  }
+
+  function updateNetworkSummary() {
+    const node = ui.networkNodeLayers.value || '—', edge = ui.networkEdgeLayers.value || '—';
+    ui.networkSummary.textContent = `Fresh runs: Node [${node}] / ${ui.networkNodeActivation.value}; Edge [${edge}] / ${ui.networkEdgeActivation.value}; ${ui.networkEdgeLatentWidth.value} edge latent channels.`;
+  }
+
   document.querySelectorAll('.nav').forEach((button) => button.addEventListener('click', () => activate(button.dataset.view)));
-  window.addEventListener('popstate', () => activate(location.hash.slice(1) || 'embodied', false));
+  window.addEventListener('popstate', () => activate(location.hash.slice(1) || 'network', false));
   ui.run.addEventListener('change', () => { state.runName = ui.run.value; state.frame = state.batch = state.coordinate = 0; state.selected = null; refreshSelectors(); drawGraph(); update(); }); ui.batch.addEventListener('change', () => { state.batch = Number(ui.batch.value); update(); }); ui.coordinate.addEventListener('change', () => { state.coordinate = Number(ui.coordinate.value); update(); }); ui.slider.addEventListener('input', () => { state.frame = Number(ui.slider.value); update(); }); ui.prev.addEventListener('click', () => move(-1)); ui.next.addEventListener('click', () => move(1)); ui.play.addEventListener('click', () => { state.playing = !state.playing; ui.play.textContent = state.playing ? 'Pause' : 'Play'; state.lastTick = performance.now(); if (state.playing) requestAnimationFrame(animate); });
   ui.file.addEventListener('change', async () => { const file = ui.file.files[0]; if (!file) return; try { load(JSON.parse(await file.text())); } catch (error) { ui.status.textContent = error.message; } });
   restorePreferences();
-  ui.asyncForm.addEventListener('submit', startAsync); ui.asyncDiagnostic.addEventListener('click', startAsyncDiagnostic); ui.asyncRefresh.addEventListener('click', loadLatestAsync); [ui.asyncCandidateBudget, ui.asyncReplicasInput, ui.asyncStablePopulation].forEach((input) => input.addEventListener('input', updateAsyncEstimate)); updateAsyncEstimate(); activate(location.hash.slice(1) || 'embodied', false); loadLatestAsync();
+  [ui.networkNodeLayers, ui.networkNodeActivation, ui.networkEdgeLayers, ui.networkEdgeActivation, ui.networkEdgeLatentWidth].forEach((input) => input.addEventListener('input', updateNetworkSummary)); updateNetworkSummary();
+  ui.asyncForm.addEventListener('submit', startAsync); ui.asyncDiagnostic.addEventListener('click', startAsyncDiagnostic); ui.asyncRefresh.addEventListener('click', loadLatestAsync); [ui.asyncCandidateBudget, ui.asyncReplicasInput, ui.asyncStablePopulation].forEach((input) => input.addEventListener('input', updateAsyncEstimate)); updateAsyncEstimate(); activate(location.hash.slice(1) || 'network', false); loadLatestAsync();
   ui.embodiedForm.addEventListener('submit', startEmbodied); ui.embodiedTerminate.addEventListener('click', terminateEmbodied); ui.embodiedRefresh.addEventListener('click', refreshEmbodiedModels); ui.embodiedModel.addEventListener('change', () => { if (ui.embodiedModel.value) { ui.embodiedContinueRun.value = ''; const width = state.embodiedModelWidths[ui.embodiedModel.value]; if (width) ui.embodiedStateWidth.value = String(width); } }); ui.embodiedContinueRun.addEventListener('change', () => { if (ui.embodiedContinueRun.value) { ui.embodiedModel.value = ''; const width = state.embodiedRunWidths[ui.embodiedContinueRun.value]; if (width) ui.embodiedStateWidth.value = String(width); } }); ui.embodiedEnergyScale.addEventListener('input', updateEmbodiedHorizonSuggestion); ui.embodiedSurvivalPressure.addEventListener('change', updateEmbodiedHorizonSuggestion); updateEmbodiedHorizonSuggestion(); refreshEmbodiedModels();
   ui.demoForm.addEventListener('submit', startDemo); ui.demoRefresh.addEventListener('click', refreshDemoRuns); ui.demoPlay.addEventListener('click', () => { if (!state.demo) return; state.demo.playing = !state.demo.playing; ui.demoPlay.textContent = state.demo.playing ? 'Pause' : 'Play'; state.demoLastTick = performance.now(); if (state.demo.playing) requestAnimationFrame(animateDemo); }); ui.demoStep.addEventListener('click', () => advanceDemo()); ui.demoRecord.addEventListener('click', toggleDemoRecording); ui.demoCanvas.addEventListener('click', (event) => { if (state.demo?.snapshot) selectDemoIndividual(state.demo.snapshot, event); }); ui.demoColorChannel.addEventListener('change', () => { if (state.demo?.lastNetwork) drawDemoNetwork(state.demo.lastNetwork); }); ui.demoChannel.addEventListener('change', drawDemoNodeChart); refreshDemoRuns();
+  ui.diagnosticsLoadServer.addEventListener('click', loadDiagnosticsFromServer); ui.diagnosticsLoadFiles.addEventListener('click', loadDiagnosticsFromFiles); ui.diagnosticsRunRandomGraphs.addEventListener('click', runRandomGraphDiagnostic); ui.diagnosticsCompareRuns.addEventListener('click', compareSavedRuns);
   ui.liveRefresh.addEventListener('click', refreshLiveModels); ui.liveModel.addEventListener('change', renderLiveModelDetail); ui.liveForm.addEventListener('submit', launchLive); ui.livePlay.addEventListener('click', () => { if (!state.live) return; state.playing = !state.playing; ui.livePlay.textContent = state.playing ? 'Pause' : 'Play'; state.lastTick = performance.now(); if (state.playing) requestAnimationFrame(animate); }); ui.liveStep.addEventListener('click', () => advanceLive()); refreshLiveModels();
 })();

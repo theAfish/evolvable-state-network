@@ -117,10 +117,21 @@ class FastAPIServerTests(unittest.TestCase):
         self.assertIn('id="embodied-training-mode"', root.text)
         self.assertIn('id="embodied-state-width"', root.text)
         self.assertIn('id="embodied-terminate"', root.text)
+        self.assertIn('data-view="diagnostics"', root.text)
+        self.assertIn('id="diagnostics-load-server"', root.text)
+        self.assertIn('id="diagnostics-report-file"', root.text)
         self.assertEqual(redirect.status_code, 307)
         self.assertEqual(redirect.headers["location"], "/")
         self.assertEqual(health.json()["status"], "ok")
         self.assertEqual(docs.status_code, 200)
+
+    def test_frontend_disables_step_grid_validation_for_all_number_inputs(self) -> None:
+        script = (
+            Path(__file__).parents[1] / "src" / "evolvable_state_network" / "web" / "app.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn("function allowArbitraryNumberPrecision", script)
+        self.assertIn("input.step = 'any'", script)
+        self.assertIn("new MutationObserver", script)
 
     def test_embodied_termination_endpoint_marks_only_running_embodied_jobs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -203,6 +214,32 @@ class FastAPIServerTests(unittest.TestCase):
         self.assertTrue(job["result"]["task_config"]["diagnostics"]["final_test_touched_only_after_selection"])
         self.assertEqual(checkpoint_generation, 1)
 
+    def test_embodied_batch_can_evolve_a_mixed_individual_population(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with TestClient(create_app(Path(directory))) as client:
+                started = client.post(
+                    "/api/embodied/food-web/train",
+                    json={
+                        "training_mode": "batch", "batch_population_mode": "mixed_individual_population",
+                        "algorithm": "genetic", "seed": 5, "population_size": 2,
+                        "prey_count": 2, "predator_count": 0, "batch_generations": 1,
+                        "batch_episode_steps": 8, "batch_trials": 1,
+                        "batch_validation_trials": 1, "batch_test_trials": 1,
+                        "batch_opponents": 1, "enforce_survival_pressure": False,
+                        "hidden_nodes": 1, "state_width": 3, "mean_degree": 0,
+                        "workers": 1,
+                    },
+                )
+                job = client.get(f"/api/jobs/{started.json()['job_id']}").json()
+        self.assertEqual(started.status_code, 200, started.text)
+        self.assertEqual(job["status"], "complete")
+        report = job["result"]
+        self.assertEqual(report["population_mode"], "mixed_individual_population")
+        self.assertEqual(report["world_count"], 2)
+        self.assertEqual(report["prey_genome_population_size"], 4)
+        self.assertEqual(report["prey"]["evaluations"], 4)
+        self.assertEqual(report["task_config"]["batch_population_mode"], "mixed_individual_population")
+
     def test_embodied_demo_accepts_ecology_overrides(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -245,6 +282,64 @@ class FastAPIServerTests(unittest.TestCase):
         self.assertEqual(snapshot["network"]["state_width"], 2)
         self.assertGreaterEqual(snapshot["network"]["vision_pixels"], 1)
         self.assertEqual(snapshot["network"]["input_signal_channels"][:4], [1, 1, 1, 1])
+
+    def test_post_run_random_graph_diagnostic_returns_individual_fitness_values(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_embodied_run(root, "diagnosticrun")
+            with TestClient(create_app(root)) as client:
+                started = client.post(
+                    "/api/embodied/runs/diagnosticrun/diagnostics/random-graphs",
+                    json={"sample_count": 2, "seed": 9},
+                )
+                job = client.get(f"/api/jobs/{started.json()['job_id']}").json()
+        self.assertEqual(started.status_code, 200, started.text)
+        self.assertEqual(job["status"], "complete")
+        result = job["result"]
+        self.assertEqual(result["mode"], "random_graph_random_state")
+        self.assertEqual(result["sample_count"], 2)
+        self.assertEqual(result["episode_seeds"], [9, 10016])
+        self.assertEqual(len(result["prey"]["fitness_values"]), 2)
+        self.assertIn("variance", result["prey"]["fitness"])
+
+    def test_saved_runs_can_be_compared_with_common_raw_output_probes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_embodied_run(root, "first")
+            self._write_embodied_run(root, "second")
+            with TestClient(create_app(root)) as client:
+                response = client.post(
+                    "/api/embodied/diagnostics/compare",
+                    json={"left_run_id": "first", "right_run_id": "second", "probe_count": 32, "seed": 9},
+                )
+        self.assertEqual(response.status_code, 200, response.text)
+        comparison = response.json()
+        self.assertEqual(comparison["probe_count"], 32)
+        self.assertTrue(comparison["prey"]["joint_genome"]["compatible"])
+        self.assertIn("abs_gt_3_fraction", comparison["prey"]["node_rule_raw_output"]["left"])
+        self.assertIn("rms_distance", comparison["prey"]["edge_rule_raw_output"]["common_probe_response"])
+
+    def test_checkpoint_evaluation_records_matched_behavior_and_dynamics(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_embodied_run(root, "first")
+            self._write_embodied_run(root, "second")
+            with TestClient(create_app(root)) as client:
+                started = client.post(
+                    "/api/embodied/diagnostics/checkpoints/evaluate",
+                    json={"left_run_id": "first", "right_run_id": "second", "evaluation_samples": 1, "parameter_scales": [1.0], "seed": 9},
+                )
+                job = client.get(f"/api/jobs/{started.json()['job_id']}").json()
+                artifact = client.get(job["result"]["output_url"])
+        self.assertEqual(started.status_code, 200, started.text)
+        self.assertEqual(job["status"], "complete")
+        result = job["result"]
+        self.assertEqual(result["evaluation_seeds"], [9])
+        self.assertIn("mean_absolute_action_difference", result["differences"])
+        self.assertIn("abs_gt_10_fraction", result["checkpoint_a"]["node_rule_raw_output"])
+        self.assertIn("near_zero_fraction", result["checkpoint_b"]["edge_update"])
+        self.assertIn("1.0", result["parameter_scaling"]["results"])
+        self.assertEqual(artifact.status_code, 200)
 
     def test_embodied_demo_uses_current_checkpoint_before_run_completes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

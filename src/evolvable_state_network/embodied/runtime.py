@@ -30,6 +30,7 @@ class EmbodiedNetworkConfig:
     max_delta: float = .12
     max_abs_state: float = 4.0
     edge_step_scale: float = .06
+    rule_output_scale: float = 1.0
     vision_pixels: int = 9
     body_inputs: tuple[Literal["hunger", "energy_change", "ate", "time_since_meal"], ...] = ("hunger",)
     allow_input_output_connections: bool = False
@@ -45,7 +46,7 @@ class EmbodiedNetworkConfig:
             raise ValueError("unknown embodied execution backend or device")
         if self.execution_backend == "python" and self.device == "cuda":
             raise ValueError("the reference Python backend cannot run on CUDA")
-        if self.initial_state_scale < 0 or self.dt <= 0 or self.max_delta <= 0 or self.max_abs_state <= 0:
+        if self.initial_state_scale < 0 or self.dt <= 0 or self.max_delta <= 0 or self.max_abs_state <= 0 or self.edge_step_scale <= 0 or self.rule_output_scale <= 0:
             raise ValueError("network integration parameters are invalid")
 
 
@@ -170,6 +171,7 @@ class EmbodiedNetwork:
             "node_state": node_state,
             "input_nodes": list(self.interface.input_nodes),
             "action_nodes": list(self.interface.action_nodes),
+            "dynamics": self.diagnostics.dynamics_summary(),
         }
 
     def act(self, observation: object) -> dict[str, object]:

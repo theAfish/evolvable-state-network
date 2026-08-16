@@ -4,10 +4,46 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import tanh
-from typing import Sequence
+from typing import Literal, Sequence
 
 from ..rules import EdgeRule, NodeRule
 from ..types import StateVector
+
+
+def _activation(value: float, name: str) -> float:
+    if name == "tanh":
+        return tanh(value)
+    if name == "relu":
+        return max(0.0, value)
+    if name == "silu":
+        return value / (1.0 + __import__("math").exp(-value))
+    # Numerically stable enough for the small evolved rule ranges used here.
+    import math
+    return .5 * value * (1.0 + math.tanh(.7978845608 * (value + .044715 * value ** 3)))
+
+
+def _decode_layers(values: tuple[float, ...], input_width: int, widths: tuple[int, ...]) -> tuple[tuple[tuple[float, ...], tuple[float, ...]], ...]:
+    cursor = 0
+    previous = input_width
+    layers = []
+    for width in widths:
+        count = width * previous
+        weights = tuple(tuple(values[cursor + row * previous + column] for column in range(previous)) for row in range(width))
+        cursor += count
+        bias = values[cursor : cursor + width]
+        cursor += width
+        layers.append((weights, bias))
+        previous = width
+    return tuple(layers)
+
+
+def _forward(features: StateVector, layers: tuple[tuple[tuple[float, ...], tuple[float, ...]], ...], activation: str) -> StateVector:
+    values = features
+    for index, (weights, bias) in enumerate(layers):
+        values = tuple(sum(weight * value for weight, value in zip(row, values, strict=True)) + offset for row, offset in zip(weights, bias, strict=True))
+        if index < len(layers) - 1:
+            values = tuple(_activation(value, activation) for value in values)
+    return values
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,11 +52,15 @@ class RuleArchitecture:
 
     state_width: int = 4
     hidden_width: int = 8
+    hidden_layers: tuple[int, ...] | None = None
+    activation: Literal["tanh", "relu", "gelu", "silu"] = "tanh"
     increment_fraction: float = 0.8
 
     def __post_init__(self) -> None:
         if self.state_width < 1 or self.hidden_width < 1 or not 0 < self.increment_fraction <= 1:
             raise ValueError("invalid fixed rule architecture")
+        if self.hidden_layers is not None and (not self.hidden_layers or any(width < 1 for width in self.hidden_layers)):
+            raise ValueError("hidden_layers must contain positive widths")
 
     @property
     def input_width(self) -> int:
@@ -29,28 +69,30 @@ class RuleArchitecture:
 
     @property
     def parameter_count(self) -> int:
-        return self.hidden_width * self.input_width + self.hidden_width + self.state_width * self.hidden_width + self.state_width
+        widths = self.layers + (self.state_width,)
+        return sum(output * (input_ + 1) for input_, output in zip((self.input_width,) + widths[:-1], widths, strict=True))
+
+    @property
+    def layers(self) -> tuple[int, ...]:
+        """Hidden widths, with ``hidden_width`` retained for old exports."""
+        # JSON checkpoints decode tuples as lists; normalize on read so both
+        # persisted reports and programmatic construction are accepted.
+        return tuple(self.hidden_layers) if self.hidden_layers is not None else (self.hidden_width,)
 
 
 class MLPUpdateRule(NodeRule):
     """One shared local rule with a bounded, unnamed-vector state increment."""
 
-    def __init__(self, architecture: RuleArchitecture, parameters: Sequence[float]) -> None:
+    def __init__(self, architecture: RuleArchitecture, parameters: Sequence[float], *, output_scale: float = 1.0) -> None:
         self.architecture = architecture
         self.state_width = architecture.state_width
         if len(parameters) != architecture.parameter_count:
             raise ValueError(f"expected {architecture.parameter_count} rule parameters, received {len(parameters)}")
         self.parameters = tuple(float(value) for value in parameters)
-        cursor = 0
-        count = architecture.hidden_width * architecture.input_width
-        self._input_weights = self.parameters[cursor : cursor + count]
-        cursor += count
-        self._hidden_bias = self.parameters[cursor : cursor + architecture.hidden_width]
-        cursor += architecture.hidden_width
-        count = architecture.state_width * architecture.hidden_width
-        self._output_weights = self.parameters[cursor : cursor + count]
-        cursor += count
-        self._output_bias = self.parameters[cursor : cursor + architecture.state_width]
+        if output_scale <= 0:
+            raise ValueError("rule output scale must be positive")
+        self.output_scale = float(output_scale)
+        self._layers = _decode_layers(self.parameters, architecture.input_width, architecture.layers + (architecture.state_width,))
 
     def initial_state(self) -> StateVector:
         return (0.0,) * self.state_width
@@ -61,24 +103,20 @@ class MLPUpdateRule(NodeRule):
         if len(state) != self.state_width or len(aggregate) != self.state_width:
             raise ValueError("MLP update inputs must match configured state width")
         features = state + aggregate + (1.0,)
-        hidden = []
-        for row in range(self.architecture.hidden_width):
-            offset = row * self.architecture.input_width
-            total = self._hidden_bias[row] + sum(
-                self._input_weights[offset + column] * value for column, value in enumerate(features)
-            )
-            hidden.append(tanh(total))
+        output = self.raw_output(state, aggregate)
         # Keep the established update magnitude at dt=.05, while making the
         # integration step meaningful for all other caller-selected values.
         increment_limit = max_delta * self.architecture.increment_fraction * (dt / .05)
         result = []
         for row in range(self.state_width):
-            offset = row * self.architecture.hidden_width
-            total = self._output_bias[row] + sum(
-                self._output_weights[offset + column] * value for column, value in enumerate(hidden)
-            )
-            result.append(state[row] + increment_limit * tanh(total))
+            result.append(state[row] + increment_limit * tanh(output[row] * self.output_scale))
         return tuple(result)
+
+    def raw_output(self, state: StateVector, aggregate: StateVector) -> StateVector:
+        """Return the final MLP layer before output scaling and bounding."""
+        if len(state) != self.state_width or len(aggregate) != self.state_width:
+            raise ValueError("MLP update inputs must match configured state width")
+        return _forward(state + aggregate + (1.0,), self._layers, self.architecture.activation)
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +130,8 @@ class EdgeArchitecture:
     node_state_width: int = 4
     latent_width: int = 3
     hidden_width: int = 12
+    hidden_layers: tuple[int, ...] | None = None
+    activation: Literal["tanh", "relu", "gelu", "silu"] = "tanh"
     gate_index: int = 0
     message_projection: tuple[tuple[float, ...], ...] | None = None
 
@@ -105,6 +145,8 @@ class EdgeArchitecture:
             or any(len(row) != self.node_state_width for row in self.message_projection)
         ):
             raise ValueError("message projection must be square in node-state width")
+        if self.hidden_layers is not None and (not self.hidden_layers or any(width < 1 for width in self.hidden_layers)):
+            raise ValueError("hidden_layers must contain positive widths")
 
     @property
     def input_width(self) -> int:
@@ -113,7 +155,12 @@ class EdgeArchitecture:
 
     @property
     def parameter_count(self) -> int:
-        return self.hidden_width * self.input_width + self.hidden_width + self.latent_width * self.hidden_width + self.latent_width
+        widths = self.layers + (self.latent_width,)
+        return sum(output * (input_ + 1) for input_, output in zip((self.input_width,) + widths[:-1], widths, strict=True))
+
+    @property
+    def layers(self) -> tuple[int, ...]:
+        return tuple(self.hidden_layers) if self.hidden_layers is not None else (self.hidden_width,)
 
     @property
     def projection(self) -> tuple[tuple[float, ...], ...]:
@@ -125,22 +172,16 @@ class EdgeArchitecture:
 class MLPEdgeRule(EdgeRule):
     """Shared edge update with bounded increments and learned coordinate-wise gates."""
 
-    def __init__(self, architecture: EdgeArchitecture, parameters: Sequence[float]) -> None:
+    def __init__(self, architecture: EdgeArchitecture, parameters: Sequence[float], *, output_scale: float = 1.0) -> None:
         self.architecture = architecture
         self.state_width = architecture.latent_width
         if len(parameters) != architecture.parameter_count:
             raise ValueError(f"expected {architecture.parameter_count} edge-rule parameters, received {len(parameters)}")
         self.parameters = tuple(float(value) for value in parameters)
-        cursor = 0
-        count = architecture.hidden_width * architecture.input_width
-        self._input_weights = self.parameters[cursor : cursor + count]
-        cursor += count
-        self._hidden_bias = self.parameters[cursor : cursor + architecture.hidden_width]
-        cursor += architecture.hidden_width
-        count = architecture.latent_width * architecture.hidden_width
-        self._output_weights = self.parameters[cursor : cursor + count]
-        cursor += count
-        self._output_bias = self.parameters[cursor : cursor + architecture.latent_width]
+        if output_scale <= 0:
+            raise ValueError("rule output scale must be positive")
+        self.output_scale = float(output_scale)
+        self._layers = _decode_layers(self.parameters, architecture.input_width, architecture.layers + (architecture.latent_width,))
 
     def initial_state(self) -> StateVector:
         return (0.0,) * self.state_width
@@ -153,16 +194,19 @@ class MLPEdgeRule(EdgeRule):
         if (len(state) != self.state_width or any(len(vector) != width for vector in (source, target, message))):
             raise ValueError("edge update inputs must match the configured architecture")
         features = state + source + target + message + (1.0,)
-        hidden = []
-        for row in range(self.architecture.hidden_width):
-            offset = row * self.architecture.input_width
-            hidden.append(tanh(self._hidden_bias[row] + sum(self._input_weights[offset + column] * value for column, value in enumerate(features))))
+        output = self.raw_output(state, source, target, message)
         increments = []
         for row in range(self.state_width):
-            offset = row * self.architecture.hidden_width
-            raw = self._output_bias[row] + sum(self._output_weights[offset + column] * value for column, value in enumerate(hidden))
-            increments.append(edge_step_scale * tanh(raw))
+            increments.append(edge_step_scale * tanh(output[row] * self.output_scale))
         return tuple(value + increment for value, increment in zip(state, increments, strict=True))
+
+    def raw_output(
+        self, state: StateVector, source: StateVector, target: StateVector, message: StateVector,
+    ) -> StateVector:
+        width = self.architecture.node_state_width
+        if len(state) != self.state_width or any(len(vector) != width for vector in (source, target, message)):
+            raise ValueError("edge update inputs must match the configured architecture")
+        return _forward(state + source + target + message + (1.0,), self._layers, self.architecture.activation)
 
     def communication_gates(self, state: StateVector) -> StateVector:
         """Map latent coordinates to one smooth communication gate per node coordinate.

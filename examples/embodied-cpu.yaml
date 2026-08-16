@@ -2,6 +2,10 @@
 seed: 41
 training_mode: batch
 algorithm: genetic
+# Each of the 24 worlds contains 8 different prey genomes, yielding a
+# 192-genome prey population per generation.  Use shared_rule_cohort to keep
+# the legacy one-rule-per-world evaluation.
+batch_population_mode: mixed_individual_population
 execution_backend: torch
 device: cpu
 # Candidate evaluation processes. Set to the Slurm CPUs requested, or 0 to use

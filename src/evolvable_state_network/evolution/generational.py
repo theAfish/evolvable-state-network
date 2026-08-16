@@ -37,10 +37,16 @@ class EvolutionConfig:
     edge_architecture: EdgeArchitecture | None = None
     target: EvolutionTarget = "node"
     scenarios: ScenarioSuite | None = None
+    rule_output_scale: float = 1.0
+    saturation_penalty_weight: float = 0.0
+    clipping_penalty_weight: float = 0.0
+    saturation_threshold: float = 3.0
 
     def __post_init__(self) -> None:
         if self.generations < 1 or self.smoke_samples < 4 or self.checkpoint_every < 1:
             raise ValueError("generations, smoke_samples, and checkpoint_every must be positive")
+        if self.rule_output_scale <= 0 or self.saturation_penalty_weight < 0 or self.clipping_penalty_weight < 0 or self.saturation_threshold <= 0:
+            raise ValueError("rule-dynamics controls are invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +105,10 @@ class EvolutionRunner:
         self.evaluator = CandidateEvaluator(
             config.architecture, config.scenarios or default_scenario_suite(),
             edge_architecture=config.edge_architecture, target=config.target,
+            rule_output_scale=config.rule_output_scale,
+            saturation_penalty_weight=config.saturation_penalty_weight,
+            clipping_penalty_weight=config.clipping_penalty_weight,
+            saturation_threshold=config.saturation_threshold,
         )
 
     def run(
@@ -263,10 +273,10 @@ class EvolutionRunner:
         path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
 
     def _config_dict(self) -> dict[str, object]:
-        return {"seed": self.config.seed, "generations": self.config.generations, "population_size": self.config.population_size, "initial_sigma": self.config.initial_sigma, "smoke_samples": self.config.smoke_samples, "checkpoint_every": self.config.checkpoint_every, "architecture": asdict(self.config.architecture), "edge_architecture": asdict(self.config.edge_architecture) if self.config.edge_architecture else None, "target": self.config.target, "scenarios": asdict(self.evaluator.suite)}
+        return {"seed": self.config.seed, "generations": self.config.generations, "population_size": self.config.population_size, "initial_sigma": self.config.initial_sigma, "smoke_samples": self.config.smoke_samples, "checkpoint_every": self.config.checkpoint_every, "architecture": asdict(self.config.architecture), "edge_architecture": asdict(self.config.edge_architecture) if self.config.edge_architecture else None, "target": self.config.target, "rule_output_scale": self.config.rule_output_scale, "saturation_penalty_weight": self.config.saturation_penalty_weight, "clipping_penalty_weight": self.config.clipping_penalty_weight, "saturation_threshold": self.config.saturation_threshold, "scenarios": asdict(self.evaluator.suite)}
 
     def _assert_compatible(self, saved: dict[str, object]) -> None:
         current = self._config_dict()
-        for key in ("seed", "population_size", "initial_sigma", "architecture", "edge_architecture", "target", "scenarios"):
+        for key in ("seed", "population_size", "initial_sigma", "architecture", "edge_architecture", "target", "rule_output_scale", "saturation_penalty_weight", "clipping_penalty_weight", "saturation_threshold", "scenarios"):
             if json.dumps(saved.get(key), sort_keys=True) != json.dumps(current.get(key), sort_keys=True):
                 raise ValueError(f"checkpoint is incompatible with current {key}")

@@ -9,7 +9,7 @@ from dataclasses import dataclass, replace
 from multiprocessing import get_context
 import os
 from random import Random
-from statistics import fmean
+from statistics import fmean, pstdev
 from typing import Callable, Literal, Mapping, Sequence
 
 from ..embodied import EmbodiedNetwork, EmbodiedNetworkConfig, FoodWebAgentAdapter
@@ -20,9 +20,13 @@ from ..environments import (
 )
 from ..evolution.candidate import EdgeArchitecture, MLPEdgeRule, MLPUpdateRule, RuleArchitecture
 from ..evolution.cmaes import CMAES, CMAESConfig
-from ..evolution.genetic import GeneticAlgorithm, GeneticAlgorithmConfig
+from ..evolution.genetic import GeneticAlgorithm, GeneticAlgorithmConfig, population_statistics
 from ..evolution.genome import GenomeCodec
 from ..simulation.torch_backend import resolve_device
+from .embodied_population_layouts import (
+    BatchPopulationMode,
+    get_batch_population_layout,
+)
 
 
 _WORKER_EVALUATOR: FoodWebCoevolutionEvaluator | None = None
@@ -52,6 +56,34 @@ def _evaluate_focal_worker(
     return _WORKER_EVALUATOR.evaluate_focal(
         genome, opponents, species, seeds, observation_mask=observation_mask,
     )
+
+
+def _evaluate_population_group_worker(
+    job: tuple[
+        BatchPopulationMode, tuple[tuple[float, ...], ...],
+        tuple[tuple[float, ...], ...], Species, tuple[int, ...],
+    ],
+) -> tuple[tuple[float, tuple[float, ...], dict[str, float]], ...]:
+    """Evaluate one world-level group and return one score row per genome."""
+    if _WORKER_EVALUATOR is None:
+        raise RuntimeError("embodied evaluation worker was not initialized")
+    return _evaluate_population_group_worker_with(_WORKER_EVALUATOR, job)
+
+
+def _evaluate_population_group_worker_with(
+    evaluator: "FoodWebCoevolutionEvaluator",
+    job: tuple[
+        BatchPopulationMode, tuple[tuple[float, ...], ...],
+        tuple[tuple[float, ...], ...], Species, tuple[int, ...],
+    ],
+) -> tuple[tuple[float, tuple[float, ...], dict[str, float]], ...]:
+    mode, genomes, opponents, species, seeds = job
+    if mode == "shared_rule_cohort":
+        score = evaluator.evaluate_focal(genomes[0], opponents, species, seeds)
+        return (score,)
+    if mode == "mixed_individual_population":
+        return evaluator.evaluate_mixed_focal(genomes, opponents, species, seeds)
+    raise ValueError(f"unknown batch population mode: {mode}")
 
 
 BEHAVIOR_KEYS = (
@@ -109,6 +141,18 @@ def _mean_behavior(rows: Sequence[Mapping[str, float]]) -> dict[str, float]:
 
 def _public_behavior(behavior: Mapping[str, float]) -> dict[str, float]:
     return {key: float(value) for key, value in behavior.items() if not key.startswith("_")}
+
+
+def _phenotype_diversity(rows: Sequence[Mapping[str, float]]) -> float:
+    """Mean normalized spread of the established behavioral descriptors."""
+    if len(rows) < 2:
+        return 0.0
+    spreads = []
+    for key in BEHAVIOR_KEYS:
+        values = [float(row.get(key, 0.0)) for row in rows]
+        scale = max(1.0, abs(fmean(values)))
+        spreads.append(pstdev(values) / scale)
+    return fmean(spreads)
 
 
 def _species_behavior(result: object, ids: Sequence[AgentId]) -> dict[str, float]:
@@ -215,7 +259,7 @@ class EmbodiedFoodWebEvaluator:
 
     def evaluate(self, genome: Sequence[float]) -> EmbodiedFoodWebEvaluation:
         encoded = tuple(float(value) for value in genome)
-        node_rule, edge_rule = self.codec.decode_groups(encoded)
+        node_rule, edge_rule = self.codec.decode_groups(encoded, output_scale=self.config.network.rule_output_scale)
         assert node_rule is not None and edge_rule is not None
         trials = tuple(
             self._trial(node_rule, edge_rule, self.config.seed + 10_007 * index)
@@ -320,11 +364,49 @@ class FoodWebCoevolutionEvaluator:
         aggregate = _mean_behavior(behavior)
         return fmean(lifetimes), tuple(lifetimes), _public_behavior(aggregate)
 
+    def evaluate_mixed_focal(
+        self, genomes: Sequence[Sequence[float]], opponents: Sequence[Sequence[float]],
+        focal_species: Species, seeds: Sequence[int], *, observation_mask: Literal["none", "vision"] = "none",
+    ) -> tuple[tuple[float, tuple[float, ...], dict[str, float]], ...]:
+        """Score every distinct focal genome from shared mixed-population worlds.
+
+        A group contains exactly one genome per focal organism.  Each genome's
+        score is its own first-life outcome, averaged across the common
+        opponent/seed bank.  Random world and graph seeds remain independent
+        of genome values, so the group members are selected fairly despite
+        interacting in the same ecology.
+        """
+        focal = tuple(tuple(float(value) for value in genome) for genome in genomes)
+        expected = self.config.prey_count if focal_species is Species.PREY else self.config.predator_count
+        if not focal or len(focal) != expected:
+            raise ValueError("mixed focal group must contain one genome for every focal organism")
+        if not opponents or not seeds:
+            raise ValueError("batch evaluation needs at least one opponent and seed")
+        lifetimes: list[list[float]] = [[] for _ in focal]
+        behavior: list[list[Mapping[str, float]]] = [[] for _ in focal]
+        for opponent_values in opponents:
+            opponent = tuple(float(value) for value in opponent_values)
+            for seed in seeds:
+                trial_lifetimes, trial_behavior = self._mixed_trial(
+                    focal, opponent, focal_species, int(seed), observation_mask=observation_mask,
+                )
+                for index, (lifetime, row) in enumerate(zip(trial_lifetimes, trial_behavior, strict=True)):
+                    lifetimes[index].append(lifetime)
+                    behavior[index].append(row)
+        return tuple(
+            (
+                fmean(lifetimes[index]),
+                tuple(lifetimes[index]),
+                _public_behavior(_mean_behavior(behavior[index])),
+            )
+            for index in range(len(focal))
+        )
+
     def _blueprint(
         self, genome: tuple[float, ...], seed: int, species: Species,
         observation_mask: Literal["none", "vision"] = "none",
     ) -> EmbodiedFoodWebControllerBlueprint:
-        node_rule, edge_rule = self.codec.decode_groups(genome)
+        node_rule, edge_rule = self.codec.decode_groups(genome, output_scale=self.config.network.rule_output_scale)
         assert node_rule is not None and edge_rule is not None
         return EmbodiedFoodWebControllerBlueprint(
             node_rule, edge_rule, self.config.network, _network_seed(seed, species), observation_mask
@@ -361,6 +443,40 @@ class FoodWebCoevolutionEvaluator:
             prey_lifetime, predator_lifetime, prey_behavior, predator_behavior,
         )
 
+    def _mixed_trial(
+        self, focal_genomes: Sequence[tuple[float, ...]], opponent_genome: tuple[float, ...],
+        focal_species: Species, seed: int, *, observation_mask: Literal["none", "vision"] = "none",
+    ) -> tuple[tuple[float, ...], tuple[Mapping[str, float], ...]]:
+        """Run one ecology where every focal organism carries its own genome."""
+        agents = make_reference_population(
+            prey_count=self.config.prey_count, predator_count=self.config.predator_count,
+            width=self.config.environment.width, height=self.config.environment.height,
+            prey_initial_energy=self.config.environment.prey_initial_energy,
+            predator_initial_energy=self.config.environment.predator_initial_energy,
+            controller=RandomControllerBlueprint(), seed=seed,
+        )
+        focal_agents = [agent for agent in agents if agent.species is focal_species]
+        if len(focal_agents) != len(focal_genomes):
+            raise ValueError("mixed focal genomes do not match the world population")
+        opponent_species = Species.PREDATOR if focal_species is Species.PREY else Species.PREY
+        opponent = self._blueprint(opponent_genome, seed, opponent_species)
+        focal_ids: list[AgentId] = []
+        for agent, genome in zip(focal_agents, focal_genomes, strict=True):
+            agent.controller = self._blueprint(genome, seed, focal_species, observation_mask)
+            focal_ids.append(agent.id)
+        for agent in agents:
+            if agent.species is not focal_species:
+                agent.controller = opponent
+        result = EpisodeRunner(FoodWebEnvironment(self.config.environment, seed=seed)).run(
+            agents, max_steps=self.config.max_steps, seed=seed,
+        )
+        behavior = getattr(result, "behavior")
+        rows = tuple(behavior[agent_id] for agent_id in focal_ids)
+        return (
+            tuple(float(row["restricted_lifetime"]) for row in rows),
+            rows,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class EmbodiedRuleEvolutionConfig:
@@ -372,10 +488,21 @@ class EmbodiedRuleEvolutionConfig:
     seed: int = 1
     initial_genome: tuple[float, ...] | None = None
     algorithm: Literal["cma_es", "genetic"] = "cma_es"
+    mutation_sigma: float | None = None
+    elite_fraction: float = .25
+    immigrant_fraction: float = .25
+    immigrant_sigma: float | None = None
+    immigrant_mode: Literal["zero", "population"] = "zero"
+    max_genome_norm: float | None = None
+    max_parameter_magnitude: float | None = None
 
     def __post_init__(self) -> None:
         if self.generations < 1 or self.population_size < 2 or self.initial_sigma <= 0:
             raise ValueError("evolution configuration is invalid")
+        if self.mutation_sigma is not None and self.mutation_sigma <= 0:
+            raise ValueError("mutation_sigma must be positive when provided")
+        if self.immigrant_sigma is not None and self.immigrant_sigma <= 0:
+            raise ValueError("immigrant_sigma must be positive when provided")
 
 
 RuleOptimizer = CMAES | GeneticAlgorithm
@@ -386,9 +513,12 @@ def _make_optimizer(dimension: int, config: EmbodiedRuleEvolutionConfig, *, seed
     if config.algorithm == "genetic":
         return GeneticAlgorithm(
             GeneticAlgorithmConfig(
-                dimension, config.population_size, config.initial_sigma, optimizer_seed,
-                elite_fraction=.25, immigrant_fraction=.25,
-                immigrant_sigma=max(.05, config.initial_sigma * 3.0),
+                dimension, config.population_size, config.mutation_sigma or config.initial_sigma, optimizer_seed,
+                elite_fraction=config.elite_fraction, immigrant_fraction=config.immigrant_fraction,
+                immigrant_sigma=config.immigrant_sigma or max(.05, config.initial_sigma * 3.0),
+                immigrant_mode=config.immigrant_mode,
+                max_genome_norm=config.max_genome_norm,
+                max_parameter_magnitude=config.max_parameter_magnitude,
             ),
             config.initial_genome,
         )
@@ -475,6 +605,7 @@ class FoodWebCoevolutionRunner:
 class BatchFoodWebConfig:
     """Comparable episodic batches with frozen opponents and common seeds."""
 
+    population_mode: BatchPopulationMode = "shared_rule_cohort"
     generations: int = 8
     episode_steps: int = 256
     trials: int = 4
@@ -509,6 +640,7 @@ class BatchFoodWebCoevolutionRunner:
             evaluator.architecture, evaluator.edge_architecture, batch_task,
         )
         self.evolution, self.config = evolution, config
+        self.population_layout = get_batch_population_layout(config.population_mode)
         if evaluator.config.max_steps != config.episode_steps:
             raise ValueError("batch evaluator max_steps must equal episode_steps")
         for genome in (config.initial_genome, config.initial_prey_genome, config.initial_predator_genome):
@@ -524,14 +656,28 @@ class BatchFoodWebCoevolutionRunner:
         prey_initial = self.config.initial_prey_genome if self.config.initial_prey_genome is not None else (initial or zero)
         predator_initial = self.config.initial_predator_genome if self.config.initial_predator_genome is not None else (initial or zero)
         prey_config = EmbodiedRuleEvolutionConfig(
-            generations=self.config.generations, population_size=self.evolution.population_size,
+            generations=self.config.generations,
+            population_size=self.population_layout.genome_population_size(
+                self.evolution.population_size, self.evaluator.config.prey_count,
+            ),
             initial_sigma=self.evolution.initial_sigma, seed=self.config.seed,
             initial_genome=prey_initial, algorithm=self.evolution.algorithm,
+            mutation_sigma=self.evolution.mutation_sigma, elite_fraction=self.evolution.elite_fraction,
+            immigrant_fraction=self.evolution.immigrant_fraction, immigrant_sigma=self.evolution.immigrant_sigma,
+            immigrant_mode=self.evolution.immigrant_mode, max_genome_norm=self.evolution.max_genome_norm,
+            max_parameter_magnitude=self.evolution.max_parameter_magnitude,
         )
         predator_config = EmbodiedRuleEvolutionConfig(
-            generations=self.config.generations, population_size=self.evolution.population_size,
+            generations=self.config.generations,
+            population_size=self.population_layout.genome_population_size(
+                self.evolution.population_size, max(1, self.evaluator.config.predator_count),
+            ),
             initial_sigma=self.evolution.initial_sigma, seed=self.config.seed + 1,
             initial_genome=predator_initial, algorithm=self.evolution.algorithm,
+            mutation_sigma=self.evolution.mutation_sigma, elite_fraction=self.evolution.elite_fraction,
+            immigrant_fraction=self.evolution.immigrant_fraction, immigrant_sigma=self.evolution.immigrant_sigma,
+            immigrant_mode=self.evolution.immigrant_mode, max_genome_norm=self.evolution.max_genome_norm,
+            max_parameter_magnitude=self.evolution.max_parameter_magnitude,
         )
         prey_optimizer = _make_optimizer(self.evaluator.codec.dimension, prey_config)
         predator_optimizer = _make_optimizer(self.evaluator.codec.dimension, predator_config)
@@ -622,6 +768,12 @@ class BatchFoodWebCoevolutionRunner:
                     **{f"predator_{key}": value for key, value in predator_validation[2].items()},
                     "episode_seeds": list(seeds),
                     "validation_seeds": list(validation_seeds),
+                    "prey_genotype": population_statistics(prey_population, node_dimension=self.evaluator.architecture.parameter_count),
+                    "predator_genotype": population_statistics(predator_population, node_dimension=self.evaluator.architecture.parameter_count) if predator_scores else {},
+                    "prey_normalizations": getattr(prey_optimizer, "last_ask_normalizations", 0),
+                    "predator_normalizations": getattr(predator_optimizer, "last_ask_normalizations", 0),
+                    "prey_phenotype_diversity": _phenotype_diversity([item[2] for item in prey_rows]),
+                    "predator_phenotype_diversity": _phenotype_diversity([item[2] for item in predator_rows]) if predator_scores else 0.0,
                 }
                 history.append(row)
                 event = {
@@ -658,7 +810,20 @@ class BatchFoodWebCoevolutionRunner:
             "task": "batch_food_web_coevolution", "training_mode": "batch", "algorithm": self.evolution.algorithm,
             "objective": "restricted_mean_lifetime", "objective_units": "ticks",
             "population_size": self.evolution.population_size,
+            "population_mode": self.config.population_mode,
+            "world_count": self.evolution.population_size,
+            "prey_genome_population_size": prey_config.population_size,
+            "predator_genome_population_size": (
+                predator_config.population_size if self.evaluator.config.predator_count else 0
+            ),
             "initial_sigma": self.evolution.initial_sigma,
+            "mutation_sigma": self.evolution.mutation_sigma or self.evolution.initial_sigma,
+            "elite_fraction": self.evolution.elite_fraction,
+            "immigrant_fraction": self.evolution.immigrant_fraction,
+            "immigrant_sigma": self.evolution.immigrant_sigma or max(.05, self.evolution.initial_sigma * 3.0),
+            "immigrant_mode": self.evolution.immigrant_mode,
+            "max_genome_norm": self.evolution.max_genome_norm,
+            "max_parameter_magnitude": self.evolution.max_parameter_magnitude,
             "generations": self.config.generations, "episode_steps": self.config.episode_steps,
             "trials": self.config.trials, "validation_trials": self.config.validation_trials,
             "test_trials": self.config.test_trials, "test_seeds": list(test_seeds),
@@ -722,8 +887,45 @@ class BatchFoodWebCoevolutionRunner:
         self, executor: ProcessPoolExecutor | None, population: Sequence[tuple[float, ...]],
         opponents: tuple[tuple[float, ...], ...], species: Species, seeds: tuple[int, ...],
     ) -> tuple[tuple[float, tuple[float, ...], dict[str, float]], ...]:
-        jobs = tuple((tuple(genome), opponents, species, seeds, "none") for genome in population)
-        return self._evaluate_jobs(executor, jobs)
+        agents_per_world = (
+            self.evaluator.config.prey_count if species is Species.PREY
+            else self.evaluator.config.predator_count
+        )
+        indexed_population = list(enumerate(population))
+        if self.config.population_mode == "mixed_individual_population":
+            # Re-group every generation independently of genome values.  A
+            # persistent slot would otherwise couple a genome to one spawn
+            # position, graph-seed sequence, and set of competitors.
+            Random(seeds[0] + (0x51A7 if species is Species.PREY else 0xA93D)).shuffle(
+                indexed_population
+            )
+        groups = self.population_layout.groups(
+            tuple(genome for _, genome in indexed_population), agents_per_world,
+        )
+        jobs = tuple(
+            (self.config.population_mode, group, opponents, species, seeds)
+            for group in groups
+        )
+        if executor is not None:
+            rows = executor.map(_evaluate_population_group_worker, jobs, chunksize=1)
+        else:
+            rows = (
+                _evaluate_population_group_worker_with(self.evaluator, job)
+                for job in jobs
+            )
+        ordered_rows = [
+            row for group_rows in rows for row in group_rows
+        ]
+        if self.config.population_mode == "shared_rule_cohort":
+            return tuple(ordered_rows)
+        restored: list[tuple[float, tuple[float, ...], dict[str, float]] | None] = [
+            None
+        ] * len(population)
+        for (original_index, _), row in zip(indexed_population, ordered_rows, strict=True):
+            restored[original_index] = row
+        if any(row is None for row in restored):
+            raise RuntimeError("mixed population evaluation lost a candidate score")
+        return tuple(row for row in restored if row is not None)
 
     def _evaluate_jobs(
         self, executor: ProcessPoolExecutor | None,
@@ -811,7 +1013,7 @@ class OnlineRuleLibrary:
         index = min(range(len(self.cohort)), key=lambda item: (self.assignments[item], item))
         self.assignments[index] += 1
         genome = self.cohort[index]
-        node_rule, edge_rule = self.codec.decode_groups(genome)
+        node_rule, edge_rule = self.codec.decode_groups(genome, output_scale=self.network.rule_output_scale)
         assert node_rule is not None and edge_rule is not None
         blueprint = EmbodiedFoodWebControllerBlueprint(node_rule, edge_rule, self.network, self.random.randrange(2**32))
         return OnlineRuleBirth(blueprint, genome, self.cohort_index)
@@ -901,11 +1103,19 @@ class ContinuousFoodWebCoevolutionRunner:
             generations=1, population_size=self.evolution.population_size,
             initial_sigma=self.evolution.initial_sigma, seed=self.config.seed, initial_genome=prey_initial,
             algorithm=self.evolution.algorithm,
+            mutation_sigma=self.evolution.mutation_sigma, elite_fraction=self.evolution.elite_fraction,
+            immigrant_fraction=self.evolution.immigrant_fraction, immigrant_sigma=self.evolution.immigrant_sigma,
+            immigrant_mode=self.evolution.immigrant_mode, max_genome_norm=self.evolution.max_genome_norm,
+            max_parameter_magnitude=self.evolution.max_parameter_magnitude,
         )
         predator_config = EmbodiedRuleEvolutionConfig(
             generations=1, population_size=self.evolution.population_size,
             initial_sigma=self.evolution.initial_sigma, seed=self.config.seed, initial_genome=predator_initial,
             algorithm=self.evolution.algorithm,
+            mutation_sigma=self.evolution.mutation_sigma, elite_fraction=self.evolution.elite_fraction,
+            immigrant_fraction=self.evolution.immigrant_fraction, immigrant_sigma=self.evolution.immigrant_sigma,
+            immigrant_mode=self.evolution.immigrant_mode, max_genome_norm=self.evolution.max_genome_norm,
+            max_parameter_magnitude=self.evolution.max_parameter_magnitude,
         )
         prey_library = OnlineRuleLibrary(self.evaluator.codec, prey_config, self.evaluator.config.network, seed=self.config.seed + 101)
         predator_library = OnlineRuleLibrary(self.evaluator.codec, predator_config, self.evaluator.config.network, seed=self.config.seed + 202)

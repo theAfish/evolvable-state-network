@@ -1,0 +1,10 @@
+# Optional companion file for `embodied-evolve --config ... --network-config ...`.
+# The learned genome is architecture-specific: use the same settings for any
+# resumed run, and let ecology demos read the architecture from its checkpoint.
+node:
+  hidden_layers: [16, 8]
+  activation: tanh
+edge:
+  hidden_layers: [24, 12]
+  activation: silu
+  latent_width: 3

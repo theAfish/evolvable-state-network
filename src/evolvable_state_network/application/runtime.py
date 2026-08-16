@@ -87,7 +87,9 @@ class ApplicationRuntime:
         return sorted(runs, key=lambda item: item["id"], reverse=True)
 
     def _load_embodied_document(self, run_id: str) -> tuple[dict[str, object], str]:
-        if not run_id.isalnum():
+        # Run folders may be named by users (for example ``server-2``), but
+        # never permit a path separator or traversal component.
+        if not run_id or any(not (character.isalnum() or character in "_-") for character in run_id):
             raise ValueError("invalid embodied run identifier")
         directory = (self.root / "embodied_runs" / run_id).resolve()
         report_path = directory / "report.json"

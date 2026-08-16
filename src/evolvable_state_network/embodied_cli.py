@@ -27,6 +27,10 @@ from .tasks import BatchFoodWebCoevolutionRunner, BatchFoodWebConfig, Continuous
 DEFAULT_CONFIG = """# Settings have the same names and defaults as the Embodied UI form.
 seed: 41
 training_mode: batch
+# shared_rule_cohort: one genome controls all same-species agents in a world.
+# mixed_individual_population: each agent has its own genome; population_size
+# then means worlds per generation, so total prey genomes are population_size * prey_count.
+batch_population_mode: shared_rule_cohort
 algorithm: cma_es
 execution_backend: torch
 device: cpu
@@ -37,6 +41,11 @@ prey_count: 5
 predator_count: 2
 hidden_nodes: 31
 state_width: 2
+node_hidden_layers: [8]
+node_activation: tanh
+edge_hidden_layers: [12]
+edge_activation: tanh
+edge_latent_width: 3
 mean_degree: 6.0
 # Default topology: input -> hidden -> output; inputs cannot connect to each other.
 allow_input_output_connections: false
@@ -46,6 +55,12 @@ initial_state_scale: 0.12
 network_dt: 0.05
 max_delta: 0.12
 edge_step_scale: 0.06
+rule_output_scale: 1.0
+# Genetic-only controls. Defaults preserve the established search behavior.
+# mutation_sigma: 0.1
+# elite_fraction: 0.25
+# immigrant_mode: population  # zero or population
+# max_genome_norm: 20.0
 initial_energy_scale: 1.0
 max_food: 80
 food_growth_rate: 24.0
@@ -83,13 +98,48 @@ def _load_config(path: Path) -> dict[str, Any]:
     return document
 
 
+def _load_network_config(path: Path) -> dict[str, Any]:
+    """Translate a focused node/edge architecture YAML into payload fields."""
+    document = _load_config(path)
+    allowed = {"node", "edge"}
+    unknown = set(document) - allowed
+    if unknown:
+        raise ValueError(f"unknown network-config section(s): {', '.join(sorted(unknown))}")
+    node = document.get("node", {})
+    edge = document.get("edge", {})
+    if not isinstance(node, dict) or not isinstance(edge, dict):
+        raise ValueError("network-config node and edge entries must be mappings")
+    allowed_node = {"hidden_layers", "activation"}
+    allowed_edge = {"hidden_layers", "activation", "latent_width"}
+    if set(node) - allowed_node or set(edge) - allowed_edge:
+        raise ValueError("network-config supports node/edge hidden_layers, activation, and edge latent_width")
+    translated: dict[str, Any] = {}
+    if "hidden_layers" in node:
+        translated["node_hidden_layers"] = node["hidden_layers"]
+    if "activation" in node:
+        translated["node_activation"] = node["activation"]
+    if "hidden_layers" in edge:
+        translated["edge_hidden_layers"] = edge["hidden_layers"]
+    if "activation" in edge:
+        translated["edge_activation"] = edge["activation"]
+    if "latent_width" in edge:
+        translated["edge_latent_width"] = edge["latent_width"]
+    return translated
+
+
 def _build_runner(payload: EmbodiedFoodWebTrainingPayload, runtime: ApplicationRuntime, seed: int):
     initial_genome: tuple[float, ...] | None = None
     initial_prey_genome: tuple[float, ...] | None = None
     initial_predator_genome: tuple[float, ...] | None = None
     initialization: dict[str, str] = {"kind": "fresh"}
-    architecture = RuleArchitecture(state_width=payload.state_width)
-    edge_architecture = EdgeArchitecture(node_state_width=payload.state_width)
+    architecture = RuleArchitecture(
+        state_width=payload.state_width, hidden_layers=payload.node_hidden_layers,
+        activation=payload.node_activation,
+    )
+    edge_architecture = EdgeArchitecture(
+        node_state_width=payload.state_width, latent_width=payload.edge_latent_width,
+        hidden_layers=payload.edge_hidden_layers, activation=payload.edge_activation,
+    )
     if payload.model_id:
         document = runtime.load_trained_rule(payload.model_id)
         if document.get("target") != "joint" or not document.get("edge_architecture"):
@@ -110,12 +160,12 @@ def _build_runner(payload: EmbodiedFoodWebTrainingPayload, runtime: ApplicationR
 
     adapter = FoodWebAgentAdapter(vision_pixels=9, body_inputs=payload.body_inputs)
     boundary_nodes = adapter.input_count + adapter.action_count
-    network = EmbodiedNetworkConfig(nodes=payload.hidden_nodes + boundary_nodes, mean_degree=payload.mean_degree, state_width=architecture.state_width, initial_state_scale=payload.initial_state_scale, dt=payload.network_dt, max_delta=payload.max_delta, edge_step_scale=payload.edge_step_scale, vision_pixels=9, body_inputs=payload.body_inputs, allow_input_output_connections=payload.allow_input_output_connections, execution_backend=payload.execution_backend, device=payload.device)
+    network = EmbodiedNetworkConfig(nodes=payload.hidden_nodes + boundary_nodes, mean_degree=payload.mean_degree, state_width=architecture.state_width, initial_state_scale=payload.initial_state_scale, dt=payload.network_dt, max_delta=payload.max_delta, edge_step_scale=payload.edge_step_scale, rule_output_scale=payload.rule_output_scale, vision_pixels=9, body_inputs=payload.body_inputs, allow_input_output_connections=payload.allow_input_output_connections, execution_backend=payload.execution_backend, device=payload.device)
     task = EmbodiedFoodWebTaskConfig(network=network, environment=FoodWebConfig(prey_initial_energy=9.0 * payload.initial_energy_scale, predator_initial_energy=14.0 * payload.initial_energy_scale, initial_plants=min(24, payload.max_food), max_plants=payload.max_food, plant_regrowth=payload.food_growth_rate, max_speed=payload.max_speed, max_turn=payload.max_turn, plant_cluster_count=payload.plant_cluster_count, plant_cluster_radius=payload.plant_cluster_radius, respawn_on_death=payload.training_mode != "batch"), prey_count=payload.prey_count, predator_count=payload.predator_count, max_steps=payload.batch_episode_steps if payload.training_mode == "batch" else 1, trials=1, seed=seed)
     evaluator = FoodWebCoevolutionEvaluator(architecture, edge_architecture, task)
-    evolution = EmbodiedRuleEvolutionConfig(generations=payload.batch_generations if payload.training_mode == "batch" else 1, population_size=payload.population_size, seed=seed, initial_genome=initial_genome, algorithm=payload.algorithm)
+    evolution = EmbodiedRuleEvolutionConfig(generations=payload.batch_generations if payload.training_mode == "batch" else 1, population_size=payload.population_size, seed=seed, initial_genome=initial_genome, algorithm=payload.algorithm, mutation_sigma=payload.mutation_sigma, elite_fraction=payload.elite_fraction, immigrant_fraction=payload.immigrant_fraction, immigrant_sigma=payload.immigrant_sigma, immigrant_mode=payload.immigrant_mode, max_genome_norm=payload.max_genome_norm, max_parameter_magnitude=payload.max_parameter_magnitude)
     if payload.training_mode == "batch":
-        runner = BatchFoodWebCoevolutionRunner(evaluator, evolution, BatchFoodWebConfig(generations=payload.batch_generations, episode_steps=payload.batch_episode_steps, trials=payload.batch_trials, validation_trials=payload.batch_validation_trials, test_trials=payload.batch_test_trials, opponent_pool_size=payload.batch_opponents, seed=seed, initial_genome=initial_genome, initial_prey_genome=initial_prey_genome, initial_predator_genome=initial_predator_genome, workers=payload.workers))
+        runner = BatchFoodWebCoevolutionRunner(evaluator, evolution, BatchFoodWebConfig(population_mode=payload.batch_population_mode, generations=payload.batch_generations, episode_steps=payload.batch_episode_steps, trials=payload.batch_trials, validation_trials=payload.batch_validation_trials, test_trials=payload.batch_test_trials, opponent_pool_size=payload.batch_opponents, seed=seed, initial_genome=initial_genome, initial_prey_genome=initial_prey_genome, initial_predator_genome=initial_predator_genome, workers=payload.workers))
     else:
         runner = ContinuousFoodWebCoevolutionRunner(evaluator, evolution, ContinuousFoodWebConfig(ticks=payload.ticks, seed=seed, initial_genome=initial_genome, initial_prey_genome=initial_prey_genome, initial_predator_genome=initial_predator_genome))
     return runner, architecture, edge_architecture, network, task, evolution, initialization, boundary_nodes
@@ -124,6 +174,7 @@ def _build_runner(payload: EmbodiedFoodWebTrainingPayload, runtime: ApplicationR
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run embodied food-web evolution from a YAML configuration.")
     parser.add_argument("--config", type=Path, help="YAML file containing UI-equivalent training settings")
+    parser.add_argument("--network-config", type=Path, help="optional YAML containing only node/edge MLP architecture")
     parser.add_argument("--data-dir", type=Path, default=Path(".outputs"), help="root directory for results")
     parser.add_argument("--run-id", help="optional unique run identifier (default: generated UUID)")
     parser.add_argument("--write-template", type=Path, metavar="PATH", help="write a commented YAML template and exit")
@@ -138,7 +189,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.run_id is not None and not args.run_id.isalnum():
         parser.error("--run-id must contain only letters and digits")
     try:
-        payload = EmbodiedFoodWebTrainingPayload(**_load_config(args.config))
+        config = _load_config(args.config)
+        if args.network_config is not None:
+            config.update(_load_network_config(args.network_config))
+        payload = EmbodiedFoodWebTrainingPayload(**config)
     except (ValueError, ValidationError) as error:
         parser.error(str(error))
     seed = secrets.randbelow(2**32) if payload.seed is None else payload.seed
@@ -159,7 +213,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         runner, architecture, edge_architecture, network, task, evolution, initialization, boundary_nodes = _build_runner(payload, runtime, seed)
     except (KeyError, TypeError, ValueError) as error:
         parser.error(str(error))
-    task_config = {"training_mode": payload.training_mode, "algorithm": payload.algorithm, "objective": "restricted_mean_lifetime" if payload.training_mode == "batch" else "completed_lifetime", "objective_units": "ticks", "reward_shaping": False, "seed": seed, "population_size": payload.population_size, "initial_sigma": evolution.initial_sigma, "execution_backend": payload.execution_backend, "device": payload.device, "workers": payload.workers, "body_inputs": list(payload.body_inputs), "embodied_interface": "ray_image_v3_sparse_multichannel_v1", "network": asdict(network), "environment": asdict(task.environment), "prey_count": task.prey_count, "predator_count": task.predator_count, "batch_generations": payload.batch_generations, "batch_episode_steps": payload.batch_episode_steps, "batch_trials": payload.batch_trials, "batch_validation_trials": payload.batch_validation_trials, "batch_test_trials": payload.batch_test_trials, "batch_opponents": payload.batch_opponents, "enforce_survival_pressure": payload.enforce_survival_pressure, "diagnostics": {"boundary_nodes": boundary_nodes, "body_inputs": list(payload.body_inputs), "hidden_nodes": payload.hidden_nodes, "total_nodes": network.nodes, "selection_objective": "first_life_restricted_mean_lifetime"}}
+    task_config = {"training_mode": payload.training_mode, "batch_population_mode": payload.batch_population_mode, "algorithm": payload.algorithm, "objective": "restricted_mean_lifetime" if payload.training_mode == "batch" else "completed_lifetime", "objective_units": "ticks", "reward_shaping": False, "seed": seed, "population_size": payload.population_size, "initial_sigma": evolution.initial_sigma, "mutation_sigma": evolution.mutation_sigma or evolution.initial_sigma, "elite_fraction": evolution.elite_fraction, "immigrant_fraction": evolution.immigrant_fraction, "immigrant_sigma": evolution.immigrant_sigma or max(.05, evolution.initial_sigma * 3.0), "immigrant_mode": evolution.immigrant_mode, "max_genome_norm": evolution.max_genome_norm, "max_parameter_magnitude": evolution.max_parameter_magnitude, "execution_backend": payload.execution_backend, "device": payload.device, "workers": payload.workers, "body_inputs": list(payload.body_inputs), "embodied_interface": "ray_image_v3_sparse_multichannel_v1", "network": asdict(network), "environment": asdict(task.environment), "prey_count": task.prey_count, "predator_count": task.predator_count, "batch_generations": payload.batch_generations, "batch_episode_steps": payload.batch_episode_steps, "batch_trials": payload.batch_trials, "batch_validation_trials": payload.batch_validation_trials, "batch_test_trials": payload.batch_test_trials, "batch_opponents": payload.batch_opponents, "enforce_survival_pressure": payload.enforce_survival_pressure, "diagnostics": {"boundary_nodes": boundary_nodes, "body_inputs": list(payload.body_inputs), "hidden_nodes": payload.hidden_nodes, "total_nodes": network.nodes, "selection_objective": "first_life_restricted_mean_lifetime"}}
 
     def checkpoint(event: dict[str, object]) -> None:
         prey, predator = dict(event["prey"]), dict(event["predator"])

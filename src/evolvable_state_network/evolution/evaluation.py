@@ -117,7 +117,7 @@ class ScenarioResult:
 
     def to_dict(self, include_trajectory: bool = False) -> dict[str, object]:
         result: dict[str, object] = {
-            "scenario": asdict(self.scenario), "metrics": self.metrics.to_dict(), "diagnostics": asdict(self.diagnostics),
+            "scenario": asdict(self.scenario), "metrics": self.metrics.to_dict(), "diagnostics": self.diagnostics.to_dict(),
             "failures": asdict(self.failures), "score": self.score, "mean_abs_correlation": self.mean_abs_correlation,
         }
         if include_trajectory and self.trajectory is not None:
@@ -133,6 +133,7 @@ class EvaluationResult:
     mean_score: float
     score_standard_deviation: float
     fitness: float
+    penalties: dict[str, float] = field(default_factory=dict)
 
     @property
     def viable_fraction(self) -> float:
@@ -142,7 +143,8 @@ class EvaluationResult:
         return {
             "genome": list(self.genome), "split": self.split, "mean_score": self.mean_score,
             "score_standard_deviation": self.score_standard_deviation, "fitness": self.fitness,
-            "viable_fraction": self.viable_fraction, "scenario_results": [item.to_dict() for item in self.scenario_results],
+            "viable_fraction": self.viable_fraction, "penalties": self.penalties,
+            "scenario_results": [item.to_dict() for item in self.scenario_results],
         }
 
 
@@ -152,12 +154,20 @@ class CandidateEvaluator:
     def __init__(
         self, architecture: RuleArchitecture | None = None, suite: ScenarioSuite | None = None,
         *, edge_architecture: EdgeArchitecture | None = None, target: EvolutionTarget = "node",
+        rule_output_scale: float = 1.0, saturation_penalty_weight: float = 0.0,
+        clipping_penalty_weight: float = 0.0, saturation_threshold: float = 3.0,
     ) -> None:
         self.architecture = architecture or RuleArchitecture()
         self.edge_architecture = edge_architecture
         self.target = target
         self.codec = GenomeCodec(self.architecture, edge_architecture, target)
         self.suite = suite or default_scenario_suite()
+        if rule_output_scale <= 0 or saturation_penalty_weight < 0 or clipping_penalty_weight < 0 or saturation_threshold <= 0:
+            raise ValueError("invalid rule-dynamics evaluation configuration")
+        self.rule_output_scale = rule_output_scale
+        self.saturation_penalty_weight = saturation_penalty_weight
+        self.clipping_penalty_weight = clipping_penalty_weight
+        self.saturation_threshold = saturation_threshold
 
     def evaluate(
         self, genome: Sequence[float], split: Split = "train", *, retain_trajectories: bool = False,
@@ -165,8 +175,10 @@ class CandidateEvaluator:
         independently_seed_candidate: bool = True,
     ) -> EvaluationResult:
         encoded = tuple(float(value) for value in genome)
-        node_rule, edge_rule = self.codec.decode_groups(encoded)
-        node_rule = node_rule or MLPUpdateRule(self.architecture, (0.0,) * self.architecture.parameter_count)
+        node_rule, edge_rule = self.codec.decode_groups(encoded, output_scale=self.rule_output_scale)
+        node_rule = node_rule or MLPUpdateRule(
+            self.architecture, (0.0,) * self.architecture.parameter_count, output_scale=self.rule_output_scale,
+        )
         if edge_rule is None:
             edge_rule = FixedEdgeRule(self.edge_architecture) if self.edge_architecture else None
         active_scenarios = tuple(scenarios) if scenarios is not None else self.suite.for_split(split)
@@ -180,8 +192,15 @@ class CandidateEvaluator:
         # wholly nonviable candidates, but make viability the primary gate.
         viable_fraction = fmean(not item.failures.failed for item in results)
         robust_score = mean_score - 0.30 * deviation
-        fitness = viable_fraction * robust_score - 0.20 * (1.0 - viable_fraction) + 0.02 * mean_score
-        return EvaluationResult(encoded, split, results, mean_score, deviation, fitness)
+        base_fitness = viable_fraction * robust_score - 0.20 * (1.0 - viable_fraction) + 0.02 * mean_score
+        saturation = fmean(_saturation_fraction(item.diagnostics, self.saturation_threshold) for item in results)
+        clipping = fmean(_clipping_fraction(item.diagnostics) for item in results)
+        penalties = {
+            "rule_output_saturation": self.saturation_penalty_weight * saturation,
+            "update_clipping": self.clipping_penalty_weight * clipping,
+        }
+        fitness = base_fitness - sum(penalties.values())
+        return EvaluationResult(encoded, split, results, mean_score, deviation, fitness, penalties)
 
     def evaluate_batch(
         self, genomes: Iterable[Sequence[float]], split: Split = "train", *, scenarios: Sequence[ScenarioConfig] | None = None,
@@ -283,6 +302,18 @@ def _candidate_scenario(scenario: ScenarioConfig, genome: Sequence[float]) -> Sc
         initial_edge_state_seed=((scenario.initial_edge_state_seed if scenario.initial_edge_state_seed is not None else scenario.initial_state_seed + 50_000_017) + 5 * salt) % 2**32,
         input_seed=(scenario.input_seed + 7 * salt) % 2**32,
     )
+
+
+def _saturation_fraction(diagnostics: TransitionDiagnostics, threshold: float) -> float:
+    values = diagnostics.node_rule_outputs + diagnostics.edge_rule_outputs
+    return sum(abs(value) > threshold for value in values) / max(1, len(values))
+
+
+def _clipping_fraction(diagnostics: TransitionDiagnostics) -> float:
+    values = diagnostics.node_applied_deltas + diagnostics.edge_applied_deltas
+    limits = [diagnostics.node_update_limit] * len(diagnostics.node_applied_deltas) + [diagnostics.edge_update_limit] * len(diagnostics.edge_applied_deltas)
+    valid = [(abs(value), limit) for value, limit in zip(values, limits, strict=True) if limit is not None]
+    return sum(value >= .99 * float(limit) for value, limit in valid) / max(1, len(valid))
 
 
 def _scenario_perturbations(scenario: ScenarioConfig) -> tuple[Perturbation, ...]:

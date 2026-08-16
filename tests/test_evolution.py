@@ -7,7 +7,7 @@ from pathlib import Path
 
 from evolvable_state_network.evolution.candidate import RuleArchitecture
 from evolvable_state_network.evolution.cmaes import CMAES, CMAESConfig
-from evolvable_state_network.evolution.genetic import GeneticAlgorithm, GeneticAlgorithmConfig
+from evolvable_state_network.evolution.genetic import GeneticAlgorithm, GeneticAlgorithmConfig, population_statistics
 from evolvable_state_network.evolution.evaluation import (
     CandidateEvaluator,
     ScenarioConfig,
@@ -76,6 +76,30 @@ class EvolutionTests(unittest.TestCase):
         self.assertEqual(next_population, repeated.ask())
         self.assertIn(population[1], next_population)
         self.assertEqual(first.generation, 1)
+
+    def test_genetic_controls_bound_mutation_and_support_population_immigrants(self) -> None:
+        optimizer = GeneticAlgorithm(GeneticAlgorithmConfig(
+            3, population_size=4, mutation_sigma=2.0, seed=4, immigrant_fraction=.5,
+            immigrant_mode="population", max_genome_norm=1.0, max_parameter_magnitude=.7,
+        ))
+        population = optimizer.ask()
+        self.assertTrue(all(sum(value * value for value in genome) <= 1.000001 for genome in population))
+        optimizer.tell(population, (0.0, .1, .2, .3))
+        next_population = optimizer.ask()
+        self.assertGreater(optimizer.normalization_count, 0)
+        self.assertGreaterEqual(population_statistics(next_population)["population_parameter_diversity"], 0.0)
+
+    def test_evaluation_reports_raw_rule_outputs_and_applied_updates(self) -> None:
+        suite = ScenarioSuite(
+            train=(ScenarioConfig("train", 1, 2, 3, nodes=4, mean_degree=2, steps=5, batch_size=1),),
+            validation=(), test=(),
+        )
+        result = CandidateEvaluator(self.architecture, suite, rule_output_scale=.5).evaluate((.1,) * self.codec.dimension)
+        dynamics = result.scenario_results[0].diagnostics.dynamics_summary()
+        self.assertGreater(dynamics["node_rule_output"]["count"], 0)
+        self.assertGreater(dynamics["node_update"]["count"], 0)
+        self.assertIn("abs_gt_3_fraction", dynamics["node_rule_output"])
+        self.assertIn("near_limit_fraction", dynamics["node_update"])
 
     def test_exported_best_genome_reproduces_saved_test_evaluation(self) -> None:
         suite = ScenarioSuite(

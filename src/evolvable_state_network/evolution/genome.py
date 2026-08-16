@@ -34,11 +34,11 @@ class GenomeCodec:
     def edge_dimension(self) -> int:
         return self.edge_architecture.parameter_count if self.target in ("edge", "joint") and self.edge_architecture else 0
 
-    def decode(self, genome: Sequence[float]) -> MLPUpdateRule:
+    def decode(self, genome: Sequence[float], *, output_scale: float = 1.0) -> MLPUpdateRule:
         """Backwards-compatible node-only decode; use ``decode_groups`` otherwise."""
         if self.target != "node":
             raise ValueError("decode_groups is required for edge or joint genomes")
-        return self.decode_node(genome)
+        return self.decode_node(genome, output_scale=output_scale)
 
     def encode(self, rule: MLPUpdateRule) -> tuple[float, ...]:
         if self.target != "node":
@@ -47,15 +47,15 @@ class GenomeCodec:
             raise ValueError("rule architecture does not match this codec")
         return rule.parameters
 
-    def decode_node(self, parameters: Sequence[float]) -> MLPUpdateRule:
+    def decode_node(self, parameters: Sequence[float], *, output_scale: float = 1.0) -> MLPUpdateRule:
         if len(parameters) != self.node_dimension:
             raise ValueError(f"node parameter dimension must be {self.node_dimension}")
-        return MLPUpdateRule(self.architecture, tuple(float(value) for value in parameters))
+        return MLPUpdateRule(self.architecture, tuple(float(value) for value in parameters), output_scale=output_scale)
 
-    def decode_edge(self, parameters: Sequence[float]) -> MLPEdgeRule:
+    def decode_edge(self, parameters: Sequence[float], *, output_scale: float = 1.0) -> MLPEdgeRule:
         if self.edge_architecture is None or len(parameters) != self.edge_dimension:
             raise ValueError(f"edge parameter dimension must be {self.edge_dimension}")
-        return MLPEdgeRule(self.edge_architecture, tuple(float(value) for value in parameters))
+        return MLPEdgeRule(self.edge_architecture, tuple(float(value) for value in parameters), output_scale=output_scale)
 
     def split(self, genome: Sequence[float]) -> tuple[tuple[float, ...], tuple[float, ...]]:
         if len(genome) != self.dimension:
@@ -63,9 +63,12 @@ class GenomeCodec:
         values = tuple(float(value) for value in genome)
         return values[: self.node_dimension], values[self.node_dimension :]
 
-    def decode_groups(self, genome: Sequence[float]) -> tuple[MLPUpdateRule | None, MLPEdgeRule | None]:
+    def decode_groups(self, genome: Sequence[float], *, output_scale: float = 1.0) -> tuple[MLPUpdateRule | None, MLPEdgeRule | None]:
         node, edge = self.split(genome)
-        return (self.decode_node(node) if node else None, self.decode_edge(edge) if edge else None)
+        return (
+            self.decode_node(node, output_scale=output_scale) if node else None,
+            self.decode_edge(edge, output_scale=output_scale) if edge else None,
+        )
 
     def export_groups(self, genome: Sequence[float]) -> dict[str, list[float]]:
         node, edge = self.split(genome)

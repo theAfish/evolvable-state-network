@@ -24,6 +24,23 @@ main { max-width:1500px; margin:auto; padding:28px 22px 42px; } .view { display:
 .demo-inspector-grid article { min-width:0; }
 .demo-inspector-grid article > label { display:flex; width:max-content; max-width:100%; margin:0 0 10px; }
 .demo-inspector-grid select { max-width:220px; }
+.diagnostics-file { flex-direction:column; align-items:stretch; gap:5px; }
+.diagnostics-file input { width:220px; max-width:100%; }
+.diagnostic-verdict { display:grid; grid-template-columns:minmax(230px,.45fr) 1fr; align-items:center; gap:24px; margin-top:28px; padding:20px 0; border-top:1px solid #526174; border-bottom:1px solid #526174; }
+.diagnostic-verdict > div span,.diagnostic-verdict > div strong { display:block; }
+.diagnostic-verdict > div span { color:var(--muted); font-size:10px; letter-spacing:.1em; }
+.diagnostic-verdict > div strong { margin-top:5px; font-size:22px; font-weight:550; }
+.diagnostic-verdict > p { color:#c5cfdd; }
+.diagnostics-grid { display:grid; grid-template-columns:1fr 1fr; gap:34px; border-bottom:1px solid #526174; }
+.diagnostics-grid > article + article { padding-left:34px; border-left:1px solid var(--line); }
+.diagnostic-list { display:grid; gap:8px; }
+.diagnostic-item { padding:11px 13px; border-left:3px solid var(--line); background:#ffffff08; }
+.diagnostic-item strong,.diagnostic-item span { display:block; }
+.diagnostic-item strong { font:12px ui-monospace,monospace; letter-spacing:.03em; }
+.diagnostic-item span { margin-top:3px; color:var(--muted); font-size:12px; }
+.diagnostic-item.warn { border-color:var(--warm); }
+.diagnostic-item.good { border-color:var(--accent); }
+@media (max-width:1050px) { .diagnostics-grid { grid-template-columns:1fr; } .diagnostics-grid > article + article { padding:28px 0 0; border-left:0; border-top:1px solid var(--line); } }
 @media (max-width:1050px) { .demo-inspector-grid { grid-template-columns:1fr; } }
 @media (max-width:1050px) { body { min-width:0; } header { grid-template-columns:1fr; position:static; } nav,.load-controls { justify-self:start; } .workspace,.evolution-layout,.evolution-results,.embodied-charts { grid-template-columns:1fr; } .controls { grid-template-columns:repeat(4,max-content) 1fr; } } @media (max-width:700px) { main { padding:18px 12px; } .summary-grid { grid-template-columns:1fr; } .page-heading { align-items:start; flex-direction:column; } .form-panel,.evolution-form { display:flex; } #fitness-chart { min-width:0; } }
 

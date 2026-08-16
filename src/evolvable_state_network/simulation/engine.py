@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from math import isfinite
+from math import isfinite, sqrt
+from statistics import fmean, pstdev
 from typing import Iterable
 
 from ..graph import Graph
@@ -108,6 +109,89 @@ class TransitionDiagnostics:
     last_state_clip: dict[str, int | float] | None = None
     clipped_components_per_step: list[int] = field(default_factory=list)
     components_per_step: list[int] = field(default_factory=list)
+    # Values are retained only for one evaluation, allowing exact tail
+    # percentiles while keeping persisted reports compact through ``to_dict``.
+    node_rule_outputs: list[float] = field(default_factory=list, repr=False)
+    edge_rule_outputs: list[float] = field(default_factory=list, repr=False)
+    node_applied_deltas: list[float] = field(default_factory=list, repr=False)
+    edge_applied_deltas: list[float] = field(default_factory=list, repr=False)
+    node_update_limit: float | None = None
+    edge_update_limit: float | None = None
+
+    def record_rule_outputs(self, kind: str, values: Iterable[float]) -> None:
+        target = self.node_rule_outputs if kind == "node" else self.edge_rule_outputs
+        target.extend(float(value) for value in values if isfinite(float(value)))
+
+    def record_applied_delta(self, kind: str, value: float, limit: float) -> None:
+        target = self.node_applied_deltas if kind == "node" else self.edge_applied_deltas
+        target.append(float(value))
+        if kind == "node":
+            self.node_update_limit = limit
+        else:
+            self.edge_update_limit = limit
+
+    def dynamics_summary(self) -> dict[str, object]:
+        return {
+            "node_rule_output": _rule_output_summary(self.node_rule_outputs),
+            "edge_rule_output": _rule_output_summary(self.edge_rule_outputs),
+            "node_update": _applied_update_summary(self.node_applied_deltas, self.node_update_limit),
+            "edge_update": _applied_update_summary(self.edge_applied_deltas, self.edge_update_limit),
+        }
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "nonfinite_proposals": self.nonfinite_proposals,
+            "delta_clipped": self.delta_clipped,
+            "state_clipped": self.state_clipped,
+            "components": self.components,
+            "raw_maximum_absolute_value": self.raw_maximum_absolute_value,
+            "raw_maximum_delta": self.raw_maximum_delta,
+            "last_state_clip": self.last_state_clip,
+            "clipped_components_per_step": self.clipped_components_per_step,
+            "components_per_step": self.components_per_step,
+            "dynamics": self.dynamics_summary(),
+        }
+
+
+def _percentile(values: list[float], fraction: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    position = fraction * (len(ordered) - 1)
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    return ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower)
+
+
+def _rule_output_summary(values: list[float]) -> dict[str, float]:
+    if not values:
+        return {"count": 0.0}
+    absolute = [abs(value) for value in values]
+    return {
+        "count": float(len(values)), "mean": fmean(values), "std": pstdev(values),
+        "rms": sqrt(fmean(value * value for value in values)),
+        "p50": _percentile(absolute, .50), "p90": _percentile(absolute, .90),
+        "p95": _percentile(absolute, .95), "p99": _percentile(absolute, .99),
+        "abs_gt_1_fraction": sum(value > 1 for value in absolute) / len(absolute),
+        "abs_gt_3_fraction": sum(value > 3 for value in absolute) / len(absolute),
+        "abs_gt_5_fraction": sum(value > 5 for value in absolute) / len(absolute),
+        "abs_gt_10_fraction": sum(value > 10 for value in absolute) / len(absolute),
+    }
+
+
+def _applied_update_summary(values: list[float], limit: float | None) -> dict[str, float]:
+    if not values:
+        return {"count": 0.0}
+    absolute = [abs(value) for value in values]
+    result = {
+        "count": float(len(values)), "mean_absolute_delta": fmean(absolute),
+        "rms_delta": sqrt(fmean(value * value for value in values)),
+        "maximum_absolute_delta": max(absolute),
+    }
+    if limit is not None:
+        result["update_limit"] = limit
+        result["near_limit_fraction"] = sum(value >= .99 * limit for value in absolute) / len(absolute)
+    return result
 
 
 class Simulation:
@@ -202,6 +286,11 @@ class Simulation:
                     messages.append(zeros(width))
                     continue
                 current_message = self.edge_rule.message(state.edge[batch][edge_index], state.node[batch][edge.source])
+                if hasattr(self.edge_rule, "raw_output"):
+                    diagnostics.record_rule_outputs("edge", self.edge_rule.raw_output(  # type: ignore[attr-defined]
+                        state.edge[batch][edge_index], state.node[batch][edge.source],
+                        state.node[batch][edge.target], current_message,
+                    ))
                 edge_state = self.edge_rule.update(
                     state.edge[batch][edge_index],
                     state.node[batch][edge.source],
@@ -209,7 +298,10 @@ class Simulation:
                     current_message,
                     config.edge_step_scale * (config.dt / .05),
                 )
-                edge_row.append(self._edge_transition(state.edge[batch][edge_index], edge_state, diagnostics))
+                edge_row.append(self._edge_transition(
+                    state.edge[batch][edge_index], edge_state, diagnostics,
+                    config.edge_step_scale * (config.dt / .05),
+                ))
                 messages.append(self.edge_rule.message(edge_row[-1], state.node[batch][edge.source]))
             next_edges.append(edge_row)
             node_row: list[StateVector] = []
@@ -236,6 +328,10 @@ class Simulation:
                 aggregate_vector = tuple(value / count for value in aggregate) if count else zeros(width)
                 if intervention is not None:
                     aggregate_vector, _ = intervention.local_inputs(aggregate_vector, zeros(width))
+                if hasattr(self.node_rule, "raw_output"):
+                    diagnostics.record_rule_outputs("node", self.node_rule.raw_output(  # type: ignore[attr-defined]
+                        state.node[batch][node], aggregate_vector,
+                    ))
                 proposed = self.node_rule.update(
                     state.node[batch][node], aggregate_vector, config.dt, config.max_delta
                 )
@@ -252,7 +348,7 @@ class Simulation:
         return NetworkState(node=next_nodes, edge=next_edges)
 
     def _edge_transition(
-        self, previous: StateVector, proposed: StateVector, diagnostics: TransitionDiagnostics
+        self, previous: StateVector, proposed: StateVector, diagnostics: TransitionDiagnostics, update_limit: float
     ) -> StateVector:
         """Keep latent channels unconstrained while safely containing non-finite proposals.
 
@@ -270,6 +366,7 @@ class Simulation:
                 after = before
             diagnostics.raw_maximum_absolute_value = max(diagnostics.raw_maximum_absolute_value, abs(after))
             diagnostics.raw_maximum_delta = max(diagnostics.raw_maximum_delta, abs(after - before))
+            diagnostics.record_applied_delta("edge", after - before, update_limit)
             values.append(after)
         return tuple(values)
 
@@ -309,6 +406,7 @@ class Simulation:
                     "bound": config.max_abs_state,
                 }
             values.append(clip(before + clip(after - before, config.max_delta), config.max_abs_state))
+            diagnostics.record_applied_delta("node", values[-1] - before, config.max_delta)
         return tuple(values)
 
     def _validate_initial_node_state(self, node: NodeTensor, config: SimulationConfig) -> None:
