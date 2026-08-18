@@ -102,6 +102,27 @@ class EmbodiedArchitectureTests(unittest.TestCase):
         self.assertEqual(library.updates, 1)
         self.assertEqual(library.snapshot()["best_lifetime"], 50.0)
 
+    def test_online_genetic_library_exposes_rolling_elites_in_status(self) -> None:
+        task = EmbodiedFoodWebTaskConfig(network=self.config, max_steps=1, trials=1)
+        evaluator = FoodWebCoevolutionEvaluator(self.architecture, self.edge_architecture, task)
+        library = OnlineRuleLibrary(
+            evaluator.codec,
+            EmbodiedRuleEvolutionConfig(population_size=2, initial_sigma=.25, seed=13, algorithm="genetic"),
+            self.config,
+            seed=13,
+        )
+        first, second, first_again, second_again = (library.birth() for _ in range(4))
+        library.observe(first, 20.0)
+        library.observe(second, 10.0)
+        library.observe(first_again, 20.0)
+        library.observe(second_again, 10.0)
+        status = library.snapshot()
+        self.assertTrue(status["elite_archive"])
+        elite = status["elite_archive"][0]
+        self.assertEqual(elite["evaluation_count"], 1)
+        self.assertIn("mean_score", elite)
+        self.assertIn("elite_reuse_count", elite)
+
     def test_adapter_nodes_are_connected_and_actions_are_bounded(self) -> None:
         network = EmbodiedNetwork(self.node, self.edge, FoodWebAgentAdapter(), self.config, seed=5)
         pairs = {(edge.source, edge.target) for edge in network.graph.edges}

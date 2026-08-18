@@ -929,7 +929,7 @@ class BatchFoodWebCoevolutionRunner:
         if self.config.workers:
             workers = self.config.workers
         else:
-            workers = min(self.evolution.population_size, max(1, (os.cpu_count() or 2) - 1), 8)
+            workers = min(self.evolution.population_size, max(1, (os.cpu_count() or 2) - 1))
         device = self.evaluator.config.network.device
         uses_cuda = (
             self.evaluator.config.network.execution_backend == "torch"
@@ -1015,12 +1015,15 @@ class BatchFoodWebCoevolutionRunner:
         optimizer: RuleOptimizer, best: tuple[float, tuple[float, ...], Mapping[str, float]],
         evaluations: int, validation_evaluations: int, *, active: bool = True,
     ) -> dict[str, object]:
-        return {
+        snapshot: dict[str, object] = {
             "updates": optimizer.generation if active else 0, "evaluations": evaluations,
             "validation_evaluations": validation_evaluations,
             "best_lifetime": best[0], "best_genome": list(best[1]), "sigma": optimizer.sigma,
             "behavior": dict(best[2]),
         }
+        if isinstance(optimizer, GeneticAlgorithm):
+            snapshot["elite_archive"] = list(optimizer.elite_archive)
+        return snapshot
 
     @staticmethod
     def _validated_archive(
@@ -1094,6 +1097,14 @@ class OnlineRuleLibrary:
             for score, genome in zip(values, self.cohort, strict=True):
                 self._archive(score, genome)
             self.optimizer.tell(self.cohort, values)
+            if isinstance(self.optimizer, GeneticAlgorithm):
+                # The GA archive is the source of truth for both the next
+                # elite cohort and the reported best rule: its score is an
+                # average across every elite re-evaluation.
+                self.archive = [
+                    (float(record["mean_score"]), tuple(float(value) for value in record["genome"]))
+                    for record in self.optimizer.elite_archive
+                ]
             self.updates += 1
             self._next_cohort()
 
@@ -1103,6 +1114,10 @@ class OnlineRuleLibrary:
             "evaluated": len(self.scores), "library_size": len(self.cohort),
             "best_lifetime": self.archive[0][0], "best_genome": list(self.archive[0][1]),
             "sigma": self.optimizer.sigma, "evaluation_replicates": self.evaluation_replicates,
+            "elite_archive": (
+                list(self.optimizer.elite_archive)
+                if isinstance(self.optimizer, GeneticAlgorithm) else []
+            ),
         }
 
     def _next_cohort(self) -> None:

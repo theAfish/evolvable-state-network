@@ -34,7 +34,7 @@ batch_population_mode: shared_rule_cohort
 algorithm: cma_es
 execution_backend: torch
 device: cpu
-workers: 0                 # 0 selects up to eight CPU workers automatically
+workers: 0                 # 0 selects up to one worker per candidate, within available CPUs
 body_inputs: [hunger]      # choose from hunger, energy_change, ate, time_since_meal
 population_size: 24
 prey_count: 5

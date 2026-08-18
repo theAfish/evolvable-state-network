@@ -124,6 +124,57 @@ class ApiConfigurationTests(unittest.TestCase):
         self.assertFalse(ablation.enforce_survival_pressure)
         self.assertEqual(ablation.plant_cluster_count, 0)
 
+    def test_embodied_experiment_parameters_have_no_arbitrary_upper_caps(self) -> None:
+        payload = EmbodiedFoodWebTrainingPayload(
+            workers=64,
+            batch_population_mode="mixed_individual_population",
+            population_size=128,
+            prey_count=128,
+            predator_count=128,
+            hidden_nodes=1024,
+            state_width=16,
+            node_hidden_layers=(1024,) * 8,
+            edge_hidden_layers=(1024,) * 8,
+            edge_latent_width=32,
+            mean_degree=1000,
+            initial_state_scale=2,
+            network_dt=1,
+            max_delta=2,
+            edge_step_scale=2,
+            rule_output_scale=2,
+            mutation_sigma=3,
+            immigrant_sigma=5,
+            local_mutation_sigma=3,
+            regional_scale=11,
+            regional_min_std=3,
+            global_parameter_range=11,
+            global_max_sampling_attempts=101,
+            initial_energy_scale=21,
+            max_food=10001,
+            food_growth_rate=10001,
+            max_speed=101,
+            max_turn=9 * 3.141592653589793,
+            plant_cluster_count=65,
+            plant_cluster_radius=101,
+            ticks=100001,
+            batch_episode_steps=5001,
+            batch_trials=33,
+            batch_validation_trials=33,
+            batch_test_trials=65,
+            batch_opponents=17,
+            enforce_survival_pressure=False,
+        )
+        self.assertEqual(payload.workers, 64)
+        self.assertEqual(payload.node_hidden_layers[-1], 1024)
+        self.assertEqual(payload.batch_test_trials, 65)
+        demo = EmbodiedDemoPayload(
+            run_id="run", network_hidden_nodes=368, network_mean_degree=401,
+            prey_count=65, predator_count=65, initial_food=10001,
+            max_food=10001, food_growth_rate=10001,
+        )
+        self.assertEqual(demo.network_hidden_nodes, 368)
+        self.assertEqual(demo.food_growth_rate, 10001)
+
 
 if __name__ == "__main__":
     unittest.main()

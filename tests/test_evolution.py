@@ -93,6 +93,21 @@ class EvolutionTests(unittest.TestCase):
         self.assertIn(population[1], next_population)
         self.assertEqual(first.generation, 1)
 
+    def test_genetic_elite_archive_uses_rolling_scores_and_is_checkpointed(self) -> None:
+        optimizer = GeneticAlgorithm(GeneticAlgorithmConfig(2, population_size=4, seed=7))
+        first_population = optimizer.ask()
+        optimizer.tell(first_population, (100.0, 5.0, 4.0, 3.0))
+        self.assertEqual(optimizer.elite_archive[0]["genome"], list(first_population[0]))
+        second_population = optimizer.ask()
+        self.assertEqual(second_population[0], first_population[0])
+        optimizer.tell(second_population, (0.0, 60.0, 55.0, 50.0))
+        # Its second, poor life changes the old elite to (100 + 0) / 2;
+        # a genuinely better current candidate then replaces it.
+        self.assertEqual(optimizer.elite_archive[0]["mean_score"], 60.0)
+        self.assertEqual(optimizer.elite_archive[0]["evaluation_count"], 1)
+        restored = GeneticAlgorithm.from_state_dict(json.loads(json.dumps(optimizer.state_dict())))
+        self.assertEqual(restored.elite_archive, optimizer.elite_archive)
+
     def test_genetic_controls_bound_mutation_and_support_population_immigrants(self) -> None:
         optimizer = GeneticAlgorithm(GeneticAlgorithmConfig(
             3, population_size=4, mutation_sigma=2.0, seed=4, immigrant_fraction=.5,

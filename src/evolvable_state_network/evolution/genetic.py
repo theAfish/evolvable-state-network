@@ -163,6 +163,11 @@ class GeneticAlgorithm:
         self._parents: tuple[tuple[float, ...], ...] = ()
         self._parent_sources: tuple[SamplingSource, ...] = ()
         self._fitnesses: tuple[float, ...] = ()
+        # Unlike the immediately preceding parent population, this is a
+        # persistent, bounded library.  An elite is evaluated again whenever
+        # it is copied into a new population, so its rank is based on all of
+        # its observed evaluations instead of one fortunate world episode.
+        self._elite_records: list[dict[str, object]] = []
         self._pending: tuple[tuple[float, ...], ...] | None = None
         self._pending_sources: tuple[SamplingSource, ...] = ()
         self._generation = self._normalizations = self._last_ask_normalizations = 0
@@ -180,6 +185,10 @@ class GeneticAlgorithm:
     def pending_sources(self) -> tuple[SamplingSource, ...]: return self._pending_sources
     @property
     def last_sampling_telemetry(self) -> dict[str, object]: return dict(self._last_sampling)
+    @property
+    def elite_archive(self) -> tuple[dict[str, object], ...]:
+        """A serialisable snapshot of the current rolling-score elite library."""
+        return tuple({**record, "genome": list(record["genome"])} for record in self._elite_records)
 
     def ask(self) -> tuple[tuple[float, ...], ...]:
         if self._pending is not None: raise RuntimeError("tell must consume the current genetic-algorithm population before ask")
@@ -193,17 +202,23 @@ class GeneticAlgorithm:
                 for _ in range(count - (1 if source == "elite" else 0)):
                     population.append(self._initial_sample(source)); sources.append(source)
         else:
-            selected_indices = sorted(range(len(self._parents)), key=lambda index: self._fitnesses[index], reverse=True)[:counts["elite"]]
+            selected_records = self._elite_records[:counts["elite"]]
             self._last_sampling["source_survival"] = {
                 source: {
                     "parent_count": self._parent_sources.count(source),
-                    "elite_survivors": sum(self._parent_sources[index] == source for index in selected_indices),
-                    "elite_survival_fraction": sum(self._parent_sources[index] == source for index in selected_indices) / max(1, self._parent_sources.count(source)),
+                    "elite_survivors": sum(record["origin_source"] == source for record in selected_records),
+                    "elite_survival_fraction": sum(record["origin_source"] == source for record in selected_records) / max(1, self._parent_sources.count(source)),
                 }
                 for source in ("elite", "local_offspring", "regional_immigrant", "global_immigrant")
             }
-            ranked = sorted(zip(self._fitnesses, self._parents, strict=True), key=lambda item: item[0], reverse=True)
-            population.extend(genome for _, genome in ranked[:counts["elite"]]); sources.extend(["elite"] * counts["elite"])
+            population.extend(tuple(float(value) for value in record["genome"]) for record in selected_records)
+            sources.extend(["elite"] * len(selected_records))
+            # The archive is filled after the first tell.  Keep this fallback
+            # for old/restored state which predates the archive field.
+            if len(selected_records) < counts["elite"]:
+                ranked = sorted(zip(self._fitnesses, self._parents, strict=True), key=lambda item: item[0], reverse=True)
+                population.extend(genome for _, genome in ranked[:counts["elite"] - len(selected_records)])
+                sources.extend(["elite"] * (counts["elite"] - len(selected_records)))
             for _ in range(counts["local_offspring"]):
                 first, second = self._select(), self._select()
                 population.append(self._mutate(tuple(a if self._random.random() < .5 else b for a, b in zip(first, second, strict=True)), self.config.local_sigma)); sources.append("local_offspring")
@@ -219,18 +234,33 @@ class GeneticAlgorithm:
         encoded = tuple(tuple(float(value) for value in genome) for genome in population)
         if self._pending is None or encoded != self._pending: raise ValueError("tell must receive the exact population returned by ask")
         if len(fitnesses) != self.config.population_size: raise ValueError("tell requires exactly one full genetic-algorithm population")
-        self._parents, self._fitnesses, self._parent_sources = encoded, tuple(float(value) for value in fitnesses), self._pending_sources
+        raw_fitnesses = tuple(float(value) for value in fitnesses)
+        self._update_elite_archive(encoded, raw_fitnesses, self._pending_sources)
+        # A current population member that is in the archive competes by its
+        # robust rolling mean, not its latest lucky or unlucky episode.
+        self._parents = encoded
+        self._fitnesses = tuple(self._elite_score(genome, score) for genome, score in zip(encoded, raw_fitnesses, strict=True))
+        self._parent_sources = self._pending_sources
         self._last_sampling = self._sampling_summary(encoded, self._parent_sources, self._fitnesses)
         self._pending, self._pending_sources = None, (); self._generation += 1
 
     def state_dict(self) -> dict[str, object]:
-        return {"config": asdict(self.config), "center": list(self._center), "generation": self._generation, "parents": [list(row) for row in self._parents], "parent_sources": list(self._parent_sources), "fitnesses": list(self._fitnesses), "pending": [list(row) for row in self._pending] if self._pending else None, "pending_sources": list(self._pending_sources), "normalizations": self._normalizations, "last_ask_normalizations": self._last_ask_normalizations, "last_sampling": self._last_sampling, "rng_pickle": b64encode(pickle.dumps(self._random.getstate())).decode("ascii")}
+        return {"config": asdict(self.config), "center": list(self._center), "generation": self._generation, "parents": [list(row) for row in self._parents], "parent_sources": list(self._parent_sources), "fitnesses": list(self._fitnesses), "elite_archive": list(self.elite_archive), "pending": [list(row) for row in self._pending] if self._pending else None, "pending_sources": list(self._pending_sources), "normalizations": self._normalizations, "last_ask_normalizations": self._last_ask_normalizations, "last_sampling": self._last_sampling, "rng_pickle": b64encode(pickle.dumps(self._random.getstate())).decode("ascii")}
 
     @classmethod
     def from_state_dict(cls, state: dict[str, object], *, global_viability_probe: Callable[[Sequence[float]], ViabilityResult | bool] | None = None) -> "GeneticAlgorithm":
         instance = cls(GeneticAlgorithmConfig(**dict(state["config"])), state["center"], global_viability_probe=global_viability_probe)
         instance._generation = int(state["generation"]); instance._parents = tuple(tuple(float(value) for value in row) for row in state["parents"]); instance._parent_sources = tuple(state.get("parent_sources", ()))  # type: ignore[assignment]
         instance._fitnesses = tuple(float(value) for value in state["fitnesses"]); pending = state.get("pending"); instance._pending = tuple(tuple(float(value) for value in row) for row in pending) if pending else None; instance._pending_sources = tuple(state.get("pending_sources", ()))  # type: ignore[assignment]
+        raw_archive = state.get("elite_archive", ())
+        instance._elite_records = [
+            {**dict(record), "genome": tuple(float(value) for value in record["genome"])}
+            for record in raw_archive  # type: ignore[union-attr]
+        ]
+        if not instance._elite_records and instance._parents:
+            # Checkpoints created before rolling elite scores retain their
+            # existing parents as one-observation archive entries.
+            instance._seed_elite_archive_from_parents()
         instance._normalizations = int(state.get("normalizations", 0)); instance._last_ask_normalizations = int(state.get("last_ask_normalizations", 0)); instance._last_sampling = dict(state.get("last_sampling", {})); instance._random.setstate(pickle.loads(b64decode(str(state["rng_pickle"])))); return instance
 
     def _source_counts(self) -> dict[SamplingSource, int]:
@@ -241,6 +271,53 @@ class GeneticAlgorithm:
             regional = min(size - elite, round(size * self.config.immigrant_fraction)) if self.config.immigrant_mode == "population" else 0
             global_ = min(size - elite - regional, round(size * self.config.immigrant_fraction)) if self.config.immigrant_mode == "zero" else 0
         return {"elite": elite, "local_offspring": size - elite - regional - global_, "regional_immigrant": regional, "global_immigrant": global_}
+
+    def _elite_score(self, genome: tuple[float, ...], fallback: float) -> float:
+        for record in self._elite_records:
+            if record["genome"] == genome:
+                return float(record["mean_score"])
+        return fallback
+
+    def _update_elite_archive(self, population: Sequence[tuple[float, ...]], fitnesses: Sequence[float], sources: Sequence[SamplingSource]) -> None:
+        records_by_genome = {tuple(record["genome"]): record for record in self._elite_records}
+        for genome, score, source in zip(population, fitnesses, sources, strict=True):
+            record = records_by_genome.get(genome)
+            if record is None:
+                record = {
+                    "genome": genome, "mean_score": float(score), "last_score": float(score),
+                    "score_sum": float(score), "evaluation_count": 1,
+                    "elite_reuse_count": 0, "first_generation": self._generation + 1,
+                    "last_generation": self._generation + 1, "origin_source": source,
+                }
+                records_by_genome[genome] = record
+            else:
+                evaluations = int(record["evaluation_count"]) + 1
+                total = float(record["score_sum"]) + float(score)
+                record.update({
+                    "score_sum": total, "mean_score": total / evaluations,
+                    "last_score": float(score), "evaluation_count": evaluations,
+                    "last_generation": self._generation + 1,
+                    "elite_reuse_count": int(record["elite_reuse_count"]) + int(source == "elite"),
+                })
+        capacity = self._source_counts()["elite"]
+        self._elite_records = sorted(
+            records_by_genome.values(),
+            key=lambda record: (float(record["mean_score"]), int(record["evaluation_count"]), int(record["last_generation"])),
+            reverse=True,
+        )[:capacity]
+
+    def _seed_elite_archive_from_parents(self) -> None:
+        capacity = self._source_counts()["elite"]
+        ranked = sorted(
+            zip(self._parents, self._fitnesses, self._parent_sources, strict=True),
+            key=lambda item: item[1], reverse=True,
+        )[:capacity]
+        self._elite_records = [
+            {"genome": genome, "mean_score": score, "last_score": score, "score_sum": score,
+             "evaluation_count": 1, "elite_reuse_count": 0, "first_generation": self._generation,
+             "last_generation": self._generation, "origin_source": source}
+            for genome, score, source in ranked
+        ]
 
     def _initial_sample(self, source: SamplingSource) -> tuple[float, ...]:
         if source == "global_immigrant" and self.config.uses_explicit_multiscale_sampling: return self._global_immigrant()
