@@ -127,12 +127,11 @@ def _synthetic_rule_outputs(
     node_values: list[float] = []
     edge_values: list[float] = []
     for _ in range(probe_count):
-        node_features = tuple(random.uniform(-state_limit, state_limit) for _ in range(2 * architecture.state_width)) + (1.0,)
+        node_features = tuple(random.uniform(-state_limit, state_limit) for _ in range(2 * architecture.state_width))
         node_values.extend(_forward(node_features, node_rule._layers, architecture.activation))
         edge_features = (
             tuple(random.uniform(-1.0, 1.0) for _ in range(edge_architecture.latent_width))
             + tuple(random.uniform(-state_limit, state_limit) for _ in range(3 * architecture.state_width))
-            + (1.0,)
         )
         edge_values.extend(_forward(edge_features, edge_rule._layers, edge_architecture.activation))
     return tuple(node_values), tuple(edge_values)
@@ -301,6 +300,13 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             immigrant_fraction=payload.immigrant_fraction, immigrant_sigma=payload.immigrant_sigma,
             immigrant_mode=payload.immigrant_mode, max_genome_norm=payload.max_genome_norm,
             max_parameter_magnitude=payload.max_parameter_magnitude,
+            local_mutation_sigma=payload.local_mutation_sigma,
+            local_offspring_fraction=payload.local_offspring_fraction,
+            regional_fraction=payload.regional_fraction, regional_scale=payload.regional_scale,
+            regional_min_std=payload.regional_min_std, global_fraction=payload.global_fraction,
+            global_parameter_range=payload.global_parameter_range,
+            global_viability_filter=payload.global_viability_filter,
+            global_max_sampling_attempts=payload.global_max_sampling_attempts,
         )
         if payload.training_mode == "batch":
             runner = BatchFoodWebCoevolutionRunner(
@@ -339,6 +345,13 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             "immigrant_sigma": evolution.immigrant_sigma or max(.05, evolution.initial_sigma * 3.0),
             "immigrant_mode": evolution.immigrant_mode, "max_genome_norm": evolution.max_genome_norm,
             "max_parameter_magnitude": evolution.max_parameter_magnitude,
+            "local_mutation_sigma": evolution.local_mutation_sigma or evolution.mutation_sigma or evolution.initial_sigma,
+            "local_offspring_fraction": evolution.local_offspring_fraction,
+            "regional_fraction": evolution.regional_fraction, "regional_scale": evolution.regional_scale,
+            "regional_min_std": evolution.regional_min_std, "global_fraction": evolution.global_fraction,
+            "global_parameter_range": evolution.global_parameter_range,
+            "global_viability_filter": evolution.global_viability_filter,
+            "global_max_sampling_attempts": evolution.global_max_sampling_attempts,
             "execution_backend": payload.execution_backend, "device": payload.device,
             "workers": payload.workers,
             "body_inputs": list(payload.body_inputs),

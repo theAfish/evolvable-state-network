@@ -511,7 +511,7 @@ class FastAPIServerTests(unittest.TestCase):
         # A positive output bias produces sustained growth.  Live replay must
         # surface whichever health failure occurs first, instead of continuing
         # with silently bounded state values.
-        genome = [0.0, 0.0, 2.0, 0.0, 1.0, 2.0]
+        genome = [0.0, 0.0, 2.0, 1.0, 2.0]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self._write_survival_elite(root, "runaway", architecture, genome)

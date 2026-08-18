@@ -201,7 +201,7 @@ class TorchMLPSimulator:
             if isinstance(self.edge_rule, FixedEdgeRule):
                 next_edge = edge
             else:
-                features = torch.cat((edge, source_state, target_state, current_message, torch.ones((*edge.shape[:2], 1), dtype=_DTYPE, device=self.device)), dim=-1)
+                features = torch.cat((edge, source_state, target_state, current_message), dim=-1)
                 edge_raw = self._mlp(features, self._edge_parameters, self.edge_rule.architecture.activation)
                 diagnostics.record_rule_outputs("edge", edge_raw.detach().flatten().cpu().tolist())
                 edge_limit = config.edge_step_scale * (config.dt / .05)
@@ -221,7 +221,7 @@ class TorchMLPSimulator:
             aggregate = torch.einsum("bew,en->bnw", weighted, target_matrix)
             counts = target_matrix.sum(dim=0)
             aggregate = aggregate / counts.clamp_min(1.0)[None, :, None]
-        features = torch.cat((node, aggregate, torch.ones((*node.shape[:2], 1), dtype=_DTYPE, device=self.device)), dim=-1)
+        features = torch.cat((node, aggregate), dim=-1)
         node_raw = self._mlp(features, self._node_parameters, self.node_rule.architecture.activation)
         diagnostics.record_rule_outputs("node", node_raw.detach().flatten().cpu().tolist())
         node_increment_limit = config.max_delta * self.node_rule.architecture.increment_fraction * (config.dt / .05)

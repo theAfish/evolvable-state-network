@@ -20,7 +20,10 @@ from ..environments import (
 )
 from ..evolution.candidate import EdgeArchitecture, MLPEdgeRule, MLPUpdateRule, RuleArchitecture
 from ..evolution.cmaes import CMAES, CMAESConfig
-from ..evolution.genetic import GeneticAlgorithm, GeneticAlgorithmConfig, population_statistics
+from ..evolution.genetic import (
+    GeneticAlgorithm, GeneticAlgorithmConfig, RuleDynamicsViabilityProbe,
+    population_statistics,
+)
 from ..evolution.genome import GenomeCodec
 from ..simulation.torch_backend import resolve_device
 from .embodied_population_layouts import (
@@ -493,6 +496,15 @@ class EmbodiedRuleEvolutionConfig:
     immigrant_fraction: float = .25
     immigrant_sigma: float | None = None
     immigrant_mode: Literal["zero", "population"] = "zero"
+    local_mutation_sigma: float | None = None
+    local_offspring_fraction: float | None = None
+    regional_fraction: float = 0.0
+    regional_scale: float = 1.0
+    regional_min_std: float = .02
+    global_fraction: float = 0.0
+    global_parameter_range: float = 1.0
+    global_viability_filter: bool = False
+    global_max_sampling_attempts: int = 20
     max_genome_norm: float | None = None
     max_parameter_magnitude: float | None = None
 
@@ -503,14 +515,39 @@ class EmbodiedRuleEvolutionConfig:
             raise ValueError("mutation_sigma must be positive when provided")
         if self.immigrant_sigma is not None and self.immigrant_sigma <= 0:
             raise ValueError("immigrant_sigma must be positive when provided")
+        if self.local_mutation_sigma is not None and self.local_mutation_sigma <= 0:
+            raise ValueError("local_mutation_sigma must be positive when provided")
+        if self.elite_fraction + self.regional_fraction + self.global_fraction > 1:
+            raise ValueError("elite, regional, and global fractions cannot exceed one")
 
 
 RuleOptimizer = CMAES | GeneticAlgorithm
 
 
-def _make_optimizer(dimension: int, config: EmbodiedRuleEvolutionConfig, *, seed: int | None = None) -> RuleOptimizer:
+def _multiscale_kwargs(config: EmbodiedRuleEvolutionConfig) -> dict[str, object]:
+    """Keep copied species/library configs in lockstep with GA exploration."""
+    return {
+        "local_mutation_sigma": config.local_mutation_sigma,
+        "local_offspring_fraction": config.local_offspring_fraction,
+        "regional_fraction": config.regional_fraction,
+        "regional_scale": config.regional_scale,
+        "regional_min_std": config.regional_min_std,
+        "global_fraction": config.global_fraction,
+        "global_parameter_range": config.global_parameter_range,
+        "global_viability_filter": config.global_viability_filter,
+        "global_max_sampling_attempts": config.global_max_sampling_attempts,
+    }
+
+
+def _make_optimizer(
+    dimension: int, config: EmbodiedRuleEvolutionConfig, *, seed: int | None = None,
+    codec: GenomeCodec | None = None,
+) -> RuleOptimizer:
     optimizer_seed = config.seed if seed is None else seed
     if config.algorithm == "genetic":
+        probe = RuleDynamicsViabilityProbe(codec) if config.global_viability_filter and codec is not None else None
+        if config.global_viability_filter and probe is None:
+            raise ValueError("a codec is required for global viability filtering")
         return GeneticAlgorithm(
             GeneticAlgorithmConfig(
                 dimension, config.population_size, config.mutation_sigma or config.initial_sigma, optimizer_seed,
@@ -519,8 +556,10 @@ def _make_optimizer(dimension: int, config: EmbodiedRuleEvolutionConfig, *, seed
                 immigrant_mode=config.immigrant_mode,
                 max_genome_norm=config.max_genome_norm,
                 max_parameter_magnitude=config.max_parameter_magnitude,
+                **_multiscale_kwargs(config),
             ),
             config.initial_genome,
+            global_viability_probe=probe,
         )
     return CMAES(
         CMAESConfig(dimension, config.population_size, config.initial_sigma, optimizer_seed),
@@ -537,7 +576,7 @@ class EmbodiedRuleEvolutionRunner:
             raise ValueError("initial genome does not match the joint rule architecture")
 
     def run(self, progress: Callable[[dict[str, object]], None] | None = None) -> dict[str, object]:
-        optimizer = _make_optimizer(self.evaluator.codec.dimension, self.config)
+        optimizer = _make_optimizer(self.evaluator.codec.dimension, self.config, codec=self.evaluator.codec)
         history: list[dict[str, object]] = []
         best: EmbodiedFoodWebEvaluation | None = None
         for _ in range(self.config.generations):
@@ -547,7 +586,11 @@ class EmbodiedRuleEvolutionRunner:
             if best is None or winner.mean_lifetime > best.mean_lifetime:
                 best = winner
             optimizer.tell(population, [item.mean_lifetime for item in evaluations])
-            row = {"generation": optimizer.generation, "best_lifetime": winner.mean_lifetime, "mean_lifetime": fmean(item.mean_lifetime for item in evaluations), "sigma": optimizer.sigma}
+            row = {
+                "generation": optimizer.generation, "best_lifetime": winner.mean_lifetime,
+                "mean_lifetime": fmean(item.mean_lifetime for item in evaluations), "sigma": optimizer.sigma,
+                "sampling": getattr(optimizer, "last_sampling_telemetry", {}),
+            }
             history.append(row)
             if progress:
                 progress(row)
@@ -564,8 +607,8 @@ class FoodWebCoevolutionRunner:
             raise ValueError("initial genome does not match the joint rule architecture")
 
     def run(self, progress: Callable[[dict[str, object]], None] | None = None) -> dict[str, object]:
-        prey_optimizer = _make_optimizer(self.evaluator.codec.dimension, self.config)
-        predator_optimizer = _make_optimizer(self.evaluator.codec.dimension, self.config, seed=self.config.seed + 1)
+        prey_optimizer = _make_optimizer(self.evaluator.codec.dimension, self.config, codec=self.evaluator.codec)
+        predator_optimizer = _make_optimizer(self.evaluator.codec.dimension, self.config, seed=self.config.seed + 1, codec=self.evaluator.codec)
         history: list[dict[str, object]] = []
         best_prey: FoodWebCoevolutionEvaluation | None = None
         best_predator: FoodWebCoevolutionEvaluation | None = None
@@ -585,6 +628,8 @@ class FoodWebCoevolutionRunner:
                 "prey_best_lifetime": prey_winner.prey_mean_lifetime,
                 "prey_mean_lifetime": fmean(item.prey_mean_lifetime for item in evaluations),
                 "predator_best_lifetime": predator_winner.predator_mean_lifetime,
+                "prey_sampling": getattr(prey_optimizer, "last_sampling_telemetry", {}),
+                "predator_sampling": getattr(predator_optimizer, "last_sampling_telemetry", {}),
                 "predator_mean_lifetime": fmean(item.predator_mean_lifetime for item in evaluations),
                 "prey_sigma": prey_optimizer.sigma, "predator_sigma": predator_optimizer.sigma,
             }
@@ -666,6 +711,7 @@ class BatchFoodWebCoevolutionRunner:
             immigrant_fraction=self.evolution.immigrant_fraction, immigrant_sigma=self.evolution.immigrant_sigma,
             immigrant_mode=self.evolution.immigrant_mode, max_genome_norm=self.evolution.max_genome_norm,
             max_parameter_magnitude=self.evolution.max_parameter_magnitude,
+            **_multiscale_kwargs(self.evolution),
         )
         predator_config = EmbodiedRuleEvolutionConfig(
             generations=self.config.generations,
@@ -678,9 +724,10 @@ class BatchFoodWebCoevolutionRunner:
             immigrant_fraction=self.evolution.immigrant_fraction, immigrant_sigma=self.evolution.immigrant_sigma,
             immigrant_mode=self.evolution.immigrant_mode, max_genome_norm=self.evolution.max_genome_norm,
             max_parameter_magnitude=self.evolution.max_parameter_magnitude,
+            **_multiscale_kwargs(self.evolution),
         )
-        prey_optimizer = _make_optimizer(self.evaluator.codec.dimension, prey_config)
-        predator_optimizer = _make_optimizer(self.evaluator.codec.dimension, predator_config)
+        prey_optimizer = _make_optimizer(self.evaluator.codec.dimension, prey_config, codec=self.evaluator.codec)
+        predator_optimizer = _make_optimizer(self.evaluator.codec.dimension, predator_config, codec=self.evaluator.codec)
         prey_hall = [(float("-inf"), tuple(prey_initial))]
         predator_hall = [(float("-inf"), tuple(predator_initial))]
         empty_behavior = _public_behavior(_mean_behavior([]))
@@ -772,6 +819,8 @@ class BatchFoodWebCoevolutionRunner:
                     "predator_genotype": population_statistics(predator_population, node_dimension=self.evaluator.architecture.parameter_count) if predator_scores else {},
                     "prey_normalizations": getattr(prey_optimizer, "last_ask_normalizations", 0),
                     "predator_normalizations": getattr(predator_optimizer, "last_ask_normalizations", 0),
+                    "prey_sampling": getattr(prey_optimizer, "last_sampling_telemetry", {}),
+                    "predator_sampling": getattr(predator_optimizer, "last_sampling_telemetry", {}) if predator_scores else {},
                     "prey_phenotype_diversity": _phenotype_diversity([item[2] for item in prey_rows]),
                     "predator_phenotype_diversity": _phenotype_diversity([item[2] for item in predator_rows]) if predator_scores else 0.0,
                 }
@@ -822,6 +871,15 @@ class BatchFoodWebCoevolutionRunner:
             "immigrant_fraction": self.evolution.immigrant_fraction,
             "immigrant_sigma": self.evolution.immigrant_sigma or max(.05, self.evolution.initial_sigma * 3.0),
             "immigrant_mode": self.evolution.immigrant_mode,
+            "local_mutation_sigma": self.evolution.local_mutation_sigma or self.evolution.mutation_sigma or self.evolution.initial_sigma,
+            "local_offspring_fraction": self.evolution.local_offspring_fraction,
+            "regional_fraction": self.evolution.regional_fraction,
+            "regional_scale": self.evolution.regional_scale,
+            "regional_min_std": self.evolution.regional_min_std,
+            "global_fraction": self.evolution.global_fraction,
+            "global_parameter_range": self.evolution.global_parameter_range,
+            "global_viability_filter": self.evolution.global_viability_filter,
+            "global_max_sampling_attempts": self.evolution.global_max_sampling_attempts,
             "max_genome_norm": self.evolution.max_genome_norm,
             "max_parameter_magnitude": self.evolution.max_parameter_magnitude,
             "generations": self.config.generations, "episode_steps": self.config.episode_steps,
@@ -997,7 +1055,7 @@ class OnlineRuleLibrary:
     ) -> None:
         self.codec, self.network, self.random = codec, network, Random(seed)
         self.algorithm = config.algorithm
-        self.optimizer = _make_optimizer(codec.dimension, config, seed=seed)
+        self.optimizer = _make_optimizer(codec.dimension, config, seed=seed, codec=codec)
         initial = tuple(config.initial_genome) if config.initial_genome is not None else (0.0,) * codec.dimension
         self.archive: list[tuple[float, tuple[float, ...]]] = [(0.0, initial)]
         self._has_evaluated_archive = False
@@ -1107,6 +1165,7 @@ class ContinuousFoodWebCoevolutionRunner:
             immigrant_fraction=self.evolution.immigrant_fraction, immigrant_sigma=self.evolution.immigrant_sigma,
             immigrant_mode=self.evolution.immigrant_mode, max_genome_norm=self.evolution.max_genome_norm,
             max_parameter_magnitude=self.evolution.max_parameter_magnitude,
+            **_multiscale_kwargs(self.evolution),
         )
         predator_config = EmbodiedRuleEvolutionConfig(
             generations=1, population_size=self.evolution.population_size,
@@ -1116,6 +1175,7 @@ class ContinuousFoodWebCoevolutionRunner:
             immigrant_fraction=self.evolution.immigrant_fraction, immigrant_sigma=self.evolution.immigrant_sigma,
             immigrant_mode=self.evolution.immigrant_mode, max_genome_norm=self.evolution.max_genome_norm,
             max_parameter_magnitude=self.evolution.max_parameter_magnitude,
+            **_multiscale_kwargs(self.evolution),
         )
         prey_library = OnlineRuleLibrary(self.evaluator.codec, prey_config, self.evaluator.config.network, seed=self.config.seed + 101)
         predator_library = OnlineRuleLibrary(self.evaluator.codec, predator_config, self.evaluator.config.network, seed=self.config.seed + 202)

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import tanh
 from random import Random
-from typing import Literal
+from typing import Callable, Literal
 
 import torch
 
@@ -101,12 +101,19 @@ def generate_embodied_graph(config: EmbodiedNetworkConfig, interface: NetworkInt
 class EmbodiedNetwork:
     """One random graph/initial state controlled by shared node and edge rules."""
 
-    def __init__(self, node_rule: NodeRule, edge_rule: EdgeRule, adapter: AgentAdapter, config: EmbodiedNetworkConfig, *, seed: int) -> None:
+    def __init__(
+        self, node_rule: NodeRule, edge_rule: EdgeRule, adapter: AgentAdapter,
+        config: EmbodiedNetworkConfig, *, seed: int,
+        node_observer: Callable[[int, int, tuple[float, ...], tuple[float, ...]], None] | None = None,
+        force_zero_messages: bool = False,
+    ) -> None:
         if node_rule.state_width != config.state_width:
             raise ValueError("node rule width must match embodied network configuration")
         if max(adapter.input_signal_channels, default=0) >= config.state_width:
             raise ValueError("node state width cannot represent the adapter's sensory signal channels")
         self.adapter, self.config = adapter, config
+        self._node_observer = node_observer
+        self._force_zero_messages = force_zero_messages
         self.interface = NetworkInterface.allocate(config.nodes, adapter)
         self.graph = generate_embodied_graph(config, self.interface, seed)
         self._simulation = Simulation(self.graph, node_rule, edge_rule)
@@ -120,6 +127,8 @@ class EmbodiedNetwork:
         self._torch_input_nodes: torch.Tensor | None = None
         self._torch_action_nodes: torch.Tensor | None = None
         if config.execution_backend == "torch":
+            if node_observer is not None or force_zero_messages:
+                raise ValueError("diagnostic node observation/message ablation requires the Python backend")
             if not isinstance(node_rule, MLPUpdateRule) or not isinstance(edge_rule, MLPEdgeRule):
                 raise TypeError("the Torch embodied backend requires the standard MLP node and edge rules")
             self._torch_simulator = TorchMLPSimulator(self.graph, node_rule, edge_rule, resolve_device(config.device))
@@ -188,7 +197,10 @@ class EmbodiedNetwork:
             vector[channel] = bounded(value)
             self.state.node[0][node] = tuple(vector)
         external = [[zeros(self.config.state_width) for _ in range(self.config.nodes)]]
-        self.state = self._simulation._step(self.state, external, self._step, self._integration, (), self.diagnostics, None)
+        self.state = self._simulation._step(
+            self.state, external, self._step, self._integration, (), self.diagnostics, None,
+            self._node_observer, self._force_zero_messages,
+        )
         # Input values are pure current sensations, not recurrent state; action
         # ports retain their readout coordinate only.  All other channels are
         # zeroed on every tick in both kinds of boundary node.

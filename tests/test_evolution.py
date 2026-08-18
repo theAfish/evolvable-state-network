@@ -5,9 +5,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from evolvable_state_network.evolution.candidate import RuleArchitecture
+from evolvable_state_network.evolution.candidate import EdgeArchitecture, MLPEdgeRule, MLPUpdateRule, RuleArchitecture
 from evolvable_state_network.evolution.cmaes import CMAES, CMAESConfig
-from evolvable_state_network.evolution.genetic import GeneticAlgorithm, GeneticAlgorithmConfig, population_statistics
+from evolvable_state_network.evolution.genetic import (
+    GeneticAlgorithm, GeneticAlgorithmConfig, RuleDynamicsViabilityProbe,
+    ViabilityResult, population_statistics,
+)
 from evolvable_state_network.evolution.evaluation import (
     CandidateEvaluator,
     ScenarioConfig,
@@ -40,6 +43,19 @@ class EvolutionTests(unittest.TestCase):
     def test_genome_round_trip_is_exact_and_deterministic(self) -> None:
         genome = tuple(index / 10 for index in range(self.codec.dimension))
         self.assertEqual(self.codec.encode(self.codec.decode(genome)), genome)
+
+    def test_mlp_input_excludes_redundant_constant_feature(self) -> None:
+        node_architecture = RuleArchitecture(state_width=2, hidden_width=1, activation="relu")
+        node_rule = MLPUpdateRule(node_architecture, tuple(float(value) for value in range(1, 10)))
+        self.assertEqual(node_architecture.input_width, 4)
+        self.assertEqual(node_architecture.parameter_count, 9)
+        self.assertEqual(node_rule.raw_output((1.0, 2.0), (3.0, 4.0)), (218.0, 254.0))
+
+        edge_architecture = EdgeArchitecture(node_state_width=1, latent_width=1, hidden_width=1, activation="relu")
+        edge_rule = MLPEdgeRule(edge_architecture, (1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0))
+        self.assertEqual(edge_architecture.input_width, 4)
+        self.assertEqual(edge_architecture.parameter_count, 7)
+        self.assertEqual(edge_rule.raw_output((1.0,), (2.0,), (3.0,), (4.0,)), (217.0,))
 
     def test_candidate_evaluation_is_deterministic_and_batch_consistent(self) -> None:
         evaluator = CandidateEvaluator(self.architecture)
@@ -88,6 +104,48 @@ class EvolutionTests(unittest.TestCase):
         next_population = optimizer.ask()
         self.assertGreater(optimizer.normalization_count, 0)
         self.assertGreaterEqual(population_statistics(next_population)["population_parameter_diversity"], 0.0)
+
+    def test_multiscale_ga_has_exact_composition_and_global_prior_is_population_independent(self) -> None:
+        config = GeneticAlgorithmConfig(
+            3, population_size=10, seed=22, elite_fraction=.2,
+            regional_fraction=.2, global_fraction=.2, global_parameter_range=.5,
+        )
+        left, right = GeneticAlgorithm(config, (-10.0,) * 3), GeneticAlgorithm(config, (10.0,) * 3)
+        left_population, right_population = left.ask(), right.ask()
+        self.assertEqual(len(left_population), config.population_size)
+        self.assertEqual(left.pending_sources.count("elite"), 2)
+        self.assertEqual(left.pending_sources.count("local_offspring"), 4)
+        self.assertEqual(left.pending_sources.count("regional_immigrant"), 2)
+        self.assertEqual(left.pending_sources.count("global_immigrant"), 2)
+        global_indices = [index for index, source in enumerate(left.pending_sources) if source == "global_immigrant"]
+        regional_indices = [index for index, source in enumerate(left.pending_sources) if source == "regional_immigrant"]
+        self.assertEqual([left_population[index] for index in global_indices], [right_population[index] for index in global_indices])
+        self.assertNotEqual([left_population[index] for index in regional_indices], [right_population[index] for index in regional_indices])
+
+    def test_rule_dynamics_probe_rejects_saturated_rules_and_accepts_active_rules(self) -> None:
+        probe = RuleDynamicsViabilityProbe(self.codec)
+        saturated = [0.0] * self.codec.dimension
+        saturated[-self.architecture.state_width:] = [100.0] * self.architecture.state_width
+        active = [0.0] * self.codec.dimension
+        active[-self.architecture.state_width:] = [.2] * self.architecture.state_width
+        self.assertFalse(probe(saturated).viable)
+        self.assertTrue(probe(active).viable)
+
+    def test_global_filter_resamples_then_records_a_fallback_without_fitness(self) -> None:
+        calls = []
+        def reject(genome: tuple[float, ...]) -> ViabilityResult:
+            calls.append(genome)
+            return ViabilityResult(False, {"node_raw_saturation_fraction": .9}, ("node_raw_saturation",))
+        optimizer = GeneticAlgorithm(
+            GeneticAlgorithmConfig(2, population_size=5, seed=4, elite_fraction=.2, global_fraction=.4,
+                                   global_viability_filter=True, global_max_sampling_attempts=3),
+            global_viability_probe=reject,
+        )
+        optimizer.ask()
+        self.assertEqual(len(calls), 6)
+        viability = optimizer.last_sampling_telemetry["global_viability"]
+        self.assertEqual(viability["attempts"], 6)
+        self.assertEqual(viability["fallbacks"], 2)
 
     def test_evaluation_reports_raw_rule_outputs_and_applied_updates(self) -> None:
         suite = ScenarioSuite(

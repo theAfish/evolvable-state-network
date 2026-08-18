@@ -103,7 +103,7 @@ class _DiagnosticController(Controller):
         next_edge: list[tuple[float, ...]] = []
         for item, state in zip(self.network.graph.edges, edge, strict=True):
             message = self.edge_rule.message(state, node[item.source])
-            raw = _forward(state + node[item.source] + node[item.target] + message + (1.0,), self.edge_rule._layers, self.edge_rule.architecture.activation)
+            raw = _forward(state + node[item.source] + node[item.target] + message, self.edge_rule._layers, self.edge_rule.architecture.activation)
             edge_raw.append(raw)
             next_edge.append(tuple(value + self.config.edge_step_scale * tanh(update * self.config.rule_output_scale) for value, update in zip(state, raw, strict=True)))
         aggregate = [[0.0] * self.config.state_width for _ in range(self.config.nodes)]
@@ -113,7 +113,7 @@ class _DiagnosticController(Controller):
             aggregate[item.target] = [a + b for a, b in zip(aggregate[item.target], message, strict=True)]
             counts[item.target] += 1
         node_raw = [
-            _forward(node[index] + tuple(value / max(1, counts[index]) for value in aggregate[index]) + (1.0,), self.node_rule._layers, self.node_rule.architecture.activation)
+            _forward(node[index] + tuple(value / max(1, counts[index]) for value in aggregate[index]), self.node_rule._layers, self.node_rule.architecture.activation)
             for index in range(self.config.nodes)
         ]
         return node_raw, edge_raw

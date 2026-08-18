@@ -98,6 +98,15 @@ class EmbodiedFoodWebTrainingPayload(StrictModel):
     immigrant_fraction: float = Field(.25, ge=0, lt=1)
     immigrant_sigma: float | None = Field(None, gt=0, le=4.0)
     immigrant_mode: Literal["zero", "population"] = "zero"
+    local_mutation_sigma: float | None = Field(None, gt=0, le=2.0)
+    local_offspring_fraction: float | None = Field(None, ge=0, lt=1)
+    regional_fraction: float = Field(0.0, ge=0, lt=1)
+    regional_scale: float = Field(1.0, gt=0, le=10)
+    regional_min_std: float = Field(.02, gt=0, le=2)
+    global_fraction: float = Field(0.0, ge=0, lt=1)
+    global_parameter_range: float = Field(1.0, gt=0, le=10)
+    global_viability_filter: bool = False
+    global_max_sampling_attempts: int = Field(20, ge=1, le=100)
     max_genome_norm: float | None = Field(None, gt=0)
     max_parameter_magnitude: float | None = Field(None, gt=0)
     initial_energy_scale: float = Field(1.0, gt=0, le=20)

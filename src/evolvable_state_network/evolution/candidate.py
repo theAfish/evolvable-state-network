@@ -64,8 +64,9 @@ class RuleArchitecture:
 
     @property
     def input_width(self) -> int:
-        # current local state, mean incoming message, bias
-        return 2 * self.state_width + 1
+        # current local state and mean incoming message; each MLP layer owns
+        # an explicit bias vector.
+        return 2 * self.state_width
 
     @property
     def parameter_count(self) -> int:
@@ -102,7 +103,6 @@ class MLPUpdateRule(NodeRule):
     ) -> StateVector:
         if len(state) != self.state_width or len(aggregate) != self.state_width:
             raise ValueError("MLP update inputs must match configured state width")
-        features = state + aggregate + (1.0,)
         output = self.raw_output(state, aggregate)
         # Keep the established update magnitude at dt=.05, while making the
         # integration step meaningful for all other caller-selected values.
@@ -116,7 +116,7 @@ class MLPUpdateRule(NodeRule):
         """Return the final MLP layer before output scaling and bounding."""
         if len(state) != self.state_width or len(aggregate) != self.state_width:
             raise ValueError("MLP update inputs must match configured state width")
-        return _forward(state + aggregate + (1.0,), self._layers, self.architecture.activation)
+        return _forward(state + aggregate, self._layers, self.architecture.activation)
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,8 +150,9 @@ class EdgeArchitecture:
 
     @property
     def input_width(self) -> int:
-        # edge vector, source/target vectors, current message, bias
-        return self.latent_width + 3 * self.node_state_width + 1
+        # edge vector, source/target vectors, and current message. Each MLP
+        # layer owns an explicit bias vector.
+        return self.latent_width + 3 * self.node_state_width
 
     @property
     def parameter_count(self) -> int:
@@ -193,7 +194,6 @@ class MLPEdgeRule(EdgeRule):
         width = self.architecture.node_state_width
         if (len(state) != self.state_width or any(len(vector) != width for vector in (source, target, message))):
             raise ValueError("edge update inputs must match the configured architecture")
-        features = state + source + target + message + (1.0,)
         output = self.raw_output(state, source, target, message)
         increments = []
         for row in range(self.state_width):
@@ -206,7 +206,7 @@ class MLPEdgeRule(EdgeRule):
         width = self.architecture.node_state_width
         if len(state) != self.state_width or any(len(vector) != width for vector in (source, target, message)):
             raise ValueError("edge update inputs must match the configured architecture")
-        return _forward(state + source + target + message + (1.0,), self._layers, self.architecture.activation)
+        return _forward(state + source + target + message, self._layers, self.architecture.activation)
 
     def communication_gates(self, state: StateVector) -> StateVector:
         """Map latent coordinates to one smooth communication gate per node coordinate.

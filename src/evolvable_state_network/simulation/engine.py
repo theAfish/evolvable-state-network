@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from math import isfinite, sqrt
 from statistics import fmean, pstdev
-from typing import Iterable
+from typing import Callable, Iterable
 
 from ..graph import Graph
 from ..inputs import GaussianInput, InputProvider
@@ -264,6 +264,8 @@ class Simulation:
         disturbances: tuple[Perturbation, ...],
         diagnostics: TransitionDiagnostics,
         intervention: StateIntervention | None,
+        node_observer: Callable[[int, int, StateVector, StateVector], None] | None = None,
+        force_zero_aggregate: bool = False,
     ) -> NetworkState:
         width = self.node_rule.state_width
         incoming = self._incoming
@@ -328,6 +330,12 @@ class Simulation:
                 aggregate_vector = tuple(value / count for value in aggregate) if count else zeros(width)
                 if intervention is not None:
                     aggregate_vector, _ = intervention.local_inputs(aggregate_vector, zeros(width))
+                # Observation and message ablation are evaluation hooks.  They
+                # are opt-in, so the normal training transition is unchanged.
+                if force_zero_aggregate:
+                    aggregate_vector = zeros(width)
+                if node_observer is not None:
+                    node_observer(step, node, state.node[batch][node], aggregate_vector)
                 if hasattr(self.node_rule, "raw_output"):
                     diagnostics.record_rule_outputs("node", self.node_rule.raw_output(  # type: ignore[attr-defined]
                         state.node[batch][node], aggregate_vector,

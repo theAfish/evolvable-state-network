@@ -6,3 +6,4 @@ experiment_output/
 
 
 .debug/
+.outputs/

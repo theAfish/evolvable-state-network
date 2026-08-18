@@ -35,7 +35,13 @@ from .generational import (
     random_search_smoke_test,
 )
 from .genome import EvolutionTarget, GenomeCodec
-from .genetic import GeneticAlgorithm, GeneticAlgorithmConfig
+from .genetic import (
+    GeneticAlgorithm,
+    GeneticAlgorithmConfig,
+    RuleDynamicsViabilityProbe,
+    ViabilityResult,
+    calibrate_global_prior,
+)
 
 __all__ = [
     "AsyncEvolutionConfig",
@@ -52,6 +58,9 @@ __all__ = [
     "GenomeCodec",
     "GeneticAlgorithm",
     "GeneticAlgorithmConfig",
+    "RuleDynamicsViabilityProbe",
+    "ViabilityResult",
+    "calibrate_global_prior",
     "HealthMonitor",
     "MLPEdgeRule",
     "MLPUpdateRule",

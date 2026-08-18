@@ -1502,7 +1502,6 @@ def diagnostic_reference_genomes(codec: GenomeCodec) -> tuple[tuple[float, ...],
         input_width = architecture.input_width
         if architecture.hidden_width >= 2:
             responsive[0] = -2.0
-            responsive[2 * architecture.state_width] = 2.0
             responsive[input_width] = 2.0
             responsive[input_width + 2 * architecture.state_width] = -2.0
             output_start = architecture.hidden_width * input_width + architecture.hidden_width
