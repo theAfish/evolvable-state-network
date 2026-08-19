@@ -233,26 +233,118 @@
         <section class="flat-section"><div class="section-heading"><div><p class="eyebrow">EVOLUTION TELEMETRY</p><h3>Lifetime-only selection evidence</h3></div><span>Batch mode separates training, selection validation, and untouched testing. Meals, hunger, and movement remain diagnostics and never enter selection.</span></div><div class="embodied-charts"><figure><figcaption id="embodied-chart-one-label">Training and held-out restricted mean lifetime</figcaption><canvas id="embodied-deaths-chart" width="700" height="260"></canvas></figure><figure><figcaption id="embodied-chart-two-label">First lives surviving the evaluation horizon</figcaption><canvas id="embodied-meals-chart" width="700" height="260"></canvas></figure></div></section>
       </section>
 
-      <section class="view" data-view="ecology-demo">
-        <div class="page-heading"><div><p class="eyebrow">BEST-RULE ECOLOGY DEMO</p><h2>Watch the two best learned rules in a fresh living world.</h2><p>Each demo uses the selected run’s prey and predator best genomes, while every organism receives a newly sampled graph and initial state. Choose the demo network size and connectivity below; checkpoint metadata supplies the learned rule and interface, not a fixed graph. A current checkpoint is available for debugging as soon as training saves it; finished runs retain their final best genomes. Deaths continue to replace organisms with the same demonstrated rule.</p></div></div>
-        <form id="demo-form" class="form-panel panel"><label>Embodied model <select id="demo-run"></select><small>Supplies learned rules and their required sensory interface. Current checkpoints refresh automatically during training.</small></label><button id="demo-refresh" type="button">Refresh models</button><label>World seed <input id="demo-seed" type="number" value="17" min="0" max="4294967295" /></label><label>Random hidden nodes <input id="demo-hidden-nodes" type="number" value="31" min="1" /><small>Anonymous recurrent nodes only. Sensory inputs and action outputs are added separately.</small></label><label>Mean degree <input id="demo-network-degree" type="number" value="6" min="0" step="0.5" /><small>Connectivity of each newly sampled directed graph; it need not match training metadata.</small></label><label>Prey slots <input id="demo-prey-count" type="number" value="5" min="1" /></label><label>Predator slots <input id="demo-predator-count" type="number" value="2" min="0" /></label><label>Initial food <input id="demo-initial-food" type="number" value="24" min="0" /></label><label>Maximum food <input id="demo-max-food" type="number" value="80" min="0" /></label><label>Food growth rate <input id="demo-food-growth-rate" type="number" value="24" min="0" step="0.1" /><small>New plants per simulated second.</small></label><label>Simulation speed <select id="demo-rate"><option value="1">1 tick/s</option><option value="4">4 ticks/s</option><option value="12" selected>12 ticks/s</option><option value="30">30 ticks/s</option><option value="120">120 ticks/s</option></select></label><button id="demo-start" type="submit">Start demo</button><output id="demo-status">Start a run and wait for its first checkpoint, or choose a completed run.</output></form>
-        <section class="controls panel"><button id="demo-play" type="button">Play</button><button id="demo-step" type="button">Step</button><button id="demo-record" type="button" disabled>Start recording</button><span id="demo-label">Choose a run to begin.</span></section>
-        <section class="flat-section"><canvas id="ecology-canvas" width="1100" height="600" aria-label="Live predator prey plant ecology; click an organism to inspect its network"></canvas><div id="demo-events" class="demo-events">No events yet.</div></section>
-        <section class="flat-section demo-inspector"><div class="section-heading"><div><p class="eyebrow">INDIVIDUAL NETWORK INSPECTOR</p><h3 id="demo-individual-title">Click a prey or predator in the ecology</h3></div><span id="demo-individual-summary">The selected organism's random recurrent graph and live state will appear here.</span></div><div class="demo-inspector-grid"><article><label>Network colour channel <select id="demo-color-channel" disabled></select></label><svg id="demo-network" viewBox="0 0 920 560" role="img" aria-label="Selected organism network structure, with sensory inputs on the left and actions on the right"></svg></article><article><label>History channel <select id="demo-channel" disabled></select></label><canvas id="demo-node-chart" width="700" height="300" aria-label="Selected organism node-state history"></canvas></article></div></section>
+      <section class="view ecology-view" data-view="ecology-demo">
+        <div class="page-heading ecology-heading">
+          <div>
+            <p class="eyebrow">LIVE ECOLOGY LAB</p>
+            <h2>Watch learned rules become behavior.</h2>
+            <p>Launch the best prey and predator rules in a fresh world, then select any organism to inspect its newly sampled recurrent network. The world view, network state, and history plot update independently to keep fast playback responsive.</p>
+          </div>
+          <div class="ecology-heading-key" aria-label="Ecology visual key">
+            <span><i class="plant-key"></i>Plant</span>
+            <span><i class="prey-key"></i>Prey</span>
+            <span><i class="predator-key"></i>Predator</span>
+          </div>
+        </div>
+
+        <form id="demo-form" class="ecology-launch panel">
+          <div class="ecology-launch-primary">
+            <label class="ecology-model-field">Embodied model<select id="demo-run"></select><small>Completed run or current training checkpoint.</small></label>
+            <button id="demo-refresh" class="quiet-button" type="button">Refresh</button>
+            <label>World seed<input id="demo-seed" type="number" value="17" min="0" max="4294967295" /></label>
+            <button id="demo-start" type="submit">Launch fresh world</button>
+          </div>
+          <details class="ecology-settings">
+            <summary>World &amp; network setup <span>9 controls</span></summary>
+            <div class="ecology-settings-grid">
+              <label>Hidden nodes<input id="demo-hidden-nodes" type="number" value="31" min="1" /><small>Per-organism recurrent tissue.</small></label>
+              <label>Mean degree<input id="demo-network-degree" type="number" value="6" min="0" step="0.5" /><small>New graph connectivity.</small></label>
+              <label>Prey slots<input id="demo-prey-count" type="number" value="5" min="1" /></label>
+              <label>Predator slots<input id="demo-predator-count" type="number" value="2" min="0" /></label>
+              <label>Initial plants<input id="demo-initial-food" type="number" value="24" min="0" /></label>
+              <label>Plant capacity<input id="demo-max-food" type="number" value="80" min="0" /></label>
+              <label>Plant growth / sec<input id="demo-food-growth-rate" type="number" value="24" min="0" step="0.1" /></label>
+              <label>Playback rate<select id="demo-rate"><option value="1">1 tick/s</option><option value="4">4 ticks/s</option><option value="12" selected>12 ticks/s</option><option value="30">30 ticks/s</option><option value="120">120 ticks/s</option></select></label>
+            </div>
+          </details>
+          <output id="demo-status" class="ecology-status">Choose a completed run or wait for the first training checkpoint.</output>
+        </form>
+
+        <section class="ecology-toolbar" aria-label="Ecology playback controls">
+          <div class="ecology-transport">
+            <button id="demo-play" type="button">Play</button>
+            <button id="demo-step" class="quiet-button" type="button">Step</button>
+            <button id="demo-record" class="quiet-button" type="button" disabled>Record</button>
+          </div>
+          <span id="demo-label">Choose a run to begin.</span>
+        </section>
+
+        <section class="ecology-workspace">
+          <div class="ecology-canvas-shell">
+            <canvas id="ecology-canvas" width="1100" height="600" aria-label="Live predator prey plant ecology; click an organism to inspect its network"></canvas>
+          </div>
+          <aside class="ecology-sidebar">
+            <div class="ecology-live-heading"><span>LIVE WORLD</span><i></i></div>
+            <div class="ecology-stats">
+              <div><span>Tick</span><strong id="demo-tick">—</strong></div>
+              <div><span>Prey</span><strong id="demo-prey-live">—</strong></div>
+              <div><span>Predators</span><strong id="demo-predator-live">—</strong></div>
+              <div><span>Plants</span><strong id="demo-plants-live">—</strong></div>
+            </div>
+            <div class="ecology-hint"><strong>Select an organism</strong><span>Click a prey circle or predator arrow to inspect the network controlling it.</span></div>
+            <div id="demo-events" class="demo-events"><div><span>Events</span><strong>No world started</strong></div></div>
+          </aside>
+        </section>
+
+        <section class="demo-inspector">
+          <div class="section-heading">
+            <div><p class="eyebrow">SELECTED ORGANISM</p><h3 id="demo-individual-title">No organism selected</h3></div>
+            <span id="demo-individual-summary">Select an organism above to inspect its live recurrent state.</span>
+          </div>
+          <div class="demo-inspector-grid">
+            <article class="demo-network-card">
+              <header class="demo-card-header">
+                <div><span>MESSAGE GRAPH</span><strong id="demo-network-summary">Select an organism to inspect its graph.</strong></div>
+                <div class="demo-card-controls">
+                  <label>Node colour<select id="demo-color-channel" disabled></select></label>
+                  <label>Edge filter<select id="demo-edge-threshold"><option value="0">All edges</option><option value="0.1">Strength ≥ 0.10</option><option value="0.25" selected>Strength ≥ 0.25</option><option value="0.5">Strength ≥ 0.50</option></select></label>
+                </div>
+              </header>
+              <svg id="demo-network" viewBox="0 0 920 560" role="img" aria-label="Selected organism network structure, with sensory inputs on the left and actions on the right"></svg>
+              <div class="demo-value-key"><span class="negative">Negative state</span><span>Near zero</span><span class="positive">Positive state</span></div>
+            </article>
+            <article class="demo-history-card">
+              <header class="demo-card-header">
+                <div><span>NODE STATE HISTORY</span><strong>Highest-activity nodes in the selected channel</strong></div>
+                <div class="demo-card-controls">
+                  <label>Channel<select id="demo-channel" disabled></select></label>
+                  <label>Lines<select id="demo-series-count"><option value="4">Top 4</option><option value="8" selected>Top 8</option><option value="12">Top 12</option><option value="0">All nodes</option></select></label>
+                </div>
+              </header>
+              <canvas id="demo-node-chart" width="700" height="340" aria-label="Selected organism node-state history"></canvas>
+              <div id="demo-node-legend" class="demo-node-legend" aria-label="Node history series legend"></div>
+            </article>
+          </div>
+        </section>
       </section>
 
       <section class="view" data-view="diagnostics">
-        <div class="page-heading"><div><p class="eyebrow">POST-RUN DIAGNOSIS</p><h2>Locate the last observable source of behavioral collapse.</h2><p>Load a completed <code>report.json</code> and its matching <code>checkpoint.json</code>. Analysis happens in this browser: no artifacts are uploaded. This view distinguishes evidence present in an older run from metrics that require the expanded runtime instrumentation described in the diagnostic plan.</p></div></div>
+        <div class="page-heading"><div><p class="eyebrow">POST-RUN DIAGNOSIS</p><h2>Locate the last observable source of behavioral collapse.</h2><p>Load a completed <code>report.json</code> and its matching <code>checkpoint.json</code> to inspect historical evidence locally. Server-backed controls run evaluation-only replays of saved rules, including the 2D local-state field; they never modify training, genomes, or checkpoints.</p></div></div>
         <form id="diagnostics-form" class="form-panel panel">
-          <div><p class="eyebrow">ARTIFACT LOADER</p><h3>Completed run or local files</h3></div>
-          <label>Server run ID <input id="diagnostics-run-id" value="server" pattern="[A-Za-z0-9_-]+" /><small>Loads <code>/artifacts/embodied_runs/&lt;id&gt;/</code>.</small></label>
+          <div><p class="eyebrow">ARTIFACT LOADER</p><h3>Completed run, active checkpoint, or local file</h3></div>
+          <label>Server run ID <input id="diagnostics-run-id" value="server" pattern="[A-Za-z0-9_-]+" /><small>Uses <code>report.json</code> when present, otherwise the current <code>checkpoint.json</code>.</small></label>
           <button id="diagnostics-load-server" type="button">Load server artifacts</button>
           <label class="diagnostics-file">Report JSON <input id="diagnostics-report-file" type="file" accept="application/json,.json" /></label>
           <label class="diagnostics-file">Checkpoint JSON <input id="diagnostics-checkpoint-file" type="file" accept="application/json,.json" /></label>
-          <button id="diagnostics-load-files" type="button">Analyze selected files</button>
+          <button id="diagnostics-load-files" type="button">Analyze selected artifact</button>
           <label>Fresh graph samples <input id="diagnostics-sample-count" type="number" value="64" min="1" max="256" /><small>Same saved rules; new graph and state per sample.</small></label>
           <label>Diagnostic seed <input id="diagnostics-seed" type="number" placeholder="random" min="0" max="4294967295" /></label>
           <button id="diagnostics-run-random-graphs" type="button">Evaluate random graphs</button>
+          <label>Coupled-state episodes <input id="diagnostics-coupled-episodes" type="number" value="1" min="1" max="3" /><small>Matched post-training replay only; never changes the saved rule.</small></label>
+          <label>Coupled-state ticks <input id="diagnostics-coupled-steps" type="number" value="48" min="4" max="512" /><small>Longer replays give stronger synchronization evidence.</small></label>
+          <label>Field channel X <input id="diagnostics-coupled-channel-x" type="number" value="0" min="0" max="63" /><small>One coordinate of the saved node state.</small></label>
+          <label>Field channel Y <input id="diagnostics-coupled-channel-y" type="number" value="1" min="0" max="63" /><small>The other coordinate; all remaining coordinates are held at their replay mean.</small></label>
+          <button id="diagnostics-run-coupled-state" type="button">Map 2D prey state field</button>
           <label>Compare run A <input id="diagnostics-compare-left" value="server" pattern="[A-Za-z0-9_-]+" /></label>
           <label>Compare run B <input id="diagnostics-compare-right" value="server-2" pattern="[A-Za-z0-9_-]+" /></label>
           <label>Matched episodes <input id="diagnostics-evaluation-samples" type="number" value="4" min="1" max="32" /><small>Same fresh graph and environment seeds for A and B.</small></label>
@@ -266,6 +358,7 @@
         </section>
         <section class="flat-section"><div class="section-heading"><div><p class="eyebrow">OBSERVED EVIDENCE</p><h3>Generation and final-genome summary</h3></div><span>These values are derived only from fields recorded in the loaded JSON.</span></div><div id="diagnostics-summary" class="summary-grid"><p class="empty-state">No report loaded.</p></div></section>
         <section class="flat-section"><div class="section-heading"><div><p class="eyebrow">FRESH RANDOM NETWORKS</p><h3>Performance variation of the saved rules</h3></div><span>Uses the server run ID, its saved environment, and matched newly sampled graph/state seeds.</span></div><div id="diagnostics-random-graphs" class="summary-grid"><p class="empty-state">Run the random-graph evaluation to measure reliability across newly created embodied networks.</p></div></section>
+        <section class="flat-section coupled-field-section"><div class="section-heading"><div><p class="eyebrow">COUPLED PREY STATE FIELD</p><h3>Local 2D flow and fixed-point map</h3></div><span>Arrow lengths are normalized for readability; direction is the effective node-state update.</span></div><div class="coupled-field-controls"><label>Incoming aggregate <select id="diagnostics-coupled-condition" disabled></select></label><span id="diagnostics-coupled-copy">Run the 2D prey diagnostic for a local-rule vector field.</span></div><canvas id="diagnostics-coupled-field" width="900" height="560" aria-label="2D prey node-state vector field"></canvas><div id="diagnostics-coupled-summary" class="summary-grid"><p class="empty-state">No coupled-state diagnostic has been run.</p></div></section>
         <section class="flat-section"><div class="section-heading"><div><p class="eyebrow">TWO-RUN RULE COMPARISON</p><h3>Matched behavior, saturation, and effective dynamics</h3></div><span>Only two saved endpoints are available; this is a displacement comparison, not a complete genome trajectory.</span></div><div id="diagnostics-comparison" class="summary-grid"><p class="empty-state">Evaluate two saved runs to inspect matched behavior trajectories, raw saturation, updates, and parameter scaling.</p></div></section>
         <section class="diagnostics-grid flat-section">
           <article><div class="section-heading"><div><p class="eyebrow">FLAGS</p><h3>Likely failure modes</h3></div></div><div id="diagnostics-flags" class="diagnostic-list"><p class="empty-state">No flags yet.</p></div></article>
@@ -303,6 +396,8 @@
         <div id="live-workspace-host"></div>
       </section>
     </main>
-    <script src="app.js?v=20260818"></script>
+    <script src="ui.js?v=20260819"></script>
+    <script src="ecology.js?v=20260819"></script>
+    <script src="app.js?v=20260819"></script>
   </body>
 </html>

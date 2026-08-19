@@ -251,9 +251,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Run stopped safely; latest checkpoint: {output / 'checkpoint.json'}", flush=True)
         return 143
     report.update({"architecture": asdict(architecture), "edge_architecture": asdict(edge_architecture), "initialization": initialization, "task_config": task_config})
-    output.mkdir(parents=True, exist_ok=True)
+    report = runtime.write_embodied_report(run_id, report)
     report_path = output / "report.json"
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
     curves_path = output / "training_curves.txt"
     write_plot_table(
         curves_path, embodied_plot_rows(report, progress_events),

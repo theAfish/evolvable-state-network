@@ -11,8 +11,7 @@ import json
 from copy import deepcopy
 from pathlib import Path
 from random import Random
-from threading import Event, Lock
-from time import sleep
+from threading import Lock
 from uuid import uuid4
 
 from ..evolution.asynchronous import (
@@ -34,20 +33,55 @@ from ..simulation import Simulation, SimulationConfig, TransitionDiagnostics
 from ..embodied import EmbodiedNetworkConfig
 from ..environments import FoodWebConfig
 from ..tasks import EmbodiedFoodWebTaskConfig, FoodWebCoevolutionEvaluator, FoodWebDemonstration
+from .artifacts import write_json_atomically
+from .jobs import JobRegistry
 from .models import EmbodiedDemoPayload, LiveSessionPayload
+
+
+_MAX_PERSISTED_EMBODIED_HISTORY_RECORDS = 128
+
+
+def _sample_embodied_history(history: list[object]) -> list[object]:
+    """Keep a bounded, evenly distributed history including both endpoints."""
+    if len(history) <= _MAX_PERSISTED_EMBODIED_HISTORY_RECORDS:
+        return list(history)
+    last = len(history) - 1
+    indices = {
+        round(index * last / (_MAX_PERSISTED_EMBODIED_HISTORY_RECORDS - 1))
+        for index in range(_MAX_PERSISTED_EMBODIED_HISTORY_RECORDS)
+    }
+    return [history[index] for index in sorted(indices)]
+
+
+def _compact_embodied_report(report: dict[str, object]) -> dict[str, object]:
+    """Bound persisted training history while retaining a representative curve."""
+    document = dict(report)
+    history = document.get("history")
+    if not isinstance(history, list):
+        return document
+    retained = _sample_embodied_history(history)
+    document.update({
+        "history": retained,
+        "history_total_records": len(history),
+        "history_retained_records": len(retained),
+        "history_sampling": {
+            "strategy": "uniform_including_endpoints",
+            "max_records": _MAX_PERSISTED_EMBODIED_HISTORY_RECORDS,
+        },
+    })
+    return document
 
 
 class ApplicationRuntime:
     def __init__(self, root: Path) -> None:
         self.root = root
-        self.jobs: dict[str, dict[str, object]] = {}
-        self.jobs_lock = Lock()
-        self.job_termination_events: dict[str, Event] = {}
+        self.job_registry = JobRegistry()
         self.live_sessions: dict[str, dict[str, object]] = {}
         self.live_lock = Lock()
         self.embodied_sessions: dict[str, FoodWebDemonstration] = {}
         self.embodied_lock = Lock()
         self.embodied_checkpoint_lock = Lock()
+        self.embodied_report_lock = Lock()
 
     def ensure_root(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
@@ -66,16 +100,24 @@ class ApplicationRuntime:
             if not directory.is_dir() or not (report_path.is_file() or checkpoint_path.is_file()):
                 continue
             try:
-                completed = report_path.is_file()
-                path = report_path if completed else checkpoint_path
-                # A writer replaces checkpoints atomically, but sharing its
-                # lock also prevents a Windows reader from briefly blocking a
-                # replacement while a debug demo is being started.
-                if completed:
-                    report = json.loads(path.read_text(encoding="utf-8"))
-                else:
+                completed = False
+                report: dict[str, object] | None = None
+                if report_path.is_file():
+                    try:
+                        report = json.loads(report_path.read_text(encoding="utf-8"))
+                        completed = True
+                    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                        # A damaged completed report must not hide the most
+                        # recent valid checkpoint.
+                        report = None
+                if report is None and checkpoint_path.is_file():
+                    # A writer replaces checkpoints atomically, but sharing its
+                    # lock also prevents a Windows reader from briefly blocking a
+                    # replacement while a debug demo is being started.
                     with self.embodied_checkpoint_lock:
-                        report = json.loads(path.read_text(encoding="utf-8"))
+                        report = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+                if report is None:
+                    continue
                 if report.get("task_config", {}).get("embodied_interface") != "ray_image_v3_sparse_multichannel_v1":
                     continue
                 mode = report.get("training_mode", report.get("task_config", {}).get("training_mode", "continuous"))
@@ -98,10 +140,14 @@ class ApplicationRuntime:
         if root not in directory.parents:
             raise ValueError("selected embodied run is unavailable")
         if report_path.is_file():
-            report = json.loads(report_path.read_text(encoding="utf-8"))
-            if report.get("task_config", {}).get("embodied_interface") != "ray_image_v3_sparse_multichannel_v1":
-                raise ValueError("selected run uses the removed legacy embodied interface")
-            return report, "completed_report"
+            try:
+                report = json.loads(report_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                report = None
+            if report is not None:
+                if report.get("task_config", {}).get("embodied_interface") != "ray_image_v3_sparse_multichannel_v1":
+                    raise ValueError("selected run uses the removed legacy embodied interface")
+                return report, "completed_report"
         with self.embodied_checkpoint_lock:
             if not checkpoint_path.is_file():
                 raise ValueError("selected embodied run is unavailable")
@@ -122,26 +168,19 @@ class ApplicationRuntime:
         directory = self.root / "embodied_runs" / job_id
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / "checkpoint.json"
-        # Windows denies a replacement while an antivirus scanner or artifact
-        # reader briefly holds the previous checkpoint open.  A unique temporary
-        # name prevents writers from trampling one another; the lock and short
-        # retry window make the final atomic replacement reliable.
-        temporary = directory / f"checkpoint.{uuid4().hex}.json.tmp"
-        with self.embodied_checkpoint_lock:
-            temporary.write_text(json.dumps(checkpoint, indent=2, sort_keys=True), encoding="utf-8")
-            try:
-                for attempt in range(6):
-                    try:
-                        temporary.replace(path)
-                        break
-                    except PermissionError:
-                        if attempt == 5:
-                            raise
-                        sleep(.05 * (attempt + 1))
-            finally:
-                if temporary.exists():
-                    temporary.unlink()
+        write_json_atomically(path, checkpoint, lock=self.embodied_checkpoint_lock)
         return self.artifact_url(path)
+
+    def write_embodied_report(self, run_id: str, report: dict[str, object]) -> dict[str, object]:
+        """Atomically persist a compact completed embodied-evolution report."""
+        if not run_id or any(not (character.isalnum() or character in "_-") for character in run_id):
+            raise ValueError("invalid embodied run identifier")
+        document = _compact_embodied_report(report)
+        directory = self.root / "embodied_runs" / run_id
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / "report.json"
+        write_json_atomically(path, document, lock=self.embodied_report_lock)
+        return document
 
     def create_embodied_session(self, payload: EmbodiedDemoPayload) -> dict[str, object]:
         report, model_source = self._load_embodied_document(payload.run_id)
@@ -208,41 +247,17 @@ class ApplicationRuntime:
             return {"session_id": session_id, **session.individual_snapshot(individual_id)}
 
     def update_job(self, job_id: str, event: dict[str, object]) -> None:
-        with self.jobs_lock:
-            job = self.jobs[job_id]
-            phase = str(event.get("phase", "running"))
-            job["phase"] = phase
-            if phase == "smoke":
-                job["samples"].append(event)
-            elif phase == "generation":
-                job["generations"].append(event)
-            else:
-                job["latest"] = event
+        self.job_registry.publish(job_id, event)
 
     def job_snapshot(self, job_id: str) -> dict[str, object]:
-        with self.jobs_lock:
-            job = self.jobs.get(job_id)
-            if job is None:
-                raise KeyError(job_id)
-            return dict(job)
+        return self.job_registry.snapshot(job_id)
 
     def request_job_termination(self, job_id: str, *, kind: str) -> bool:
         """Request cooperative termination for a currently running job."""
-        with self.jobs_lock:
-            job = self.jobs.get(job_id)
-            if job is None or job["kind"] != kind:
-                raise KeyError(job_id)
-            if job["status"] != "running":
-                return False
-            job["termination_requested"] = True
-            job["phase"] = "termination_requested"
-            self.job_termination_events[job_id].set()
-            return True
+        return self.job_registry.request_termination(job_id, kind=kind)
 
     def job_termination_requested(self, job_id: str) -> bool:
-        with self.jobs_lock:
-            event = self.job_termination_events.get(job_id)
-            return event.is_set() if event is not None else False
+        return self.job_registry.termination_requested(job_id)
 
     def async_run_summary(self, run_directory: Path) -> dict[str, object]:
         report_path = run_directory / "diagnostic_report.json"
@@ -694,38 +709,13 @@ class ApplicationRuntime:
             return self.live_snapshot(session)
 
     def new_job(self, kind: str, seed: int, total: int | None) -> str:
-        job_id = uuid4().hex
-        with self.jobs_lock:
-            self.jobs[job_id] = {
-                "id": job_id,
-                "kind": kind,
-                "status": "running",
-                "phase": "queued",
-                "seed": seed,
-                "samples_total": total,
-                "samples": [],
-                "generations": [],
-                "latest": {},
-                "result": None,
-                "termination_requested": False,
-            }
-            self.job_termination_events[job_id] = Event()
-        return job_id
+        return self.job_registry.create(kind, seed, total)
 
     def finish_job(self, job_id: str, result: dict[str, object]) -> None:
-        with self.jobs_lock:
-            self.jobs[job_id].update(
-                {"status": "complete", "phase": "complete", "result": result}
-            )
+        self.job_registry.finish(job_id, result)
 
     def fail_job(self, job_id: str, error: Exception) -> None:
-        with self.jobs_lock:
-            self.jobs[job_id].update(
-                {"status": "failed", "phase": "failed", "error": str(error)}
-            )
+        self.job_registry.fail(job_id, error)
 
     def terminate_job(self, job_id: str) -> None:
-        with self.jobs_lock:
-            self.jobs[job_id].update(
-                {"status": "terminated", "phase": "terminated", "termination_requested": True}
-            )
+        self.job_registry.terminate(job_id)

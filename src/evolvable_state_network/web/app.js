@@ -1,21 +1,29 @@
 (() => {
   'use strict';
-  const $ = (id) => document.getElementById(id);
+  const {
+    byId: $,
+    createSvgElement: element,
+    formatNumber: number,
+    apiError,
+    statCard,
+    definitionRows,
+  } = window.StateNetworkUI;
+  const {
+    HistoryBuffer,
+    NetworkView,
+    drawNodeHistoryChart,
+    nearestOrganism,
+  } = window.StateNetworkEcology;
   const ui = {
     run: $('run-select'), batch: $('batch-select'), coordinate: $('coordinate-select'), rate: $('rate-select'), slider: $('frame-slider'), label: $('frame-label'), play: $('play'), prev: $('previous'), next: $('next'), loop: $('loop'), svg: $('network'), status: $('load-status'), file: $('file-input'), frameInfo: $('frame-info'), selection: $('selection-info'), metrics: $('metrics'), events: $('events'),
     liveForm: $('live-form'), liveModel: $('live-model-select'), liveModelDetail: $('live-model-detail'), liveRefresh: $('refresh-live-models'), liveStatus: $('live-status'), livePlay: $('live-play'), liveStep: $('live-step'), liveRate: $('live-rate'), liveLabel: $('live-frame-label'), workspace: $('shared-workspace'), replayHost: $('replay-workspace-host'), liveHost: $('live-workspace-host'),
     asyncForm: $('async-form'), asyncSeed: $('async-seed'), asyncRun: $('async-run'), asyncDiagnostic: $('async-diagnostic'), asyncRefresh: $('async-refresh'), asyncStatus: $('async-status'), asyncProgress: $('async-progress'), asyncProgressLabel: $('async-progress-label'), asyncMetrics: $('async-metrics'), asyncValidation: $('async-validation'), asyncSlots: $('async-slots'), asyncCauses: $('async-causes'), asyncCurriculum: $('async-curriculum'), asyncCurriculumCopy: $('async-curriculum-copy'), asyncCandidates: $('async-candidates'), asyncDetail: $('async-detail'), asyncArtifacts: $('async-artifacts'), asyncLearningState: $('async-learning-state'), asyncLearningCopy: $('async-learning-copy'), asyncRunFacts: $('async-run-facts'), asyncEstimate: $('async-work-estimate'), asyncCandidateBudget: $('async-candidates-budget'), asyncSlotsInput: $('async-slots-input'), asyncReplicasInput: $('async-replicas-input'), asyncStablePopulation: $('async-stable-population'), asyncBatchInput: $('async-batch-input'), asyncStateWidth: $('async-state-width'), asyncInitialStateScale: $('async-initial-state-scale'), asyncTicksInput: $('async-ticks-input'), networkForm: $('network-form'), networkNodeLayers: $('network-node-layers'), networkNodeActivation: $('network-node-activation'), networkEdgeLayers: $('network-edge-layers'), networkEdgeActivation: $('network-edge-activation'), networkEdgeLatentWidth: $('network-edge-latent-width'), networkSummary: $('network-summary'),
     embodiedForm: $('embodied-form'), embodiedModel: $('embodied-model'), embodiedContinueRun: $('embodied-continue-run'), embodiedRefresh: $('embodied-refresh'), embodiedAlgorithm: $('embodied-algorithm'), embodiedTrainingMode: $('embodied-training-mode'), embodiedBatchPopulationMode: $('embodied-batch-population-mode'), embodiedExecutionBackend: $('embodied-execution-backend'), embodiedDevice: $('embodied-device'), embodiedWorkers: $('embodied-workers'), embodiedPopulation: $('embodied-population'), embodiedMutationSigma: $('embodied-mutation-sigma'), embodiedEliteFraction: $('embodied-elite-fraction'), embodiedLocalMutationSigma: $('embodied-local-mutation-sigma'), embodiedRegionalFraction: $('embodied-regional-fraction'), embodiedRegionalScale: $('embodied-regional-scale'), embodiedRegionalMinStd: $('embodied-regional-min-std'), embodiedGlobalFraction: $('embodied-global-fraction'), embodiedGlobalParameterRange: $('embodied-global-parameter-range'), embodiedGlobalViabilityFilter: $('embodied-global-viability-filter'), embodiedGlobalMaxAttempts: $('embodied-global-max-attempts'), embodiedGaComposition: $('embodied-ga-composition'), embodiedImmigrantFraction: $('embodied-immigrant-fraction'), embodiedImmigrantMode: $('embodied-immigrant-mode'), embodiedImmigrantSigma: $('embodied-immigrant-sigma'), embodiedMaxGenomeNorm: $('embodied-max-genome-norm'), embodiedMaxParameterMagnitude: $('embodied-max-parameter-magnitude'), embodiedTicks: $('embodied-ticks'), embodiedBatchGenerations: $('embodied-batch-generations'), embodiedBatchSteps: $('embodied-batch-steps'), embodiedHorizonSuggestion: $('embodied-horizon-suggestion'), embodiedBatchTrials: $('embodied-batch-trials'), embodiedBatchValidationTrials: $('embodied-batch-validation-trials'), embodiedBatchTestTrials: $('embodied-batch-test-trials'), embodiedBatchOpponents: $('embodied-batch-opponents'), embodiedPreyCount: $('embodied-prey-count'), embodiedPredatorCount: $('embodied-predator-count'), embodiedMaxFood: $('embodied-max-food'), embodiedFoodGrowthRate: $('embodied-food-growth-rate'), embodiedMaxSpeed: $('embodied-max-speed'), embodiedMaxTurn: $('embodied-max-turn'), embodiedPlantClusters: $('embodied-plant-clusters'), embodiedPlantClusterRadius: $('embodied-plant-cluster-radius'), embodiedNodes: $('embodied-nodes'), embodiedStateWidth: $('embodied-state-width'), embodiedDegree: $('embodied-degree'), embodiedAllowInputOutputConnections: $('embodied-allow-input-output-connections'), embodiedStateScale: $('embodied-state-scale'), embodiedNetworkDt: $('embodied-network-dt'), embodiedRuleOutputScale: $('embodied-rule-output-scale'), embodiedMaxDelta: $('embodied-max-delta'), embodiedEdgeStepScale: $('embodied-edge-step-scale'), embodiedEnergyScale: $('embodied-energy-scale'), embodiedSurvivalPressure: $('embodied-survival-pressure'), embodiedSeed: $('embodied-seed'), embodiedRun: $('embodied-run'), embodiedTerminate: $('embodied-terminate'), embodiedStatus: $('embodied-status'), embodiedProgress: $('embodied-progress'), embodiedResult: $('embodied-result'), embodiedDeathsChart: $('embodied-deaths-chart'), embodiedMealsChart: $('embodied-meals-chart'), embodiedChartOneLabel: $('embodied-chart-one-label'), embodiedChartTwoLabel: $('embodied-chart-two-label'),
-    demoForm: $('demo-form'), demoRun: $('demo-run'), demoRefresh: $('demo-refresh'), demoSeed: $('demo-seed'), demoHiddenNodes: $('demo-hidden-nodes'), demoNetworkDegree: $('demo-network-degree'), demoPreyCount: $('demo-prey-count'), demoPredatorCount: $('demo-predator-count'), demoInitialFood: $('demo-initial-food'), demoMaxFood: $('demo-max-food'), demoFoodGrowthRate: $('demo-food-growth-rate'), demoRate: $('demo-rate'), demoStart: $('demo-start'), demoStatus: $('demo-status'), demoPlay: $('demo-play'), demoStep: $('demo-step'), demoRecord: $('demo-record'), demoLabel: $('demo-label'), demoCanvas: $('ecology-canvas'), demoEvents: $('demo-events'), demoNetwork: $('demo-network'), demoColorChannel: $('demo-color-channel'), demoChannel: $('demo-channel'), demoNodeChart: $('demo-node-chart'), demoIndividualTitle: $('demo-individual-title'), demoIndividualSummary: $('demo-individual-summary'),
-    diagnosticsForm: $('diagnostics-form'), diagnosticsRunId: $('diagnostics-run-id'), diagnosticsLoadServer: $('diagnostics-load-server'), diagnosticsReportFile: $('diagnostics-report-file'), diagnosticsCheckpointFile: $('diagnostics-checkpoint-file'), diagnosticsLoadFiles: $('diagnostics-load-files'), diagnosticsSampleCount: $('diagnostics-sample-count'), diagnosticsSeed: $('diagnostics-seed'), diagnosticsRunRandomGraphs: $('diagnostics-run-random-graphs'), diagnosticsCompareLeft: $('diagnostics-compare-left'), diagnosticsCompareRight: $('diagnostics-compare-right'), diagnosticsEvaluationSamples: $('diagnostics-evaluation-samples'), diagnosticsParameterScales: $('diagnostics-parameter-scales'), diagnosticsCompareRuns: $('diagnostics-compare-runs'), diagnosticsStatus: $('diagnostics-status'), diagnosticsTitle: $('diagnostics-title'), diagnosticsCopy: $('diagnostics-copy'), diagnosticsSummary: $('diagnostics-summary'), diagnosticsRandomGraphs: $('diagnostics-random-graphs'), diagnosticsComparison: $('diagnostics-comparison'), diagnosticsFlags: $('diagnostics-flags'), diagnosticsCoverage: $('diagnostics-coverage'), diagnosticsSpecies: $('diagnostics-species')
+    demoForm: $('demo-form'), demoRun: $('demo-run'), demoRefresh: $('demo-refresh'), demoSeed: $('demo-seed'), demoHiddenNodes: $('demo-hidden-nodes'), demoNetworkDegree: $('demo-network-degree'), demoPreyCount: $('demo-prey-count'), demoPredatorCount: $('demo-predator-count'), demoInitialFood: $('demo-initial-food'), demoMaxFood: $('demo-max-food'), demoFoodGrowthRate: $('demo-food-growth-rate'), demoRate: $('demo-rate'), demoStart: $('demo-start'), demoStatus: $('demo-status'), demoPlay: $('demo-play'), demoStep: $('demo-step'), demoRecord: $('demo-record'), demoLabel: $('demo-label'), demoCanvas: $('ecology-canvas'), demoEvents: $('demo-events'), demoTick: $('demo-tick'), demoPreyLive: $('demo-prey-live'), demoPredatorLive: $('demo-predator-live'), demoPlantsLive: $('demo-plants-live'), demoNetwork: $('demo-network'), demoColorChannel: $('demo-color-channel'), demoEdgeThreshold: $('demo-edge-threshold'), demoNetworkSummary: $('demo-network-summary'), demoChannel: $('demo-channel'), demoSeriesCount: $('demo-series-count'), demoNodeChart: $('demo-node-chart'), demoNodeLegend: $('demo-node-legend'), demoIndividualTitle: $('demo-individual-title'), demoIndividualSummary: $('demo-individual-summary'),
+    diagnosticsForm: $('diagnostics-form'), diagnosticsRunId: $('diagnostics-run-id'), diagnosticsLoadServer: $('diagnostics-load-server'), diagnosticsReportFile: $('diagnostics-report-file'), diagnosticsCheckpointFile: $('diagnostics-checkpoint-file'), diagnosticsLoadFiles: $('diagnostics-load-files'), diagnosticsSampleCount: $('diagnostics-sample-count'), diagnosticsSeed: $('diagnostics-seed'), diagnosticsRunRandomGraphs: $('diagnostics-run-random-graphs'), diagnosticsCoupledEpisodes: $('diagnostics-coupled-episodes'), diagnosticsCoupledSteps: $('diagnostics-coupled-steps'), diagnosticsCoupledChannelX: $('diagnostics-coupled-channel-x'), diagnosticsCoupledChannelY: $('diagnostics-coupled-channel-y'), diagnosticsRunCoupledState: $('diagnostics-run-coupled-state'), diagnosticsCoupledCondition: $('diagnostics-coupled-condition'), diagnosticsCoupledField: $('diagnostics-coupled-field'), diagnosticsCoupledCopy: $('diagnostics-coupled-copy'), diagnosticsCoupledSummary: $('diagnostics-coupled-summary'), diagnosticsCompareLeft: $('diagnostics-compare-left'), diagnosticsCompareRight: $('diagnostics-compare-right'), diagnosticsEvaluationSamples: $('diagnostics-evaluation-samples'), diagnosticsParameterScales: $('diagnostics-parameter-scales'), diagnosticsCompareRuns: $('diagnostics-compare-runs'), diagnosticsStatus: $('diagnostics-status'), diagnosticsTitle: $('diagnostics-title'), diagnosticsCopy: $('diagnostics-copy'), diagnosticsSummary: $('diagnostics-summary'), diagnosticsRandomGraphs: $('diagnostics-random-graphs'), diagnosticsComparison: $('diagnostics-comparison'), diagnosticsFlags: $('diagnostics-flags'), diagnosticsCoverage: $('diagnostics-coverage'), diagnosticsSpecies: $('diagnostics-species')
   };
-  const state = { data: null, runName: '', frame: 0, batch: 0, coordinate: 0, selected: null, playing: false, lastTick: 0, layout: [], job: null, jobTimer: null, live: null, liveModels: [], demo: null, demoLastTick: 0, demoIndividual: null, demoHistory: [], demoRecorder: null, demoRecordingChunks: [], embodiedCheckpointVersion: '', embodiedJobId: '', embodiedModelWidths: {}, embodiedRunWidths: {} };
-  const NS = 'http://www.w3.org/2000/svg';
-  const element = (tag, attrs = {}) => { const node = document.createElementNS(NS, tag); Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value)); return node; };
-  const number = (value) => Number.isFinite(value) ? Number(value).toFixed(5) : '—';
-  const apiError = (data, fallback) => Array.isArray(data?.detail)
-    ? data.detail.map((item) => item.msg).join('; ')
-    : (data?.detail || data?.error || fallback);
+  const state = { data: null, runName: '', frame: 0, batch: 0, coordinate: 0, selected: null, playing: false, lastTick: 0, layout: [], job: null, jobTimer: null, live: null, liveModels: [], demo: null, demoLastTick: 0, demoIndividual: null, demoHistory: new HistoryBuffer(360), demoRecorder: null, demoRecordingChunks: [], embodiedCheckpointVersion: '', embodiedJobId: '', embodiedModelWidths: {}, embodiedRunWidths: {}, coupledDiagnostic: null };
+  const demoNetworkView = new NetworkView(ui.demoNetwork);
   const viewTitles = {
     survival: 'Survival training', network: 'Network architecture',
     embodied: 'Embodied learning',
@@ -101,7 +109,6 @@
   function activeRun() { return state.data.runs[state.runName]; }
   function trajectory() { return activeRun().trajectory; }
   function refreshSelectors() { const first = trajectory().node_states[0]; ui.batch.replaceChildren(...first.map((_, index) => new Option(`batch ${index}`, index))); ui.coordinate.replaceChildren(...first[0][0].map((_, index) => new Option(`coordinate ${index}`, index))); ui.slider.max = String(trajectory().steps.length - 1); ui.slider.value = String(state.frame); }
-  function statCard(label, value) { const card = document.createElement('article'); card.className = 'stat'; const title = document.createElement('span'); title.textContent = label; const result = document.createElement('strong'); result.textContent = value; card.append(title, result); return card; }
   function nodePositions(count, edges) {
     if (count === 1) return [{x:360, y:280}]; const columns = Math.ceil(Math.sqrt(count * 1.25)), rows = Math.ceil(count / columns), left = 70, right = 650, top = 64, bottom = 500;
     const anchors = Array.from({length: count}, (_, index) => ({x: left + (index % columns) * (right - left) / Math.max(1, columns - 1), y: top + Math.floor(index / columns) * (bottom - top) / Math.max(1, rows - 1)})); const points = anchors.map((point) => ({...point}));
@@ -113,7 +120,7 @@
   function color(value, scale) { const t = Math.min(1, Math.abs(value) / scale), base = value >= 0 ? [250,130,103] : [90,169,255], mix = base.map((item) => Math.round(198 + (item - 198) * t)); return `rgb(${mix.join(',')})`; }
   function strengths(trace) { return trace.effective_edge_strengths?.[state.frame]?.[state.batch] ?? []; }
   function update() { if (!state.data) return; const trace = trajectory(), values = currentValues(), scale = Math.max(.15, ...values.map(Math.abs)), edgeStrengths = strengths(trace); ui.slider.value = String(state.frame); ui.label.value = `step ${trace.steps[state.frame]} | t=${Number(trace.times[state.frame]).toFixed(3)}`; ui.svg.querySelectorAll('.node').forEach((node, index) => { const value = values[index]; node.setAttribute('r', '12'); node.setAttribute('fill', color(value, scale)); node.classList.toggle('selected', state.selected?.kind === 'node' && state.selected.index === index); }); ui.svg.querySelectorAll('.edge').forEach((line, index) => { const baseWeight = state.data.graph.edges[index].weight, strength = edgeStrengths[index] ?? 1, effectiveWeight = baseWeight * strength; line.setAttribute('stroke', effectiveWeight >= 0 ? '#f39b72' : '#6daafa'); line.setAttribute('stroke-width', String(.7 + Math.min(3.6, Math.abs(effectiveWeight) * 2.5))); line.setAttribute('opacity', String(.10 + Math.min(.80, Math.abs(effectiveWeight)))); line.classList.toggle('selected', state.selected?.kind === 'edge' && state.selected.index === index); }); updateDiagnostics(values); updateSelection(values); updateMetrics(); updateEvents(); }
-  function updateDiagnostics(values) { const trace = trajectory(), frame = trace.node_states[state.frame][state.batch], effectiveStrengths = strengths(trace), finite = values.every(Number.isFinite), magnitude = values.reduce((sum, value) => sum + Math.abs(value), 0) / values.length, config = state.data.simulation_config || {}; const rows = [['run', state.runName], ['recorded frame', `${state.frame + 1} / ${trace.steps.length}`], ['integration dt', config.dt ?? 'not recorded'], ['state vector width', frame[0].length], ['mean |selected coordinate|', magnitude.toFixed(5)], ['all finite', finite ? 'yes' : 'NO'], ['edge-state width', trace.edge_states[state.frame]?.[state.batch]?.[0]?.length ?? 0], ['mean communication strength', effectiveStrengths.length ? (effectiveStrengths.reduce((sum, value) => sum + value, 0) / effectiveStrengths.length).toFixed(5) : 'fixed']]; ui.frameInfo.replaceChildren(...rows.flatMap(([term, value]) => { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = term; dd.textContent = value; return [dt, dd]; })); }
+  function updateDiagnostics(values) { const trace = trajectory(), frame = trace.node_states[state.frame][state.batch], effectiveStrengths = strengths(trace), finite = values.every(Number.isFinite), magnitude = values.reduce((sum, value) => sum + Math.abs(value), 0) / values.length, config = state.data.simulation_config || {}; const rows = [['run', state.runName], ['recorded frame', `${state.frame + 1} / ${trace.steps.length}`], ['integration dt', config.dt ?? 'not recorded'], ['state vector width', frame[0].length], ['mean |selected coordinate|', magnitude.toFixed(5)], ['all finite', finite ? 'yes' : 'NO'], ['edge-state width', trace.edge_states[state.frame]?.[state.batch]?.[0]?.length ?? 0], ['mean communication strength', effectiveStrengths.length ? (effectiveStrengths.reduce((sum, value) => sum + value, 0) / effectiveStrengths.length).toFixed(5) : 'fixed']]; ui.frameInfo.replaceChildren(...definitionRows(rows)); }
   function updateSelection(values) { if (!state.selected) { ui.selection.textContent = 'Select a node or edge.'; return; } const trace = trajectory(), item = state.selected, edgeStrengths = strengths(trace); if (item.kind === 'node') { const edges = state.data.graph.edges.map((edge, index) => ({edge, index})).filter(({edge}) => edge.source === item.index || edge.target === item.index).map(({edge,index}) => { const strength = edgeStrengths[index] ?? 1; return {edge:index, direction:edge.source === item.index ? 'out' : 'in', other:edge.source === item.index ? edge.target : edge.source, base_weight:+edge.weight.toFixed(5), communication_strength:+strength.toFixed(5), effective_weight:+(edge.weight * strength).toFixed(5)}; }); ui.selection.textContent = JSON.stringify({kind:'node', node:item.index, state:trace.node_states[state.frame][state.batch][item.index], external_input:trace.inputs[state.frame][state.batch][item.index], selected_coordinate:values[item.index], incident_edges:edges}, null, 2); } else { const edge = state.data.graph.edges[item.index], vector = trace.edge_states[state.frame]?.[state.batch]?.[item.index] ?? [], strength = edgeStrengths[item.index] ?? 1; ui.selection.textContent = JSON.stringify({kind:'edge', edge:item.index, source:edge.source, target:edge.target, base_weight:edge.weight, edge_state:vector, communication_strength:strength, effective_weight:edge.weight * strength, source_state:trace.node_states[state.frame][state.batch][edge.source], target_state:trace.node_states[state.frame][state.batch][edge.target]}, null, 2); } }
   function updateMetrics() { const metrics = activeRun().metrics; ui.metrics.replaceChildren(...Object.entries(metrics).map(([name, value]) => { const row = document.createElement('div'); row.className = 'metric'; const label = document.createElement('span'); label.textContent = name.replaceAll('_', ' '); const outcome = document.createElement('strong'); const status = value.bounded ?? value.non_silent ?? value.diverse ?? value.responsive ?? value.recovered; const pass = name === 'saturation' ? !value.saturated : status; outcome.textContent = pass === undefined ? JSON.stringify(value) : (pass ? 'pass' : 'flag'); row.append(label, outcome); return row; })); }
   function updateEvents() { const step = trajectory().steps[state.frame]; ui.events.replaceChildren(...trajectory().events.map((event) => { const entry = document.createElement('div'); entry.className = `event ${step >= event.start && step <= event.end + 1 ? 'active' : ''}`; entry.textContent = `${event.kind}: ${event.start}–${event.end}`; return entry; })); }
@@ -180,7 +187,7 @@
       ['minimum probe separation', Number(model.minimum_distinguishability).toExponential(3)],
       ['recovered in every replica', model.recovered_across_replicas ? 'yes' : 'no'],
     ];
-    const list = document.createElement('dl'); facts.forEach(([key, value]) => { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = key; dd.textContent = value; list.append(dt, dd); });
+    const list = document.createElement('dl'); list.append(...definitionRows(facts));
     ui.liveModelDetail.replaceChildren(intro, list);
   }
 
@@ -651,23 +658,18 @@
     } catch (error) { ui.demoStatus.textContent = `Could not load embodied runs: ${error.message}`; }
   }
   function drawDemoNetwork(network) {
-    // Preserve Live graph visual encoding, but arrange boundary nodes as a
-    // readable body interface: sensations at left, actions at right, and
-    // anonymous recurrent tissue in the centre.
-    const svg = ui.demoNetwork, width = 920, height = 560, channel = Number(ui.demoColorChannel.value) || 0, edges = network.edges.map((edge) => ({...edge, weight:1})), values = network.node_state.map((vector) => Number(vector[channel] || 0)), scale = Math.max(.15, ...values.map(Math.abs)), inputs = network.input_nodes, actions = network.action_nodes, hidden = Array.from({length:Number(network.nodes)}, (_, index) => index).filter((index) => !inputs.includes(index) && !actions.includes(index)), positions = Array(Number(network.nodes));
-    const spread = (items, x, top, bottom) => items.forEach((node, index) => { positions[node] = {x, y:items.length === 1 ? (top + bottom) / 2 : top + index * (bottom - top) / (items.length - 1)}; });
-    spread(inputs, 130, 62, height - 44); spread(actions, width - 130, 185, height - 185);
-    const columns = Math.max(1, Math.ceil(Math.sqrt(hidden.length * 1.25))), rows = Math.max(1, Math.ceil(hidden.length / columns)); hidden.forEach((node, index) => { positions[node] = {x:300 + (index % columns) * 320 / Math.max(1, columns - 1), y:74 + Math.floor(index / columns) * (height - 148) / Math.max(1, rows - 1)}; });
-    svg.replaceChildren();
-    const defs = element('defs'), marker = element('marker', {id:'demo-arrow', markerWidth:'7', markerHeight:'7', refX:'6', refY:'3.5', orient:'auto'}); marker.append(element('path', {d:'M0,0 L7,3.5 L0,7 z', fill:'#71809b'})); defs.append(marker); svg.append(defs);
-    const edgeLayer = element('g'), nodeLayer = element('g'); svg.append(edgeLayer, nodeLayer);
-    edges.forEach((edge, index) => { const from = positions[edge.source], to = positions[edge.target], strength = Number(network.edges[index].communication_strength ?? 1), line = element('line', {x1:from.x, y1:from.y, x2:to.x, y2:to.y, 'marker-end':'url(#demo-arrow)', class:'edge'}); line.setAttribute('stroke', strength >= 0 ? '#f39b72' : '#6daafa'); line.setAttribute('stroke-width', String(.7 + Math.min(3.6, Math.abs(strength) * 2.5))); line.setAttribute('opacity', String(.10 + Math.min(.80, Math.abs(strength)))); edgeLayer.append(line); });
-    positions.forEach((point, index) => { const group = element('g'), circle = element('circle', {cx:point.x, cy:point.y, r:'12', class:'node', fill:color(values[index], scale)}), label = element('text', {x:point.x, y:point.y + 4, class:'node-label'}); label.textContent = index; group.append(circle, label); nodeLayer.append(group); });
-    const inputLabels = demoInputLabels(network), actionLabels = ['turn (−1 left · +1 right)', 'throttle (0 stopped · 1 full)'];
-    const heading = (text, x, anchor) => { const item = element('text', {x, y:25, fill:'#63d5c2', 'font-size':'12', 'font-weight':'700', 'letter-spacing':'1.2', 'text-anchor':anchor}); item.textContent = text; svg.append(item); };
-    heading('SENSORY INPUTS', 18, 'start'); heading('ACTION OUTPUTS', width - 18, 'end');
-    inputs.forEach((node, index) => { const point = positions[node], text = element('text', {x:18, y:point.y + 4, fill:'#cbd6e8', 'font-size':'10', 'text-anchor':'start'}); const channel = network.input_signal_channels?.[index] ?? 0; text.textContent = `${inputLabels[index] || `input ${index}`} · ch ${channel}`; svg.append(text); });
-    actions.forEach((node, index) => { const point = positions[node], text = element('text', {x:width - 18, y:point.y + 4, fill:'#cbd6e8', 'font-size':'10', 'text-anchor':'end'}); text.textContent = actionLabels[index] || `action ${index}`; svg.append(text); });
+    const channel = Number(ui.demoColorChannel.value) || 0;
+    const edgeThreshold = Number(ui.demoEdgeThreshold.value) || 0;
+    demoNetworkView.render(network, {
+      channel,
+      edgeThreshold,
+      inputLabels: demoInputLabels(network),
+    });
+    const visibleEdges = network.edges.reduce(
+      (count, edge) => count + (Math.abs(Number(edge.communication_strength ?? 1)) >= edgeThreshold ? 1 : 0),
+      0,
+    );
+    ui.demoNetworkSummary.textContent = `${network.nodes} nodes · ${visibleEdges}/${network.edges.length} edges visible · state channel ${channel}`;
   }
   function demoInputLabels(network) {
     const names = {hunger:'hunger', energy_change:'energy change', ate:'ate last tick', time_since_meal:'time since meal'};
@@ -675,57 +677,277 @@
     return [...body, ...Array.from({length:network.vision_pixels || Math.max(0, Math.floor((network.input_nodes.length - 4) / 3))}, (_, pixel) => [`ray ${pixel + 1}: plant`, `ray ${pixel + 1}: prey`, `ray ${pixel + 1}: predator`]).flat()];
   }
   function drawDemoNodeChart() {
-    const canvas = ui.demoNodeChart, context = canvas.getContext('2d'), width = canvas.width, height = canvas.height, channel = Number(ui.demoChannel.value) || 0, history = state.demoHistory;
-    context.clearRect(0, 0, width, height); context.fillStyle = '#101621'; context.fillRect(0, 0, width, height);
-    if (!history.length) { context.fillStyle = '#9caac2'; context.font = '14px system-ui'; context.fillText('Select an organism to collect node-state history.', 22, 32); return; }
-    const values = history.flatMap((entry) => entry.node_state.map((vector) => Number(vector[channel] || 0))), scale = Math.max(.1, ...values.map((value) => Math.abs(value))) * 1.12, left = 45, right = width - 12, top = 16, bottom = height - 30, x = (index) => left + index / Math.max(1, history.length - 1) * (right - left), y = (value) => (top + bottom) / 2 - value / scale * (bottom - top) / 2;
-    context.strokeStyle = '#46566f'; context.lineWidth = 1; context.beginPath(); context.moveTo(left, y(0)); context.lineTo(right, y(0)); context.stroke(); context.fillStyle = '#9caac2'; context.font = '11px ui-monospace'; context.fillText(`+${scale.toFixed(2)}`, 4, top + 4); context.fillText('0', 26, y(0) + 4); context.fillText(`−${scale.toFixed(2)}`, 4, bottom);
-    const palette = ['#63d5c2','#f39b72','#6daafa','#d1a9ff','#e6cc72','#f47f96','#84c87b','#b1bfd8'];
-    history[history.length - 1].node_state.forEach((_, node) => { context.strokeStyle = palette[node % palette.length]; context.globalAlpha = .85; context.lineWidth = node < 3 ? 1.8 : 1; context.beginPath(); history.forEach((entry, index) => { const px = x(index), py = y(Number(entry.node_state[node]?.[channel] || 0)); if (index) context.lineTo(px, py); else context.moveTo(px, py); }); context.stroke(); }); context.globalAlpha = 1; context.fillStyle = '#cbd6e8'; context.fillText(`channel ${channel} · ${history.length} samples · one line per node`, left, height - 10);
+    const channel = Number(ui.demoChannel.value) || 0;
+    const seriesCount = Number(ui.demoSeriesCount.value) || 0;
+    const series = drawNodeHistoryChart(
+      ui.demoNodeChart,
+      state.demoHistory.toArray(),
+      { channel, seriesCount },
+    );
+    ui.demoNodeLegend.replaceChildren(...series.map((item) => {
+      const entry = document.createElement('span');
+      const swatch = document.createElement('i');
+      swatch.style.backgroundColor = item.color;
+      entry.append(swatch, document.createTextNode(`node ${item.node} · now ${item.current.toFixed(3)} · rms ${item.rms.toFixed(3)}`));
+      return entry;
+    }));
   }
   function renderDemoIndividual(snapshot) {
     const individual = snapshot.individual, network = snapshot.network;
+    if (state.demo?.lastNetwork && network.step < state.demo.lastNetwork.step) {
+      state.demoHistory.clear();
+      demoNetworkView.reset();
+    }
     state.demoIndividual = individual.id;
     if (state.demo) state.demo.lastNetwork = network;
-    const options = Array.from({length:network.state_width}, (_, index) => new Option(`channel ${index}`, String(index))), priorColour = ui.demoColorChannel.value, priorHistory = ui.demoChannel.value;
-    ui.demoColorChannel.replaceChildren(...options.map((option) => option.cloneNode(true))); ui.demoColorChannel.value = Number(priorColour) < network.state_width ? priorColour : '0'; ui.demoColorChannel.disabled = false;
-    ui.demoChannel.replaceChildren(...options); ui.demoChannel.value = Number(priorHistory) < network.state_width ? priorHistory : '0'; ui.demoChannel.disabled = false;
-    state.demoHistory.push({tick:snapshot.tick, node_state:network.node_state}); if (state.demoHistory.length > 360) state.demoHistory.shift();
+    if (ui.demoColorChannel.options.length !== network.state_width) {
+      const options = Array.from({length:network.state_width}, (_, index) => new Option(`channel ${index}`, String(index)));
+      const priorColour = ui.demoColorChannel.value;
+      const priorHistory = ui.demoChannel.value;
+      ui.demoColorChannel.replaceChildren(...options.map((option) => option.cloneNode(true)));
+      ui.demoColorChannel.value = Number(priorColour) < network.state_width ? priorColour : '0';
+      ui.demoChannel.replaceChildren(...options);
+      ui.demoChannel.value = Number(priorHistory) < network.state_width ? priorHistory : '0';
+    }
+    ui.demoColorChannel.disabled = false;
+    ui.demoChannel.disabled = false;
+    state.demoHistory.push({tick:snapshot.tick, node_state:network.node_state});
     ui.demoIndividualTitle.textContent = `${individual.species} ${individual.id} · ${network.nodes} nodes · ${network.edges.length} directed edges`;
     ui.demoIndividualSummary.textContent = `Network tick ${network.step}; ray vision occupies channel 0, body/interoceptive signals occupy channel 1, and all other input coordinates are zero. The colour and history controls are independent; history retains ${state.demoHistory.length} observed ecology ticks.`;
     drawDemoNetwork(network); drawDemoNodeChart();
   }
   async function refreshDemoIndividual(individualId = state.demoIndividual) {
     if (!state.demo || !individualId) return;
-    try { const response = await fetch(`/api/embodied/sessions/${state.demo.id}/individuals/${encodeURIComponent(individualId)}`), snapshot = await response.json(); if (!response.ok) throw new Error(apiError(snapshot, 'selected organism is unavailable')); renderDemoIndividual(snapshot); } catch (error) { if (individualId === state.demoIndividual) { state.demoIndividual = null; state.demoHistory = []; ui.demoIndividualTitle.textContent = 'Selected organism is no longer alive'; ui.demoIndividualSummary.textContent = 'Choose another organism to inspect its newly sampled network.'; ui.demoColorChannel.disabled = true; ui.demoChannel.disabled = true; ui.demoNetwork.replaceChildren(); drawDemoNodeChart(); } }
+    const now = performance.now();
+    if (state.demo.inspectionPending || now - (state.demo.lastInspectionAt || 0) < 100) return;
+    state.demo.inspectionPending = true;
+    state.demo.lastInspectionAt = now;
+    try {
+      const response = await fetch(`/api/embodied/sessions/${state.demo.id}/individuals/${encodeURIComponent(individualId)}`);
+      const snapshot = await response.json();
+      if (!response.ok) throw new Error(apiError(snapshot, 'selected organism is unavailable'));
+      if (individualId === state.demoIndividual) renderDemoIndividual(snapshot);
+    } catch (error) {
+      if (individualId === state.demoIndividual) {
+        state.demoIndividual = null;
+        state.demoHistory.clear();
+        demoNetworkView.reset();
+        ui.demoIndividualTitle.textContent = 'Selected organism is no longer alive';
+        ui.demoIndividualSummary.textContent = 'Choose another organism to inspect its newly sampled network.';
+        ui.demoColorChannel.disabled = true;
+        ui.demoChannel.disabled = true;
+        drawDemoNodeChart();
+      }
+    } finally {
+      if (state.demo) state.demo.inspectionPending = false;
+    }
   }
   function selectDemoIndividual(snapshot, event) {
-    const rect = ui.demoCanvas.getBoundingClientRect(), world = snapshot.state, px = (event.clientX - rect.left) / rect.width * ui.demoCanvas.width, py = (event.clientY - rect.top) / rect.height * ui.demoCanvas.height, x = (value) => value / world.bounds.width * ui.demoCanvas.width, y = (value) => ui.demoCanvas.height - value / world.bounds.height * ui.demoCanvas.height;
-    const chosen = world.organisms.map((organism) => ({organism, distance:Math.hypot(px - x(organism.x), py - y(organism.y))})).sort((left, right) => left.distance - right.distance)[0];
-    if (!chosen || chosen.distance > 28) return;
-    state.demoIndividual = chosen.organism.id; state.demoHistory = []; refreshDemoIndividual(chosen.organism.id);
+    const rect = ui.demoCanvas.getBoundingClientRect();
+    const world = snapshot.state;
+    const worldX = (event.clientX - rect.left) / rect.width * world.bounds.width;
+    const worldY = (1 - (event.clientY - rect.top) / rect.height) * world.bounds.height;
+    const chosen = nearestOrganism(world, worldX, worldY);
+    const hitRadius = 28 / ui.demoCanvas.width * world.bounds.width;
+    if (!chosen || chosen.distance > hitRadius) return;
+    if (state.demoIndividual !== chosen.organism.id) {
+      state.demoHistory.clear();
+      demoNetworkView.reset();
+      state.demo.lastInspectionAt = 0;
+    }
+    state.demoIndividual = chosen.organism.id;
+    refreshDemoIndividual(chosen.organism.id);
   }
   function drawDemo(snapshot) {
-    const context = ui.demoCanvas.getContext('2d'), width = ui.demoCanvas.width, height = ui.demoCanvas.height, world = snapshot.state, bounds = world.bounds;
-    context.clearRect(0, 0, width, height); context.fillStyle = '#101a24'; context.fillRect(0, 0, width, height);
-    const x = (value) => value / bounds.width * width, y = (value) => height - value / bounds.height * height;
-    world.plants.forEach((plant) => { context.fillStyle = '#74c365'; context.beginPath(); context.arc(x(plant.x), y(plant.y), Math.max(2, plant.radius * 3), 0, 2 * Math.PI); context.fill(); });
-    world.organisms.forEach((organism) => { const px = x(organism.x), py = y(organism.y), predator = organism.species === 'predator', radius = predator ? 9 : 7, selected = organism.id === state.demoIndividual; context.fillStyle = predator ? '#f39b72' : '#63d5c2'; context.beginPath(); context.arc(px, py, radius, 0, 2 * Math.PI); context.fill(); context.strokeStyle = selected ? '#fff2a8' : '#e9edf7'; context.lineWidth = selected ? 3 : 1.5; context.beginPath(); context.arc(px, py, radius + (selected ? 4 : 0), 0, 2 * Math.PI); context.stroke(); context.beginPath(); context.moveTo(px, py); context.lineTo(px + Math.cos(organism.heading) * radius * 1.6, py - Math.sin(organism.heading) * radius * 1.6); context.stroke(); context.fillStyle = '#cbd6e8'; context.font = '10px ui-monospace'; context.fillText(`${organism.id} e${organism.energy.toFixed(1)}`, px + radius + 3, py - radius - 2); });
-    context.fillStyle = '#9caac2'; context.font = '12px system-ui'; context.fillText('green = plant · cyan = prey · orange = predator · line = heading', 12, 20);
-    ui.demoLabel.textContent = `world tick ${snapshot.tick} · prey ${world.population.prey} · predators ${world.population.predator} · plants ${world.plants.length}`;
-    const events = snapshot.events || {}; ui.demoEvents.textContent = `Click an organism to inspect its network · births: ${(events.births || []).join(', ') || 'none'} · deaths: ${(events.deaths || []).join(', ') || 'none'} · meals: ${(events.meals || []).map((meal) => `${meal.species}:${Number(meal.interval).toFixed(2)}s`).join(', ') || 'none'}`;
+    const context = ui.demoCanvas.getContext('2d');
+    const width = ui.demoCanvas.width;
+    const height = ui.demoCanvas.height;
+    const world = snapshot.state;
+    const bounds = world.bounds;
+    const x = (value) => value / bounds.width * width;
+    const y = (value) => height - value / bounds.height * height;
+
+    context.clearRect(0, 0, width, height);
+    context.fillStyle = '#09131a';
+    context.fillRect(0, 0, width, height);
+    context.strokeStyle = '#17303a';
+    context.lineWidth = 1;
+    for (let grid = 1; grid < 10; grid += 1) {
+      const px = grid * width / 10;
+      const py = grid * height / 10;
+      context.beginPath();
+      context.moveTo(px, 0); context.lineTo(px, height);
+      context.moveTo(0, py); context.lineTo(width, py);
+      context.stroke();
+    }
+
+    context.fillStyle = '#75c96b';
+    context.beginPath();
+    world.plants.forEach((plant) => {
+      const radius = Math.max(2, plant.radius * 3);
+      context.moveTo(x(plant.x) + radius, y(plant.y));
+      context.arc(x(plant.x), y(plant.y), radius, 0, 2 * Math.PI);
+    });
+    context.fill();
+
+    world.organisms.forEach((organism) => {
+      const px = x(organism.x);
+      const py = y(organism.y);
+      const predator = organism.species === 'predator';
+      const radius = predator ? 10 : 7;
+      const selected = organism.id === state.demoIndividual;
+      context.save();
+      context.translate(px, py);
+      context.rotate(-organism.heading);
+      context.fillStyle = predator ? '#ff966c' : '#5fd9c1';
+      context.strokeStyle = selected ? '#fff0a3' : '#dce7ed';
+      context.lineWidth = selected ? 3 : 1.3;
+      context.beginPath();
+      if (predator) {
+        context.moveTo(radius * 1.4, 0);
+        context.lineTo(-radius, radius * 0.85);
+        context.lineTo(-radius * 0.55, 0);
+        context.lineTo(-radius, -radius * 0.85);
+        context.closePath();
+      } else {
+        context.arc(0, 0, radius, 0, 2 * Math.PI);
+        context.moveTo(0, 0);
+        context.lineTo(radius * 1.7, 0);
+      }
+      context.fill();
+      context.stroke();
+      if (selected) {
+        context.beginPath();
+        context.arc(0, 0, radius + 6, 0, 2 * Math.PI);
+        context.stroke();
+      }
+      context.restore();
+      if (selected) {
+        const label = `${organism.id} · energy ${organism.energy.toFixed(1)}`;
+        context.font = '11px ui-monospace';
+        const labelWidth = context.measureText(label).width + 14;
+        context.fillStyle = '#09131add';
+        context.fillRect(px + 13, py - 25, labelWidth, 20);
+        context.fillStyle = '#fff4bf';
+        context.fillText(label, px + 20, py - 11);
+      }
+    });
+
+    context.fillStyle = '#09131acc';
+    context.fillRect(0, height - 31, width, 31);
+    context.fillStyle = '#93a6b6';
+    context.font = '12px system-ui';
+    context.fillText('● plant', 14, height - 11);
+    context.fillStyle = '#5fd9c1'; context.fillText('● prey', 92, height - 11);
+    context.fillStyle = '#ff966c'; context.fillText('▲ predator', 166, height - 11);
+    context.fillStyle = '#93a6b6'; context.fillText('click an organism to inspect its live network', 270, height - 11);
+
+    ui.demoTick.textContent = String(snapshot.tick);
+    ui.demoPreyLive.textContent = String(world.population.prey);
+    ui.demoPredatorLive.textContent = String(world.population.predator);
+    ui.demoPlantsLive.textContent = String(world.plants.length);
+    ui.demoLabel.textContent = `tick ${snapshot.tick} · ${world.organisms.length} organisms · ${world.plants.length}/${world.plant_capacity} plants`;
+    const events = snapshot.events || {};
+    const eventRows = [
+      ['Births', (events.births || []).join(', ') || 'None'],
+      ['Deaths', (events.deaths || []).join(', ') || 'None'],
+      ['Meals', (events.meals || []).map((meal) => `${meal.species} · ${Number(meal.interval).toFixed(2)}s`).join(', ') || 'None'],
+    ];
+    ui.demoEvents.replaceChildren(...eventRows.map(([label, value]) => {
+      const row = document.createElement('div');
+      const title = document.createElement('span');
+      const detail = document.createElement('strong');
+      title.textContent = label;
+      detail.textContent = value;
+      row.append(title, detail);
+      return row;
+    }));
     if (state.demo) state.demo.snapshot = snapshot;
   }
   async function advanceDemo(ticks = 1) {
     if (!state.demo || state.demo.pending) return;
     state.demo.pending = true;
-    try { const response = await fetch(`/api/embodied/sessions/${state.demo.id}/step`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ticks})}), snapshot = await response.json(); if (!response.ok) throw new Error(apiError(snapshot, 'demo update failed')); drawDemo(snapshot); if (state.demoIndividual) refreshDemoIndividual(); } catch (error) { state.demo.playing = false; ui.demoPlay.textContent = 'Play'; ui.demoStatus.textContent = `Demo update failed: ${error.message}`; } finally { if (state.demo) state.demo.pending = false; }
+    try {
+      const response = await fetch(`/api/embodied/sessions/${state.demo.id}/step`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ticks})});
+      const snapshot = await response.json();
+      if (!response.ok) throw new Error(apiError(snapshot, 'demo update failed'));
+      drawDemo(snapshot);
+      if (state.demoIndividual) refreshDemoIndividual();
+    } catch (error) {
+      state.demo.playing = false;
+      ui.demoPlay.textContent = 'Play';
+      ui.demoStatus.textContent = `Demo update failed: ${error.message}`;
+    } finally {
+      if (state.demo) state.demo.pending = false;
+    }
   }
-  function animateDemo(now) { if (!state.demo?.playing) return; if (now - state.demoLastTick >= 1000 / Number(ui.demoRate.value)) { state.demoLastTick = now; advanceDemo(); } requestAnimationFrame(animateDemo); }
+  function animateDemo(now) {
+    if (!state.demo?.playing) return;
+    const tickRate = Number(ui.demoRate.value) || 1;
+    const tickBatch = Math.max(1, Math.ceil(tickRate / 30));
+    const interval = 1000 * tickBatch / tickRate;
+    if (now - state.demoLastTick >= interval) {
+      state.demoLastTick = now;
+      advanceDemo(tickBatch);
+    }
+    requestAnimationFrame(animateDemo);
+  }
   async function startDemo(event) {
-    event.preventDefault(); if (!ui.demoRun.value) return;
-    ui.demoStart.disabled = true; ui.demoStatus.textContent = 'Creating a fresh ecology with the selected best rules…';
-    try { const response = await fetch('/api/embodied/sessions', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({run_id:ui.demoRun.value, seed:Number(ui.demoSeed.value), network_hidden_nodes:Number(ui.demoHiddenNodes.value), network_mean_degree:Number(ui.demoNetworkDegree.value), prey_count:Number(ui.demoPreyCount.value), predator_count:Number(ui.demoPredatorCount.value), initial_food:Number(ui.demoInitialFood.value), max_food:Number(ui.demoMaxFood.value), food_growth_rate:Number(ui.demoFoodGrowthRate.value)})}), snapshot = await response.json(); if (!response.ok) throw new Error(apiError(snapshot, 'could not create demo')); if (state.demoRecorder?.state === 'recording') state.demoRecorder.stop(); state.demo = {id:snapshot.session_id, pending:false, playing:false, snapshot}; state.demoIndividual = null; state.demoHistory = []; ui.demoColorChannel.replaceChildren(); ui.demoColorChannel.disabled = true; ui.demoChannel.replaceChildren(); ui.demoChannel.disabled = true; ui.demoIndividualTitle.textContent = 'Click a prey or predator in the ecology'; ui.demoIndividualSummary.textContent = 'The selected organism\'s random recurrent graph and live state will appear here.'; ui.demoNetwork.replaceChildren(); drawDemoNodeChart(); ui.demoRecord.disabled = false; drawDemo(snapshot); const source = snapshot.model_source === 'current_checkpoint' ? 'the current training checkpoint' : 'the completed run'; ui.demoStatus.textContent = `Loaded ${source} ${snapshot.run_id.slice(0, 8)} with ${ui.demoHiddenNodes.value} random hidden nodes and degree ${ui.demoNetworkDegree.value}. Press Play or Step.`; } catch (error) { ui.demoStatus.textContent = `Could not start demo: ${error.message}`; } finally { ui.demoStart.disabled = false; }
+    event.preventDefault();
+    if (!ui.demoRun.value) return;
+    ui.demoStart.disabled = true;
+    ui.demoStatus.textContent = 'Creating a fresh ecology with the selected best rules…';
+    const payload = {
+      run_id: ui.demoRun.value,
+      seed: Number(ui.demoSeed.value),
+      network_hidden_nodes: Number(ui.demoHiddenNodes.value),
+      network_mean_degree: Number(ui.demoNetworkDegree.value),
+      prey_count: Number(ui.demoPreyCount.value),
+      predator_count: Number(ui.demoPredatorCount.value),
+      initial_food: Number(ui.demoInitialFood.value),
+      max_food: Number(ui.demoMaxFood.value),
+      food_growth_rate: Number(ui.demoFoodGrowthRate.value),
+    };
+    try {
+      const response = await fetch('/api/embodied/sessions', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+      });
+      const snapshot = await response.json();
+      if (!response.ok) throw new Error(apiError(snapshot, 'could not create demo'));
+      if (state.demoRecorder?.state === 'recording') state.demoRecorder.stop();
+      state.demo = {
+        id: snapshot.session_id,
+        pending: false,
+        playing: false,
+        inspectionPending: false,
+        lastInspectionAt: 0,
+        snapshot,
+      };
+      state.demoIndividual = null;
+      state.demoHistory.clear();
+      demoNetworkView.reset();
+      ui.demoColorChannel.replaceChildren();
+      ui.demoColorChannel.disabled = true;
+      ui.demoChannel.replaceChildren();
+      ui.demoChannel.disabled = true;
+      ui.demoNodeLegend.replaceChildren();
+      ui.demoNetworkSummary.textContent = 'Select an organism to inspect its graph.';
+      ui.demoIndividualTitle.textContent = 'Click a prey or predator in the ecology';
+      ui.demoIndividualSummary.textContent = 'The selected organism\'s random recurrent graph and live state will appear here.';
+      drawDemoNodeChart();
+      ui.demoRecord.disabled = false;
+      drawDemo(snapshot);
+      const source = snapshot.model_source === 'current_checkpoint'
+        ? 'the current training checkpoint'
+        : 'the completed run';
+      ui.demoStatus.textContent = `Loaded ${source} ${snapshot.run_id.slice(0, 8)} with ${payload.network_hidden_nodes} hidden nodes and mean degree ${payload.network_mean_degree}.`;
+    } catch (error) {
+      ui.demoStatus.textContent = `Could not start demo: ${error.message}`;
+    } finally {
+      ui.demoStart.disabled = false;
+    }
   }
   function toggleDemoRecording() {
     if (!state.demo) return;
@@ -773,8 +995,8 @@
     return {cards, fitness, action, speed, turn, allZero};
   }
   function renderDiagnostics(report, checkpoint = {}) {
-    if (!report || !Array.isArray(report.history)) throw new Error('Expected an embodied batch report with a history array.');
-    const history = report.history, source = Object.keys(checkpoint).length ? checkpoint : report, prey = renderDiagnosticSpecies(history, report, source, 'prey'), predator = renderDiagnosticSpecies(history, report, source, 'predator');
+    if (!report || typeof report !== 'object') throw new Error('Expected an embodied report or checkpoint JSON object.');
+    const history = Array.isArray(report.history) ? report.history : [], historyTotal = Math.max(history.length, Number(report.history_total_records) || 0), historyLabel = historyTotal === history.length ? `${historyTotal} generations` : `${historyTotal} generations (${history.length} sampled points)`, source = Object.keys(checkpoint).length ? checkpoint : report, prey = renderDiagnosticSpecies(history, report, source, 'prey'), predator = renderDiagnosticSpecies(history, report, source, 'predator');
     const nodeCount = nodeParameterCount(diagnosticArchitecture(source)), edgeCount = edgeParameterCount(source?.edge_architecture || {}), firstGenome = diagnosticGenome(source, 'prey'), genomeRms = firstGenome.length ? Math.sqrt(firstGenome.reduce((sum, value) => sum + value ** 2, 0) / firstGenome.length) : null;
     const flags = [], coverage = [];
     if (predator.allZero) flags.push(diagnosticItem('PREDATOR_RULE_ZERO', 'The saved predator joint genome is exactly zero. Its reported action, speed, and lifetime are therefore all zero; this is a direct loss of behavior, not a subtle convergence signal.'));
@@ -795,11 +1017,57 @@
     coverage.push(diagnosticItem('CONNECTIVITY / LATENCY', hasGraph || hasLatency ? 'At least one topology or sensor-response diagnostic is recorded.' : 'Not recorded: sensor-to-action paths and perturbation latency cannot be inferred from a final genome alone.'));
     coverage.push(diagnosticItem('MULTI-INSTANCE / ABLATION', report.diagnostics?.ablations || report.diagnostics?.random_instance_fitness ? 'Recorded.' : 'Not recorded: matched random-brain trials, rule ablations, and edge-state interventions require a diagnostic evaluation run.'));
     const preyAction = prey.action?.tailMean, predatorAction = predator.action?.tailMean;
-    ui.diagnosticsTitle.textContent = predator.allZero ? 'Predator policy collapsed to the zero genome' : 'Historical run analyzed; runtime cause remains unobserved';
-    ui.diagnosticsCopy.textContent = predator.allZero ? `The report records ${history.length} generations. Prey retains action motion (${diagnosticNumber(preyAction)} mean change in the tail), while the saved predator genome and behavior are both zero. The exact stage that erased variation cannot be assigned without raw-output and state-update logging.` : `The report contains ${history.length} generations of aggregate fitness and behavior. It can characterize output-level stability, but it cannot attribute it to genome movement, local-rule saturation, graph reachability, or runtime state dynamics.`;
-    ui.diagnosticsSummary.replaceChildren(statCard('Recorded generations', String(history.length)), statCard('Training mode', report.training_mode || 'not recorded'), statCard('Prey best lifetime', diagnosticNumber(report.prey?.best_lifetime)), statCard('Predator best lifetime', diagnosticNumber(report.predator?.best_lifetime)), statCard('Node / edge parameters', nodeCount && edgeCount ? `${nodeCount} / ${edgeCount}` : 'architecture incomplete'), statCard('Prey genome RMS', diagnosticNumber(genomeRms)));
+    ui.diagnosticsTitle.textContent = predator.allZero ? 'Predator policy collapsed to the zero genome' : history.length ? 'Historical run analyzed; runtime cause remains unobserved' : 'Current checkpoint loaded; run-level history is not available';
+    ui.diagnosticsCopy.textContent = predator.allZero ? `The report records ${historyLabel}. Prey retains action motion (${diagnosticNumber(preyAction)} mean change in the tail), while the saved predator genome and behavior are both zero. The exact stage that erased variation cannot be assigned without raw-output and state-update logging.` : history.length ? `The report contains ${historyLabel} of aggregate fitness and behavior. It can characterize output-level stability, but it cannot attribute it to genome movement, local-rule saturation, graph reachability, or runtime state dynamics.` : 'This checkpoint is sufficient for fresh-rule, coupled-state, and synchronization diagnostics. A completed report is only needed for historical training curves.';
+    ui.diagnosticsSummary.replaceChildren(statCard('Recorded generations', historyLabel), statCard('Training mode', report.training_mode || 'not recorded'), statCard('Prey best lifetime', diagnosticNumber(report.prey?.best_lifetime)), statCard('Predator best lifetime', diagnosticNumber(report.predator?.best_lifetime)), statCard('Node / edge parameters', nodeCount && edgeCount ? `${nodeCount} / ${edgeCount}` : 'architecture incomplete'), statCard('Prey genome RMS', diagnosticNumber(genomeRms)));
     ui.diagnosticsFlags.replaceChildren(...flags); ui.diagnosticsCoverage.replaceChildren(...coverage);
     const speciesCards = [...prey.cards, ...predator.cards]; ui.diagnosticsSpecies.replaceChildren(...speciesCards);
+  }
+  function drawCoupledStateField() {
+    const report = state.coupledDiagnostic, canvas = ui.diagnosticsCoupledField;
+    if (!report?.vector_field_2d?.available || !canvas) return;
+    const conditions = report.vector_field_2d.conditions || {}, condition = conditions[ui.diagnosticsCoupledCondition.value];
+    if (!condition?.samples?.length) return;
+    const ratio = window.devicePixelRatio || 1, width = Math.max(360, canvas.clientWidth || canvas.width), height = Math.max(280, width * .61);
+    canvas.width = Math.round(width * ratio); canvas.height = Math.round(height * ratio); canvas.style.height = `${height}px`;
+    const context = canvas.getContext('2d'); context.setTransform(ratio, 0, 0, ratio, 0, 0); context.clearRect(0, 0, width, height);
+    const margin = {left:58, right:22, top:24, bottom:48}, xs = condition.samples.map((row) => Number(row.h0)), ys = condition.samples.map((row) => Number(row.h1));
+    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys), mapX = (value) => margin.left + (value - minX) / (maxX - minX || 1) * (width - margin.left - margin.right), mapY = (value) => height - margin.bottom - (value - minY) / (maxY - minY || 1) * (height - margin.top - margin.bottom);
+    context.fillStyle = '#111a25'; context.fillRect(0, 0, width, height); context.strokeStyle = '#385066'; context.lineWidth = 1; context.beginPath(); context.moveTo(margin.left, margin.top); context.lineTo(margin.left, height - margin.bottom); context.lineTo(width - margin.right, height - margin.bottom); context.stroke();
+    const channels = report.vector_field_2d.channels || [0, 1]; context.font = '12px ui-monospace, monospace'; context.fillStyle = '#aebdd0'; context.fillText(`hidden channel ${channels[0]}`, width / 2 - 55, height - 14); context.save(); context.translate(17, height / 2 + 48); context.rotate(-Math.PI / 2); context.fillText(`hidden channel ${channels[1]}`, 0, 0); context.restore();
+    const magnitudes = condition.samples.map((row) => Math.hypot(Number(row.effective_delta?.[0] || 0), Number(row.effective_delta?.[1] || 0))), maxMagnitude = Math.max(...magnitudes, 1e-9);
+    condition.samples.forEach((row, index) => {
+      const dx = Number(row.effective_delta?.[0] || 0), dy = Number(row.effective_delta?.[1] || 0), magnitude = magnitudes[index]; if (!magnitude) return;
+      const x = mapX(Number(row.h0)), y = mapY(Number(row.h1)), length = 3.5 + 11 * Math.min(1, magnitude / maxMagnitude); // Moderate normalized length keeps direction legible without crowding the field.
+      const endX = x + length * dx / magnitude, endY = y - length * dy / magnitude, hue = 185 - 105 * Math.min(1, magnitude / maxMagnitude);
+      context.strokeStyle = `hsl(${hue} 68% 58%)`; context.fillStyle = context.strokeStyle; context.lineWidth = 1.15; context.beginPath(); context.moveTo(x, y); context.lineTo(endX, endY); context.stroke();
+      const angle = Math.atan2(endY - y, endX - x); context.beginPath(); context.moveTo(endX, endY); context.lineTo(endX - 4 * Math.cos(angle - .5), endY - 4 * Math.sin(angle - .5)); context.lineTo(endX - 4 * Math.cos(angle + .5), endY - 4 * Math.sin(angle + .5)); context.closePath(); context.fill();
+    });
+    (condition.fixed_points || []).forEach((point) => { const [x, y] = point.state; context.fillStyle = point.classification === 'stable' ? '#ff607d' : '#f4c86a'; context.beginPath(); context.arc(mapX(x), mapY(y), 5, 0, Math.PI * 2); context.fill(); });
+    const empirical = report.empirical_replay_attractor?.selected_state || report.empirical_replay_attractor?.state; if (Array.isArray(empirical) && empirical.length === 2) { context.fillStyle = '#ffb94d'; context.beginPath(); context.arc(mapX(empirical[0]), mapY(empirical[1]), 7, 0, Math.PI * 2); context.fill(); }
+  }
+  function renderCoupledStateDiagnostic(report) {
+    state.coupledDiagnostic = report; const conditions = report?.vector_field_2d?.conditions || {}, names = Object.keys(conditions);
+    ui.diagnosticsCoupledCondition.replaceChildren(...names.map((name) => { const option = document.createElement('option'); option.value = name; option.textContent = name.replaceAll('_', ' '); return option; }));
+    ui.diagnosticsCoupledCondition.disabled = !names.length;
+    const attractor = report.empirical_replay_attractor || {}, eigen = (attractor.transition_eigenvalues || []).map((value) => Number(value[0]).toFixed(3)).join(', '), sync = report.hidden_synchronization?.aggregate || {};
+    ui.diagnosticsCoupledCopy.textContent = names.length ? `Short arrows show local direction. Pink dot = stable fixed point; amber dot = replay mean. ${report.output_url ? `JSON: ${report.output_url}` : ''}` : 'No 2D field is available for this rule.';
+    const selected = attractor.selected_channels || report.vector_field_2d?.channels || [0, 1], selectedState = attractor.selected_state || attractor.state;
+    ui.diagnosticsCoupledSummary.replaceChildren(statCard(`Replay attractor (h${selected[0]}, h${selected[1]})`, Array.isArray(selectedState) ? `(${selectedState.map((value) => Number(value).toFixed(3)).join(', ')})` : '—'), statCard('Local stability', `${attractor.classification || '—'} · ρ ${diagnosticNumber(attractor.spectral_radius)}`), statCard('Transition eigenvalues', eigen || '—'), statCard('Hidden sync time', diagnosticNumber(sync.synchronization_time_state_variance)), statCard('State/message correlation', diagnosticNumber(sync.state_message_variance_correlation)), statCard('Diagnostic flags', (report.flags || []).join(' · ') || 'none'));
+    drawCoupledStateField();
+  }
+  async function runCoupledStateDiagnostic() {
+    const runId = ui.diagnosticsRunId.value.trim(), episodes = Number(ui.diagnosticsCoupledEpisodes.value), episodeSteps = Number(ui.diagnosticsCoupledSteps.value), channelX = Number(ui.diagnosticsCoupledChannelX.value), channelY = Number(ui.diagnosticsCoupledChannelY.value);
+    if (!validDiagnosticRunId(runId)) { ui.diagnosticsStatus.textContent = 'Run ID may contain letters, digits, hyphens, and underscores.'; return; }
+    if (!Number.isInteger(episodes) || episodes < 1 || episodes > 3 || !Number.isInteger(episodeSteps) || episodeSteps < 4 || episodeSteps > 512 || !Number.isInteger(channelX) || !Number.isInteger(channelY) || channelX < 0 || channelY < 0 || channelX === channelY) { ui.diagnosticsStatus.textContent = 'Use 1–3 episodes, 4–512 ticks, and two distinct non-negative state channels.'; return; }
+    const payload = {episodes, episode_steps:episodeSteps, channel_x:channelX, channel_y:channelY}; if (ui.diagnosticsSeed.value.trim()) payload.seed = Number(ui.diagnosticsSeed.value);
+    ui.diagnosticsRunCoupledState.disabled = true; ui.diagnosticsStatus.textContent = `Mapping the 2D prey state field and ${episodes} matched replay${episodes === 1 ? '' : 's'}…`;
+    try {
+      const response = await fetch(`/api/embodied/runs/${encodeURIComponent(runId)}/diagnostics/coupled-state`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}), data = await response.json();
+      if (!response.ok) throw new Error(apiError(data, 'could not start coupled-state diagnostic'));
+      const poll = async () => { const statusResponse = await fetch(`/api/jobs/${encodeURIComponent(data.job_id)}`), job = await statusResponse.json(); if (!statusResponse.ok) throw new Error(apiError(job, 'diagnostic job disappeared')); if (job.status === 'complete') { renderCoupledStateDiagnostic(job.result); ui.diagnosticsStatus.textContent = `2D prey-state diagnostic complete (${episodeSteps} ticks, ${episodes} matched episode${episodes === 1 ? '' : 's'}).`; ui.diagnosticsRunCoupledState.disabled = false; activate('diagnostics'); return; } if (job.status === 'failed') throw new Error(job.error || 'coupled-state diagnostic failed'); window.setTimeout(() => { poll().catch((error) => { ui.diagnosticsStatus.textContent = `Coupled-state diagnostic failed: ${error.message}`; ui.diagnosticsRunCoupledState.disabled = false; }); }, 500); };
+      await poll();
+    } catch (error) { ui.diagnosticsStatus.textContent = `Could not run coupled-state diagnostic: ${error.message}`; ui.diagnosticsRunCoupledState.disabled = false; }
   }
   async function loadDiagnosticsFromServer() {
     const runId = ui.diagnosticsRunId.value.trim();
@@ -807,16 +1075,17 @@
     ui.diagnosticsLoadServer.disabled = true; ui.diagnosticsStatus.textContent = `Loading report and checkpoint for ${runId}…`;
     try {
       const base = `/artifacts/embodied_runs/${encodeURIComponent(runId)}`, responses = await Promise.all([fetch(`${base}/report.json`), fetch(`${base}/checkpoint.json`)]);
-      if (!responses[0].ok) throw new Error(`report.json could not be loaded (${responses[0].status})`);
-      const report = await responses[0].json(), checkpoint = responses[1].ok ? await responses[1].json() : {};
-      renderDiagnostics(report, checkpoint); ui.diagnosticsStatus.textContent = `Analyzed server run ${runId}${responses[1].ok ? ' with checkpoint' : ' (report only)'}.`; activate('diagnostics');
+      const parseArtifact = async (response) => { if (!response.ok) return null; try { return await response.json(); } catch { return null; } };
+      const [report, checkpoint] = await Promise.all(responses.map(parseArtifact));
+      if (!report && !checkpoint) throw new Error(`Neither usable report.json nor checkpoint.json could be loaded (${responses[0].status}/${responses[1].status})`);
+      renderDiagnostics(report || checkpoint, checkpoint || {}); ui.diagnosticsStatus.textContent = `Analyzed server run ${runId}${report ? (checkpoint ? ' with checkpoint' : ' (report only)') : ' from its current checkpoint'}.`; activate('diagnostics');
     } catch (error) { ui.diagnosticsStatus.textContent = `Could not load artifacts: ${error.message}`; } finally { ui.diagnosticsLoadServer.disabled = false; }
   }
   async function loadDiagnosticsFromFiles() {
     const reportFile = ui.diagnosticsReportFile.files[0], checkpointFile = ui.diagnosticsCheckpointFile.files[0];
-    if (!reportFile) { ui.diagnosticsStatus.textContent = 'Choose a report.json file first.'; return; }
+    if (!reportFile && !checkpointFile) { ui.diagnosticsStatus.textContent = 'Choose a report.json or checkpoint.json file first.'; return; }
     ui.diagnosticsLoadFiles.disabled = true;
-    try { renderDiagnostics(JSON.parse(await reportFile.text()), checkpointFile ? JSON.parse(await checkpointFile.text()) : {}); ui.diagnosticsStatus.textContent = `Analyzed ${reportFile.name}${checkpointFile ? ` with ${checkpointFile.name}` : ' (report only)'}.`; activate('diagnostics'); } catch (error) { ui.diagnosticsStatus.textContent = `Could not analyze files: ${error.message}`; } finally { ui.diagnosticsLoadFiles.disabled = false; }
+    try { const checkpoint = checkpointFile ? JSON.parse(await checkpointFile.text()) : {}, report = reportFile ? JSON.parse(await reportFile.text()) : checkpoint; renderDiagnostics(report, checkpoint); ui.diagnosticsStatus.textContent = reportFile ? `Analyzed ${reportFile.name}${checkpointFile ? ` with ${checkpointFile.name}` : ' (report only)'}.` : `Analyzed current checkpoint ${checkpointFile.name}.`; activate('diagnostics'); } catch (error) { ui.diagnosticsStatus.textContent = `Could not analyze files: ${error.message}`; } finally { ui.diagnosticsLoadFiles.disabled = false; }
   }
   function renderRandomGraphDiagnostic(result) {
     const cards = [];
@@ -894,7 +1163,29 @@
   [ui.networkNodeLayers, ui.networkNodeActivation, ui.networkEdgeLayers, ui.networkEdgeActivation, ui.networkEdgeLatentWidth].forEach((input) => input.addEventListener('input', updateNetworkSummary)); updateNetworkSummary();
   ui.asyncForm.addEventListener('submit', startAsync); ui.asyncDiagnostic.addEventListener('click', startAsyncDiagnostic); ui.asyncRefresh.addEventListener('click', loadLatestAsync); [ui.asyncCandidateBudget, ui.asyncReplicasInput, ui.asyncStablePopulation].forEach((input) => input.addEventListener('input', updateAsyncEstimate)); updateAsyncEstimate(); activate(location.hash.slice(1) || 'network', false); loadLatestAsync();
   ui.embodiedForm.addEventListener('submit', startEmbodied); ui.embodiedTerminate.addEventListener('click', terminateEmbodied); ui.embodiedRefresh.addEventListener('click', refreshEmbodiedModels); ui.embodiedModel.addEventListener('change', () => { if (ui.embodiedModel.value) { ui.embodiedContinueRun.value = ''; const width = state.embodiedModelWidths[ui.embodiedModel.value]; if (width) ui.embodiedStateWidth.value = String(width); } }); ui.embodiedContinueRun.addEventListener('change', () => { if (ui.embodiedContinueRun.value) { ui.embodiedModel.value = ''; const width = state.embodiedRunWidths[ui.embodiedContinueRun.value]; if (width) ui.embodiedStateWidth.value = String(width); } }); ui.embodiedEnergyScale.addEventListener('input', updateEmbodiedHorizonSuggestion); ui.embodiedSurvivalPressure.addEventListener('change', updateEmbodiedHorizonSuggestion); [ui.embodiedTrainingMode, ui.embodiedAlgorithm].forEach((input) => input.addEventListener('change', updateEmbodiedSettingsLayout)); [ui.embodiedPopulation, ui.embodiedEliteFraction, ui.embodiedRegionalFraction, ui.embodiedGlobalFraction].forEach((input) => input.addEventListener('input', () => { updateGaComposition(); updateEmbodiedSettingsLayout(); })); updateEmbodiedHorizonSuggestion(); updateGaComposition(); updateEmbodiedSettingsLayout(); refreshEmbodiedModels();
-  ui.demoForm.addEventListener('submit', startDemo); ui.demoRefresh.addEventListener('click', refreshDemoRuns); ui.demoPlay.addEventListener('click', () => { if (!state.demo) return; state.demo.playing = !state.demo.playing; ui.demoPlay.textContent = state.demo.playing ? 'Pause' : 'Play'; state.demoLastTick = performance.now(); if (state.demo.playing) requestAnimationFrame(animateDemo); }); ui.demoStep.addEventListener('click', () => advanceDemo()); ui.demoRecord.addEventListener('click', toggleDemoRecording); ui.demoCanvas.addEventListener('click', (event) => { if (state.demo?.snapshot) selectDemoIndividual(state.demo.snapshot, event); }); ui.demoColorChannel.addEventListener('change', () => { if (state.demo?.lastNetwork) drawDemoNetwork(state.demo.lastNetwork); }); ui.demoChannel.addEventListener('change', drawDemoNodeChart); refreshDemoRuns();
-  ui.diagnosticsLoadServer.addEventListener('click', loadDiagnosticsFromServer); ui.diagnosticsLoadFiles.addEventListener('click', loadDiagnosticsFromFiles); ui.diagnosticsRunRandomGraphs.addEventListener('click', runRandomGraphDiagnostic); ui.diagnosticsCompareRuns.addEventListener('click', compareSavedRuns);
+  ui.demoForm.addEventListener('submit', startDemo);
+  ui.demoRefresh.addEventListener('click', refreshDemoRuns);
+  ui.demoPlay.addEventListener('click', () => {
+    if (!state.demo) return;
+    state.demo.playing = !state.demo.playing;
+    ui.demoPlay.textContent = state.demo.playing ? 'Pause' : 'Play';
+    state.demoLastTick = performance.now();
+    if (state.demo.playing) requestAnimationFrame(animateDemo);
+  });
+  ui.demoStep.addEventListener('click', () => advanceDemo());
+  ui.demoRecord.addEventListener('click', toggleDemoRecording);
+  ui.demoCanvas.addEventListener('click', (event) => {
+    if (state.demo?.snapshot) selectDemoIndividual(state.demo.snapshot, event);
+  });
+  [ui.demoColorChannel, ui.demoEdgeThreshold].forEach((control) => {
+    control.addEventListener('change', () => {
+      if (state.demo?.lastNetwork) drawDemoNetwork(state.demo.lastNetwork);
+    });
+  });
+  [ui.demoChannel, ui.demoSeriesCount].forEach((control) => {
+    control.addEventListener('change', drawDemoNodeChart);
+  });
+  refreshDemoRuns();
+  ui.diagnosticsLoadServer.addEventListener('click', loadDiagnosticsFromServer); ui.diagnosticsLoadFiles.addEventListener('click', loadDiagnosticsFromFiles); ui.diagnosticsRunRandomGraphs.addEventListener('click', runRandomGraphDiagnostic); ui.diagnosticsRunCoupledState.addEventListener('click', runCoupledStateDiagnostic); ui.diagnosticsCoupledCondition.addEventListener('change', drawCoupledStateField); ui.diagnosticsCompareRuns.addEventListener('click', compareSavedRuns);
   ui.liveRefresh.addEventListener('click', refreshLiveModels); ui.liveModel.addEventListener('change', renderLiveModelDetail); ui.liveForm.addEventListener('submit', launchLive); ui.livePlay.addEventListener('click', () => { if (!state.live) return; state.playing = !state.playing; ui.livePlay.textContent = state.playing ? 'Pause' : 'Play'; state.lastTick = performance.now(); if (state.playing) requestAnimationFrame(animate); }); ui.liveStep.addEventListener('click', () => advanceLive()); refreshLiveModels();
 })();

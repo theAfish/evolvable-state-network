@@ -84,6 +84,42 @@ class FastAPIServerTests(unittest.TestCase):
             os.environ.pop("ESN_DATA_DIR", None)
             self.assertEqual(application_data_dir(), (Path.cwd() / ".outputs").resolve())
 
+    def test_embodied_report_persists_a_bounded_representative_history(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = ApplicationRuntime(Path(directory))
+            original = {"task": "batch_food_web_coevolution", "history": [
+                {"generation": generation, "prey_best_lifetime": float(generation)}
+                for generation in range(1, 401)
+            ]}
+            saved = runtime.write_embodied_report("longrun", original)
+            path = Path(directory) / "embodied_runs" / "longrun" / "report.json"
+            on_disk = json.loads(path.read_text(encoding="utf-8"))
+
+        self.assertEqual(len(original["history"]), 400)
+        self.assertEqual(saved, on_disk)
+        self.assertEqual(on_disk["history_total_records"], 400)
+        self.assertEqual(on_disk["history_retained_records"], 128)
+        self.assertEqual(on_disk["history_sampling"]["strategy"], "uniform_including_endpoints")
+        self.assertEqual(on_disk["history"][0]["generation"], 1)
+        self.assertEqual(on_disk["history"][-1]["generation"], 400)
+
+    def test_embodied_checkpoint_is_used_when_report_is_corrupt(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_embodied_run(root, "recoverable")
+            path = root / "embodied_runs" / "recoverable"
+            report = json.loads((path / "report.json").read_text(encoding="utf-8"))
+            (path / "checkpoint.json").write_text(json.dumps(report), encoding="utf-8")
+            (path / "report.json").write_bytes(b"\0" * 128)
+            runtime = ApplicationRuntime(root)
+            loaded = runtime.load_embodied_report("recoverable")
+            runs = runtime.available_embodied_runs()
+
+        self.assertEqual(loaded["ticks"], 1)
+        run = next(item for item in runs if item["id"] == "recoverable")
+        self.assertFalse(run["complete"])
+        self.assertEqual(run["source"], "current_checkpoint")
+
     def test_server_port_can_be_overridden_from_cli_or_environment(self) -> None:
         with patch("evolvable_state_network.server.uvicorn.run") as run:
             with patch.dict(os.environ):
@@ -281,7 +317,9 @@ class FastAPIServerTests(unittest.TestCase):
         self.assertEqual(len(snapshot["network"]["node_state"]), snapshot["network"]["nodes"])
         self.assertEqual(snapshot["network"]["state_width"], 2)
         self.assertGreaterEqual(snapshot["network"]["vision_pixels"], 1)
-        self.assertEqual(snapshot["network"]["input_signal_channels"][:4], [1, 1, 1, 1])
+        # Hunger occupies state channel 1; the following ray-image inputs use
+        # channel 0, matching FoodWebAgentAdapter's multichannel contract.
+        self.assertEqual(snapshot["network"]["input_signal_channels"][:4], [1, 0, 0, 0])
 
     def test_post_run_random_graph_diagnostic_returns_individual_fitness_values(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

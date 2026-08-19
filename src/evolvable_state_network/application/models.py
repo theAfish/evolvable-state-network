@@ -198,6 +198,23 @@ class EmbodiedRandomGraphDiagnosticPayload(StrictModel):
     seed: int | None = Field(None, ge=0, lt=2**32)
 
 
+class EmbodiedCoupledStateDiagnosticPayload(StrictModel):
+    """Evaluation-only 2D state-field and synchronization probe."""
+
+    episodes: int = Field(1, ge=1, le=3)
+    episode_steps: int = Field(48, ge=4, le=512)
+    vector_grid_points: int = Field(25, ge=9, le=61)
+    channel_x: int = Field(0, ge=0, le=63)
+    channel_y: int = Field(1, ge=0, le=63)
+    seed: int | None = Field(None, ge=0, lt=2**32)
+
+    @model_validator(mode="after")
+    def validate_channels(self) -> "EmbodiedCoupledStateDiagnosticPayload":
+        if self.channel_x == self.channel_y:
+            raise ValueError("choose two distinct state channels")
+        return self
+
+
 class EmbodiedRunComparisonPayload(StrictModel):
     """Common synthetic probes for comparing two saved embodied rule sets."""
 

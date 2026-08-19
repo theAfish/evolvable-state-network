@@ -5,10 +5,7 @@ from __future__ import annotations
 import json
 import secrets
 from dataclasses import asdict
-from math import sqrt
 from pathlib import Path
-from random import Random
-from statistics import fmean, median, pstdev
 from typing import Literal
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
@@ -16,10 +13,17 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .application.configuration import build_async_training_config
+from .application.diagnostics import (
+    compare_vectors,
+    distribution_summary,
+    raw_output_summary,
+    synthetic_rule_outputs,
+)
 from .application.models import (
     AsyncDiagnosticPayload,
     AsyncTrainingPayload,
     EmbodiedFoodWebTrainingPayload,
+    EmbodiedCoupledStateDiagnosticPayload,
     EmbodiedRandomGraphDiagnosticPayload,
     EmbodiedRunComparisonPayload,
     EmbodiedDemoPayload,
@@ -30,8 +34,9 @@ from .application.models import (
 )
 from .application.runtime import ApplicationRuntime
 from .checkpoint_diagnostics import evaluate_prey_checkpoints
+from .prey_diagnostics import PreyDiagnosticConfig, diagnose_prey_genome
 from .evolution.asynchronous import run_async_experiment, run_diagnostic_experiment
-from .evolution.candidate import EdgeArchitecture, RuleArchitecture, _forward
+from .evolution.candidate import EdgeArchitecture, RuleArchitecture
 from .evolution.genome import GenomeCodec
 from .dashboard import dashboard_document
 from .evolution.evaluation import CandidateEvaluator
@@ -53,88 +58,6 @@ from .tasks import (
 
 def _seed(value: int | None) -> int:
     return secrets.randbelow(2**32) if value is None else value
-
-
-def _distribution_summary(values: tuple[float, ...]) -> dict[str, float]:
-    """Return stable JSON-friendly descriptive statistics for diagnostic trials."""
-    ordered = sorted(values)
-    if not ordered:
-        return {}
-
-    def percentile(fraction: float) -> float:
-        position = fraction * (len(ordered) - 1)
-        lower, upper = int(position), min(int(position) + 1, len(ordered) - 1)
-        return ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower)
-
-    standard_deviation = pstdev(ordered)
-    return {
-        "mean": fmean(ordered), "standard_deviation": standard_deviation,
-        "variance": standard_deviation ** 2, "minimum": ordered[0], "maximum": ordered[-1],
-        "median": median(ordered), "p10": percentile(.10), "p25": percentile(.25),
-        "p75": percentile(.75), "p90": percentile(.90),
-    }
-
-
-def _vector_comparison(left: tuple[float, ...], right: tuple[float, ...]) -> dict[str, float | int | bool]:
-    """Compare vectors without silently aligning incompatible architectures."""
-    if len(left) != len(right):
-        return {"compatible": False, "left_dimension": len(left), "right_dimension": len(right)}
-    l2 = sqrt(sum((a - b) ** 2 for a, b in zip(left, right, strict=True)))
-    left_norm = sqrt(sum(value ** 2 for value in left))
-    right_norm = sqrt(sum(value ** 2 for value in right))
-    return {
-        "compatible": True, "left_dimension": len(left), "right_dimension": len(right),
-        "l2_distance": l2, "rms_distance": l2 / sqrt(max(1, len(left))),
-        "cosine_similarity": sum(a * b for a, b in zip(left, right, strict=True)) / max(left_norm * right_norm, 1e-12),
-        "left_rms": left_norm / sqrt(max(1, len(left))), "right_rms": right_norm / sqrt(max(1, len(right))),
-    }
-
-
-def _raw_output_summary(values: tuple[float, ...]) -> dict[str, float]:
-    if not values:
-        return {}
-    absolute = tuple(abs(value) for value in values)
-    ordered = sorted(absolute)
-
-    def percentile(fraction: float) -> float:
-        position = fraction * (len(ordered) - 1)
-        lower, upper = int(position), min(int(position) + 1, len(ordered) - 1)
-        return ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower)
-
-    return {
-        "mean": fmean(values), "standard_deviation": pstdev(values),
-        "rms": sqrt(fmean(value ** 2 for value in values)), "minimum": min(values), "maximum": max(values),
-        "abs_p50": percentile(.50), "abs_p90": percentile(.90), "abs_p99": percentile(.99),
-        "abs_gt_1_fraction": sum(value > 1 for value in absolute) / len(absolute),
-        "abs_gt_2_fraction": sum(value > 2 for value in absolute) / len(absolute),
-        "abs_gt_3_fraction": sum(value > 3 for value in absolute) / len(absolute),
-    }
-
-
-def _synthetic_rule_outputs(
-    genome: tuple[float, ...], architecture: RuleArchitecture, edge_architecture: EdgeArchitecture,
-    *, state_limit: float, probe_count: int, seed: int,
-) -> tuple[tuple[float, ...], tuple[float, ...]]:
-    """Evaluate raw MLP outputs on a common bounded synthetic input distribution.
-
-    These probes intentionally bypass the downstream ``tanh`` and update
-    scaling.  They are a fast saturation signal, not a replacement for an
-    episode trace drawn from the learned policy's real state distribution.
-    """
-    node_rule, edge_rule = GenomeCodec(architecture, edge_architecture, "joint").decode_groups(genome)
-    assert node_rule is not None and edge_rule is not None
-    random = Random(seed)
-    node_values: list[float] = []
-    edge_values: list[float] = []
-    for _ in range(probe_count):
-        node_features = tuple(random.uniform(-state_limit, state_limit) for _ in range(2 * architecture.state_width))
-        node_values.extend(_forward(node_features, node_rule._layers, architecture.activation))
-        edge_features = (
-            tuple(random.uniform(-1.0, 1.0) for _ in range(edge_architecture.latent_width))
-            + tuple(random.uniform(-state_limit, state_limit) for _ in range(3 * architecture.state_width))
-        )
-        edge_values.extend(_forward(edge_features, edge_rule._layers, edge_architecture.activation))
-    return tuple(node_values), tuple(edge_values)
 
 
 def create_app(data_dir: Path | None = None) -> FastAPI:
@@ -415,9 +338,8 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 report["edge_architecture"] = asdict(edge_architecture)
                 report["initialization"] = initialization
                 report["task_config"] = task_config
+                report = runtime.write_embodied_report(job_id, report)
                 output = runtime.root / "embodied_runs" / job_id
-                output.mkdir(parents=True, exist_ok=True)
-                (output / "report.json").write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
                 report["output_url"] = runtime.artifact_url(output / "report.json")
                 runtime.finish_job(job_id, report)
             except EvolutionTerminated:
@@ -464,9 +386,59 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                     "mode": "random_graph_random_state", "run_id": run_id, "seed": seed,
                     "sample_count": payload.sample_count,
                     "episode_seeds": [seed + 10_007 * index for index in range(payload.sample_count)],
-                    "prey": {"fitness_values": list(evaluation.prey_trial_lifetimes), "fitness": _distribution_summary(evaluation.prey_trial_lifetimes), "behavior": dict(evaluation.prey_behavior)},
-                    "predator": {"fitness_values": list(evaluation.predator_trial_lifetimes), "fitness": _distribution_summary(evaluation.predator_trial_lifetimes), "behavior": dict(evaluation.predator_behavior)},
+                    "prey": {"fitness_values": list(evaluation.prey_trial_lifetimes), "fitness": distribution_summary(evaluation.prey_trial_lifetimes), "behavior": dict(evaluation.prey_behavior)},
+                    "predator": {"fitness_values": list(evaluation.predator_trial_lifetimes), "fitness": distribution_summary(evaluation.predator_trial_lifetimes), "behavior": dict(evaluation.predator_behavior)},
                 }
+                runtime.finish_job(job_id, result)
+            except Exception as error:
+                runtime.fail_job(job_id, error)
+
+        background_tasks.add_task(worker)
+        return {"job_id": job_id}
+
+    @application.post("/api/embodied/runs/{run_id}/diagnostics/coupled-state")
+    def diagnose_embodied_coupled_state(
+        run_id: str, payload: EmbodiedCoupledStateDiagnosticPayload, background_tasks: BackgroundTasks,
+    ) -> dict[str, str]:
+        """Probe the saved prey rule without changing the completed run."""
+        try:
+            report = runtime.load_embodied_report(run_id)
+            architecture = RuleArchitecture(**report["architecture"])
+            edge_architecture = EdgeArchitecture(**report["edge_architecture"])
+            task_data = report["task_config"]
+            network = EmbodiedNetworkConfig(**task_data["network"])
+            environment = FoodWebConfig(**task_data["environment"])
+            prey_genome = tuple(float(value) for value in report["prey_best_genome"])
+            predator_genome = tuple(float(value) for value in report.get("predator_best_genome", ()))
+        except (KeyError, TypeError, ValueError) as error:
+            raise HTTPException(404, "selected embodied run is unavailable or incomplete") from error
+        if max(payload.channel_x, payload.channel_y) >= architecture.state_width:
+            raise HTTPException(422, f"selected channels must be below this rule's state width ({architecture.state_width})")
+        seed = _seed(payload.seed)
+        job_id = runtime.new_job("embodied_coupled_state_diagnostic", seed, payload.episodes)
+
+        def worker() -> None:
+            try:
+                task = EmbodiedFoodWebTaskConfig(
+                    network=network, environment=environment,
+                    prey_count=int(task_data["prey_count"]), predator_count=int(task_data["predator_count"]),
+                    max_steps=payload.episode_steps, trials=1, seed=seed,
+                )
+                result = diagnose_prey_genome(
+                    prey_genome, architecture, edge_architecture, task,
+                    predator_genome=predator_genome or None,
+                    config=PreyDiagnosticConfig(
+                        episodes=payload.episodes,
+                        vector_grid_points=payload.vector_grid_points,
+                        state_channels=(payload.channel_x, payload.channel_y),
+                    ),
+                )
+                result.update({"run_id": run_id, "seed": seed, "episode_steps": payload.episode_steps})
+                output = runtime.root / "embodied_diagnostics"
+                output.mkdir(parents=True, exist_ok=True)
+                path = output / f"{run_id}-coupled-state-{job_id}.json"
+                path.write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
+                result["output_url"] = runtime.artifact_url(path)
                 runtime.finish_job(job_id, result)
             except Exception as error:
                 runtime.fail_job(job_id, error)
@@ -495,21 +467,21 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 right_genome = tuple(float(value) for value in right[f"{species}_best_genome"])
                 left_node, left_edge_group = GenomeCodec(left_architecture, left_edge, "joint").split(left_genome)
                 right_node, right_edge_group = GenomeCodec(right_architecture, right_edge, "joint").split(right_genome)
-                left_node_raw, left_edge_raw = _synthetic_rule_outputs(left_genome, left_architecture, left_edge, state_limit=probe_limit, probe_count=payload.probe_count, seed=seed)
-                right_node_raw, right_edge_raw = _synthetic_rule_outputs(right_genome, right_architecture, right_edge, state_limit=probe_limit, probe_count=payload.probe_count, seed=seed)
+                left_node_raw, left_edge_raw = synthetic_rule_outputs(left_genome, left_architecture, left_edge, state_limit=probe_limit, probe_count=payload.probe_count, seed=seed)
+                right_node_raw, right_edge_raw = synthetic_rule_outputs(right_genome, right_architecture, right_edge, state_limit=probe_limit, probe_count=payload.probe_count, seed=seed)
             except (KeyError, TypeError, ValueError) as error:
                 raise HTTPException(422, f"{species} genome is incompatible with its saved architecture") from error
             return {
-                "joint_genome": _vector_comparison(left_genome, right_genome),
-                "node_genome": _vector_comparison(left_node, right_node),
-                "edge_genome": _vector_comparison(left_edge_group, right_edge_group),
+                "joint_genome": compare_vectors(left_genome, right_genome),
+                "node_genome": compare_vectors(left_node, right_node),
+                "edge_genome": compare_vectors(left_edge_group, right_edge_group),
                 "node_rule_raw_output": {
-                    "left": _raw_output_summary(left_node_raw), "right": _raw_output_summary(right_node_raw),
-                    "common_probe_response": _vector_comparison(left_node_raw, right_node_raw),
+                    "left": raw_output_summary(left_node_raw), "right": raw_output_summary(right_node_raw),
+                    "common_probe_response": compare_vectors(left_node_raw, right_node_raw),
                 },
                 "edge_rule_raw_output": {
-                    "left": _raw_output_summary(left_edge_raw), "right": _raw_output_summary(right_edge_raw),
-                    "common_probe_response": _vector_comparison(left_edge_raw, right_edge_raw),
+                    "left": raw_output_summary(left_edge_raw), "right": raw_output_summary(right_edge_raw),
+                    "common_probe_response": compare_vectors(left_edge_raw, right_edge_raw),
                 },
             }
 

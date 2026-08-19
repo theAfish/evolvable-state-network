@@ -50,6 +50,7 @@ class PreyDiagnosticConfig:
     synchronization_distance_threshold: float = .15
     cross_coupling_derivative_threshold: float = .02
     fixed_point_max_iterations: int = 20
+    state_channels: tuple[int, int] = (0, 1)
 
 
 class _Trace:
@@ -265,11 +266,13 @@ def _effective_delta(rule: MLPUpdateRule, state: Sequence[float], aggregate: Seq
 def _local_jacobian(rule: MLPUpdateRule, state: Sequence[float], aggregate: Sequence[float], network: EmbodiedNetworkConfig, config: PreyDiagnosticConfig) -> np.ndarray:
     epsilon = config.jacobian_epsilon
     matrix = np.zeros((2, 2), dtype=float)
-    for column in range(2):
+    channels = config.state_channels
+    for column, channel in enumerate(channels):
         plus = np.asarray(state, dtype=float).copy()
         minus = np.asarray(state, dtype=float).copy()
-        plus[column] += epsilon; minus[column] -= epsilon
-        matrix[:, column] = (_effective_delta(rule, plus, aggregate, network) - _effective_delta(rule, minus, aggregate, network)) / (2 * epsilon)
+        plus[channel] += epsilon; minus[channel] -= epsilon
+        derivative = (_effective_delta(rule, plus, aggregate, network) - _effective_delta(rule, minus, aggregate, network)) / (2 * epsilon)
+        matrix[:, column] = derivative[list(channels)]
     return matrix
 
 
@@ -289,14 +292,16 @@ def _stability(rule: MLPUpdateRule, state: Sequence[float], aggregate: Sequence[
     return {"jacobian_effective_delta": jacobian.tolist(), "transition_eigenvalues": [[float(value.real), float(value.imag)] for value in eigenvalues], "spectral_radius": float(max(radii)), "classification": classification}
 
 
-def _refine_fixed_point(rule: MLPUpdateRule, initial: Sequence[float], aggregate: Sequence[float], network: EmbodiedNetworkConfig, config: PreyDiagnosticConfig) -> tuple[np.ndarray, float] | None:
+def _refine_fixed_point(rule: MLPUpdateRule, initial: Sequence[float], reference_state: Sequence[float], aggregate: Sequence[float], network: EmbodiedNetworkConfig, config: PreyDiagnosticConfig) -> tuple[np.ndarray, float] | None:
     point = np.asarray(initial, dtype=float)
+    channels = config.state_channels
     for _ in range(config.fixed_point_max_iterations):
-        delta = _effective_delta(rule, point, aggregate, network)
+        full = np.asarray(reference_state, dtype=float).copy(); full[list(channels)] = point
+        delta = _effective_delta(rule, full, aggregate, network)[list(channels)]
         residual = float(np.linalg.norm(delta))
         if residual <= config.fixed_point_tolerance:
             return point, residual
-        jacobian = _local_jacobian(rule, point, aggregate, network, config)
+        jacobian = _local_jacobian(rule, full, aggregate, network, config)
         try:
             step = np.linalg.solve(jacobian, delta)
         except np.linalg.LinAlgError:
@@ -305,15 +310,18 @@ def _refine_fixed_point(rule: MLPUpdateRule, initial: Sequence[float], aggregate
         if float(np.linalg.norm(candidate - point)) < config.jacobian_epsilon * .1:
             break
         point = candidate
-    residual = float(np.linalg.norm(_effective_delta(rule, point, aggregate, network)))
+    full = np.asarray(reference_state, dtype=float).copy(); full[list(channels)] = point
+    residual = float(np.linalg.norm(_effective_delta(rule, full, aggregate, network)[list(channels)]))
     return (point, residual) if residual <= config.fixed_point_tolerance else None
 
 
 def _vector_field(rule: MLPUpdateRule, samples: Sequence[tuple[tuple[float, ...], tuple[float, ...]]], network: EmbodiedNetworkConfig, config: PreyDiagnosticConfig) -> dict[str, object]:
-    if rule.state_width != 2:
-        return {"available": False, "reason": "2D vector fields require state_width=2"}
-    zero = (0.0, 0.0)
-    mean = tuple(float(fmean(aggregate[index] for _, aggregate in samples)) if samples else 0.0 for index in range(2))
+    channels = config.state_channels
+    if len(set(channels)) != 2 or min(channels) < 0 or max(channels) >= rule.state_width:
+        return {"available": False, "reason": "selected state channels must be distinct and within the saved rule width"}
+    zero = (0.0,) * rule.state_width
+    reference_state = tuple(float(fmean(state[index] for state, _ in samples)) if samples else 0.0 for index in range(rule.state_width))
+    mean = tuple(float(fmean(aggregate[index] for _, aggregate in samples)) if samples else 0.0 for index in range(rule.state_width))
     ordered = sorted((aggregate for _, aggregate in samples), key=lambda row: sum(row))
     low = ordered[max(0, len(ordered) // 10)] if ordered else zero
     high = ordered[min(len(ordered) - 1, 9 * len(ordered) // 10)] if ordered else zero
@@ -325,32 +333,38 @@ def _vector_field(rule: MLPUpdateRule, samples: Sequence[tuple[tuple[float, ...]
         candidates: list[tuple[float, tuple[float, float]]] = []
         for h0 in coordinates:
             for h1 in coordinates:
-                state = (float(h0), float(h1))
+                state = list(reference_state); state[channels[0]], state[channels[1]] = float(h0), float(h1); state = tuple(state)
                 raw = rule.raw_output(state, aggregate)
                 delta = _effective_delta(rule, state, aggregate, network)
-                residual = float(np.linalg.norm(delta))
-                rows.append({"h0": state[0], "h1": state[1], "raw_output": list(raw), "effective_delta": delta.tolist(), "residual": residual})
-                candidates.append((residual, state))
+                selected_delta = delta[list(channels)]
+                residual = float(np.linalg.norm(selected_delta))
+                rows.append({"h0": float(h0), "h1": float(h1), "raw_output": list(raw), "effective_delta": selected_delta.tolist(), "residual": residual})
+                candidates.append((residual, (float(h0), float(h1))))
         fixed: list[dict[str, object]] = []
         for _, seed in sorted(candidates)[:16]:
-            refined = _refine_fixed_point(rule, seed, aggregate, network, config)
+            refined = _refine_fixed_point(rule, seed, reference_state, aggregate, network, config)
             if refined is None:
                 continue
             point, residual = refined
             if any(float(np.linalg.norm(point - np.asarray(existing["state"]))) < .02 for existing in fixed):
                 continue
-            fixed.append({"state": point.tolist(), "residual_update_magnitude": residual, "aggregate_condition": name, **_stability(rule, point, aggregate, network, config)})
+            full_point = np.asarray(reference_state, dtype=float).copy(); full_point[list(channels)] = point
+            fixed.append({"state": point.tolist(), "residual_update_magnitude": residual, "aggregate_condition": name, **_stability(rule, full_point, aggregate, network, config)})
         result[name] = {"aggregate": list(aggregate), "samples": rows, "fixed_points": fixed}
-    return {"available": True, "grid_points": config.vector_grid_points, "conditions": result}
+    return {"available": True, "channels": list(channels), "held_state_coordinates": list(reference_state), "grid_points": config.vector_grid_points, "conditions": result}
 
 
 def _cross_channel_coupling(rule: MLPUpdateRule, state: Sequence[float], aggregate: Sequence[float], network: EmbodiedNetworkConfig, config: PreyDiagnosticConfig) -> dict[str, object]:
     extent = min(1.5, network.max_abs_state)
-    h0, h1 = float(state[0]), float(state[1])
-    h1_sweep = [{"h1": float(value), "delta_h0": float(_effective_delta(rule, (h0, value), aggregate, network)[0])} for value in np.linspace(max(-network.max_abs_state, h1 - extent), min(network.max_abs_state, h1 + extent), 41)]
-    h0_sweep = [{"h0": float(value), "delta_h1": float(_effective_delta(rule, (value, h1), aggregate, network)[1])} for value in np.linspace(max(-network.max_abs_state, h0 - extent), min(network.max_abs_state, h0 + extent), 41)]
+    first, second = config.state_channels; h0, h1 = float(state[first]), float(state[second])
+    h1_sweep = []
+    for value in np.linspace(max(-network.max_abs_state, h1 - extent), min(network.max_abs_state, h1 + extent), 41):
+        probe = list(state); probe[second] = value; h1_sweep.append({"h1": float(value), "delta_h0": float(_effective_delta(rule, probe, aggregate, network)[first])})
+    h0_sweep = []
+    for value in np.linspace(max(-network.max_abs_state, h0 - extent), min(network.max_abs_state, h0 + extent), 41):
+        probe = list(state); probe[first] = value; h0_sweep.append({"h0": float(value), "delta_h1": float(_effective_delta(rule, probe, aggregate, network)[second])})
     jacobian = _local_jacobian(rule, state, aggregate, network, config)
-    return {"empirical_state": [h0, h1], "aggregate": list(aggregate), "hold_h0_sweep_h1_to_delta_h0": h1_sweep, "hold_h1_sweep_h0_to_delta_h1": h0_sweep, "d_delta_h0_d_h1": float(jacobian[0, 1]), "d_delta_h1_d_h0": float(jacobian[1, 0])}
+    return {"channels": list(config.state_channels), "empirical_state": [h0, h1], "aggregate": list(aggregate), "hold_h0_sweep_h1_to_delta_h0": h1_sweep, "hold_h1_sweep_h0_to_delta_h1": h0_sweep, "d_delta_h0_d_h1": float(jacobian[0, 1]), "d_delta_h1_d_h0": float(jacobian[1, 0])}
 
 
 def _synchronization(events: Sequence[dict[str, object]], config: PreyDiagnosticConfig) -> dict[str, object]:
@@ -477,6 +491,8 @@ def diagnose_prey_genome(prey_genome: Sequence[float], architecture: RuleArchite
     """Return a JSON-ready diagnostic report; no training state is modified."""
     if config.sweep_points < 3 or config.episodes < 1:
         raise ValueError("sweep_points must be at least 3 and episodes must be positive")
+    if len(set(config.state_channels)) != 2 or min(config.state_channels) < 0 or max(config.state_channels) >= architecture.state_width:
+        raise ValueError("state_channels must name two distinct coordinates in the saved rule")
     codec = GenomeCodec(architecture, edge_architecture, "joint")
     prey, edge = codec.decode_groups(prey_genome, output_scale=task.network.rule_output_scale)
     assert prey is not None and edge is not None
@@ -505,8 +521,9 @@ def diagnose_prey_genome(prey_genome: Sequence[float], architecture: RuleArchite
     # replay attractor estimate rather than mixing boundary ports into it.
     groups = _node_group_state_summaries(normal_events, architecture.state_width)
     empirical_state = list(groups["anonymous_hidden"]["final_mean"])
-    empirical_aggregate = tuple(float(fmean(aggregate[index] for _, aggregate in samples)) if samples else 0.0 for index in range(2))
-    empirical_stability = {"residual_update_magnitude": float(np.linalg.norm(_effective_delta(prey, empirical_state, empirical_aggregate, task.network))), **_stability(prey, empirical_state, empirical_aggregate, task.network, config)}
+    empirical_aggregate = tuple(float(fmean(aggregate[index] for _, aggregate in samples)) if samples else 0.0 for index in range(architecture.state_width))
+    empirical_plane = [empirical_state[index] for index in config.state_channels]
+    empirical_stability = {"residual_update_magnitude": float(np.linalg.norm(_effective_delta(prey, empirical_state, empirical_aggregate, task.network)[list(config.state_channels)])), **_stability(prey, empirical_state, empirical_aggregate, task.network, config)}
     coupling = _cross_channel_coupling(prey, empirical_state, empirical_aggregate, task.network, config)
     zero_message_events: list[dict[str, object]] = []
     for name, rule, zero_messages in (("zero_final_output_bias", _final_bias_zeroed(prey), False), ("zero_messages", prey, True)):
@@ -539,7 +556,7 @@ def diagnose_prey_genome(prey_genome: Sequence[float], architecture: RuleArchite
     if vector_field.get("available"):
         all_fixed = [point for condition in vector_field["conditions"].values() for point in condition["fixed_points"]]
         if any(point["classification"] == "stable" for point in all_fixed): flags.append("STABLE_2D_FIXED_POINT")
-        near_empirical = [point for point in all_fixed if float(np.linalg.norm(np.asarray(point["state"]) - np.asarray(empirical_state))) < .5]
+        near_empirical = [point for point in all_fixed if float(np.linalg.norm(np.asarray(point["state"]) - np.asarray(empirical_plane))) < .5]
         if near_empirical: flags.append("COUPLED_STATE_ATTRACTOR_DETECTED")
     if coupling["d_delta_h0_d_h1"] <= -config.cross_coupling_derivative_threshold: flags.append("STRONG_CROSS_CHANNEL_COUPLING")
     if normal_sync.get("aggregate", {}).get("synchronization_time_state_variance") is not None: flags.append("HIDDEN_NODE_SYNCHRONIZATION")
@@ -553,10 +570,10 @@ def diagnose_prey_genome(prey_genome: Sequence[float], architecture: RuleArchite
         for name, condition in conditions.items():
             if name == "zero" or not zero_fixed or not condition["fixed_points"]:
                 continue
-            start = min(zero_fixed, key=lambda row: float(np.linalg.norm(np.asarray(row["state"]) - np.asarray(empirical_state))))
-            end = min(condition["fixed_points"], key=lambda row: float(np.linalg.norm(np.asarray(row["state"]) - np.asarray(empirical_state))))
+            start = min(zero_fixed, key=lambda row: float(np.linalg.norm(np.asarray(row["state"]) - np.asarray(empirical_plane))))
+            end = min(condition["fixed_points"], key=lambda row: float(np.linalg.norm(np.asarray(row["state"]) - np.asarray(empirical_plane))))
             shifts.append({"condition": name, "from_zero_state": start["state"], "to_state": end["state"], "displacement": (np.asarray(end["state"]) - np.asarray(start["state"])).tolist(), "from_stability": start["classification"], "to_stability": end["classification"]})
-    return {"kind": "prey_negative_state_attractor_diagnostic", "config": asdict(config), "seeds": seeds, "drift_curves_channel_0": drift, "vector_field_2d": vector_field, "empirical_replay_attractor": {"state": empirical_state, "aggregate": list(empirical_aggregate), **empirical_stability}, "cross_channel_coupling": coupling, "attractor_message_shifts": shifts, "self_state_vs_message": probes, "zero_self_state_probe": {"real_state": probes["normal_state_normal_aggregate"], "zero_state": probes["zero_state_normal_aggregate"]}, "mlp_bias": bias, "ablations": ablations, "post_initialization_convergence": normal_summary["convergence"], "per_channel_hidden_summary": normal_summary["convergence"], "node_groups": groups, "hidden_synchronization": normal_sync, "graph_induced_symmetry": _graph_roles(normal_events), "flags": flags}
+    return {"kind": "prey_negative_state_attractor_diagnostic", "config": asdict(config), "seeds": seeds, "drift_curves_channel_0": drift, "vector_field_2d": vector_field, "empirical_replay_attractor": {"state": empirical_state, "selected_channels": list(config.state_channels), "selected_state": empirical_plane, "aggregate": list(empirical_aggregate), **empirical_stability}, "cross_channel_coupling": coupling, "attractor_message_shifts": shifts, "self_state_vs_message": probes, "zero_self_state_probe": {"real_state": probes["normal_state_normal_aggregate"], "zero_state": probes["zero_state_normal_aggregate"]}, "mlp_bias": bias, "ablations": ablations, "post_initialization_convergence": normal_summary["convergence"], "per_channel_hidden_summary": normal_summary["convergence"], "node_groups": groups, "hidden_synchronization": normal_sync, "graph_induced_symmetry": _graph_roles(normal_events), "flags": flags}
 
 
 def _load_report(path: Path) -> tuple[Sequence[float], Sequence[float] | None, RuleArchitecture, EdgeArchitecture, EmbodiedFoodWebTaskConfig]:
@@ -583,6 +600,7 @@ def write_diagnostic_plots(report: Mapping[str, object], output_dir: Path) -> li
             names = [name for name in ("zero", "episode_mean", "representative_low", "representative_high") if name in conditions]
             figure, axes = plt.subplots(2, 2, figsize=(11, 9), constrained_layout=True)
             empirical = report.get("empirical_replay_attractor", {})
+            channels = vector.get("channels", [0, 1])
             for axis, name in zip(axes.flat, names, strict=False):
                 condition = conditions[name]
                 rows = condition.get("samples", [])
@@ -594,9 +612,9 @@ def write_diagnostic_plots(report: Mapping[str, object], output_dir: Path) -> li
                     state = point["state"]
                     axis.plot(state[0], state[1], "o", color="crimson" if point["classification"] == "stable" else "black", ms=6)
                 if isinstance(empirical, Mapping):
-                    state = empirical.get("state", [])
+                    state = empirical.get("selected_state", empirical.get("state", []))
                     if len(state) == 2: axis.plot(state[0], state[1], "*", color="orange", ms=11, label="replay mean")
-                axis.set(title=name.replace("_", " "), xlabel="hidden channel 0", ylabel="hidden channel 1", xlim=(-4, 4), ylim=(-4, 4))
+                axis.set(title=name.replace("_", " "), xlabel=f"hidden channel {channels[0]}", ylabel=f"hidden channel {channels[1]}", xlim=(-4, 4), ylim=(-4, 4))
             for axis in axes.flat[len(names):]: axis.set_visible(False)
             path = output_dir / "vector_fields_2d.png"; figure.savefig(path, dpi=160); plt.close(figure); paths.append(path)
 
@@ -605,8 +623,9 @@ def write_diagnostic_plots(report: Mapping[str, object], output_dir: Path) -> li
         left, right = coupling.get("hold_h0_sweep_h1_to_delta_h0", []), coupling.get("hold_h1_sweep_h0_to_delta_h1", [])
         if left and right:
             figure, axes = plt.subplots(1, 2, figsize=(10, 4), constrained_layout=True)
-            axes[0].plot([row["h1"] for row in left], [row["delta_h0"] for row in left]); axes[0].axhline(0, color="black", lw=.7); axes[0].set(xlabel="channel 1 (channel 0 held)", ylabel="effective Δ channel 0")
-            axes[1].plot([row["h0"] for row in right], [row["delta_h1"] for row in right]); axes[1].axhline(0, color="black", lw=.7); axes[1].set(xlabel="channel 0 (channel 1 held)", ylabel="effective Δ channel 1")
+            channels = coupling.get("channels", [0, 1])
+            axes[0].plot([row["h1"] for row in left], [row["delta_h0"] for row in left]); axes[0].axhline(0, color="black", lw=.7); axes[0].set(xlabel=f"channel {channels[1]} (channel {channels[0]} held)", ylabel=f"effective Δ channel {channels[0]}")
+            axes[1].plot([row["h0"] for row in right], [row["delta_h1"] for row in right]); axes[1].axhline(0, color="black", lw=.7); axes[1].set(xlabel=f"channel {channels[0]} (channel {channels[1]} held)", ylabel=f"effective Δ channel {channels[1]}")
             path = output_dir / "cross_channel_coupling.png"; figure.savefig(path, dpi=160); plt.close(figure); paths.append(path)
 
     synchronization = report.get("hidden_synchronization", {})
