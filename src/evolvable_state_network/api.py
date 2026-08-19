@@ -562,6 +562,14 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     def embodied_runs() -> dict[str, object]:
         return {"runs": runtime.available_embodied_runs()}
 
+    @application.get("/api/embodied/runs/{run_id}/artifacts")
+    def embodied_run_artifacts(run_id: str) -> dict[str, object]:
+        """Return validated diagnostic inputs and their selected provenance."""
+        try:
+            return runtime.load_embodied_artifacts(run_id)
+        except ValueError as error:
+            raise HTTPException(404, str(error)) from error
+
     @application.post("/api/embodied/sessions")
     def create_embodied_session(payload: EmbodiedDemoPayload) -> dict[str, object]:
         try:

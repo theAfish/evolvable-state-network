@@ -1347,7 +1347,15 @@ class FoodWebDemonstration:
         return self.snapshot()
 
     def snapshot(self) -> dict[str, object]:
-        return {"tick": self.tick, "state": self.world.snapshot(), "events": self.last_events}
+        # The canvas and body telemetry must describe the same ecology tick.
+        # Supplying the already-computed observations here avoids a second,
+        # potentially stale inspection request during fast playback.
+        return {
+            "tick": self.tick,
+            "state": self.world.snapshot(),
+            "observations": {str(agent_id): observation for agent_id, observation in self.observations.items()},
+            "events": self.last_events,
+        }
 
     def individual_snapshot(self, agent_id: AgentId) -> dict[str, object]:
         """Return one living organism's private recurrent network for display."""
@@ -1364,6 +1372,14 @@ class FoodWebDemonstration:
                 "id": organism.id,
                 "species": organism.species.value,
                 "energy": organism.energy,
+                "position": {"x": organism.position.x, "y": organism.position.y},
+                "heading": organism.heading,
+                "age": organism.age,
+                "life": organism.life,
             },
+            # Use the exact sensory record supplied to this controller for the
+            # current world state.  This keeps visual ray debugging faithful to
+            # the learned interface rather than reconstructing it in the UI.
+            "observation": self.observations.get(agent_id, {}),
             "network": controller.inspection_snapshot(),
         }

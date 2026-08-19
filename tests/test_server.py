@@ -120,6 +120,38 @@ class FastAPIServerTests(unittest.TestCase):
         self.assertFalse(run["complete"])
         self.assertEqual(run["source"], "current_checkpoint")
 
+    def test_diagnostic_artifact_endpoint_reports_fallback_and_warnings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_embodied_run(root, "recoverable")
+            path = root / "embodied_runs" / "recoverable"
+            report = json.loads((path / "report.json").read_text(encoding="utf-8"))
+            (path / "checkpoint.json").write_text(json.dumps(report), encoding="utf-8")
+            (path / "report.json").write_text("{broken", encoding="utf-8")
+            with TestClient(create_app(root)) as client:
+                response = client.get("/api/embodied/runs/recoverable/artifacts")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIsNone(payload["report"])
+        self.assertEqual(payload["checkpoint"]["ticks"], 1)
+        self.assertEqual(payload["selected_source"], "current_checkpoint")
+        self.assertTrue(any("report.json is unreadable" in warning for warning in payload["warnings"]))
+
+    def test_diagnostic_artifact_endpoint_rejects_unusable_or_unsafe_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "embodied_runs" / "broken"
+            path.mkdir(parents=True)
+            (path / "report.json").write_text("[]", encoding="utf-8")
+            with TestClient(create_app(root)) as client:
+                broken = client.get("/api/embodied/runs/broken/artifacts")
+                traversal = client.get("/api/embodied/runs/..%2Fsecret/artifacts")
+
+        self.assertEqual(broken.status_code, 404)
+        self.assertIn("must contain a JSON object", broken.json()["detail"])
+        self.assertIn(traversal.status_code, {404, 422})
+
     def test_server_port_can_be_overridden_from_cli_or_environment(self) -> None:
         with patch("evolvable_state_network.server.uvicorn.run") as run:
             with patch.dict(os.environ):
@@ -307,6 +339,8 @@ class FastAPIServerTests(unittest.TestCase):
                     json={"run_id": "inspectrun", "seed": 4, "prey_count": 1, "predator_count": 0, "max_food": 30},
                 ).json()
                 individual_id = session["state"]["organisms"][0]["id"]
+                self.assertIn(individual_id, session["observations"])
+                self.assertIn("hunger", session["observations"][individual_id])
                 response = client.get(
                     f"/api/embodied/sessions/{session['session_id']}/individuals/{individual_id}"
                 )
@@ -317,6 +351,12 @@ class FastAPIServerTests(unittest.TestCase):
         self.assertEqual(len(snapshot["network"]["node_state"]), snapshot["network"]["nodes"])
         self.assertEqual(snapshot["network"]["state_width"], 2)
         self.assertGreaterEqual(snapshot["network"]["vision_pixels"], 1)
+        self.assertEqual(snapshot["individual"]["position"].keys(), {"x", "y"})
+        self.assertIn("heading", snapshot["individual"])
+        self.assertIn("age", snapshot["individual"])
+        self.assertIn("life", snapshot["individual"])
+        self.assertEqual(len(snapshot["observation"]["vision"]), snapshot["network"]["vision_pixels"])
+        self.assertEqual(snapshot["observation"]["vision"][0].keys(), {"angle", "distance", "kind", "target_id", "range"})
         # Hunger occupies state channel 1; the following ray-image inputs use
         # channel 0, matching FoodWebAgentAdapter's multichannel contract.
         self.assertEqual(snapshot["network"]["input_signal_channels"][:4], [1, 0, 0, 0])

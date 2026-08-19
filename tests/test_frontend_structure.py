@@ -13,9 +13,11 @@ class FrontendStructureTests(unittest.TestCase):
         index = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
         ui = index.index('src="ui.js')
         ecology = index.index('src="ecology.js')
+        diagnostics = index.index('src="diagnostics.js')
         app = index.index('src="app.js')
         self.assertLess(ui, ecology)
-        self.assertLess(ecology, app)
+        self.assertLess(ecology, diagnostics)
+        self.assertLess(diagnostics, app)
 
     def test_dashboard_uses_shared_ui_helpers(self) -> None:
         helpers = (WEB_ROOT / "ui.js").read_text(encoding="utf-8")
@@ -24,6 +26,15 @@ class FrontendStructureTests(unittest.TestCase):
         self.assertIn("window.StateNetworkUI = Object.freeze", helpers)
         self.assertIn("} = window.StateNetworkUI", app)
         self.assertNotIn("document.createElementNS(NS", app)
+
+    def test_embodied_training_uses_torch_without_a_backend_selector(self) -> None:
+        index = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
+        app = (WEB_ROOT / "app.js").read_text(encoding="utf-8")
+
+        self.assertNotIn('id="embodied-execution-backend"', index)
+        self.assertNotIn("Reference Python", index)
+        self.assertIn("execution_backend:'torch'", app)
+        self.assertNotIn("Legacy comparison controls", index)
 
     def test_ecology_renderer_reuses_geometry_and_bounds_history(self) -> None:
         ecology = (WEB_ROOT / "ecology.js").read_text(encoding="utf-8")
@@ -34,6 +45,8 @@ class FrontendStructureTests(unittest.TestCase):
         self.assertIn("demoHistory: new HistoryBuffer(360)", app)
         self.assertIn("Math.ceil(tickRate / 30)", app)
         self.assertIn("lastInspectionAt", app)
+        self.assertIn("function clearDemoIndividualSelection", app)
+        self.assertIn("if (state.demoIndividual) clearDemoIndividualSelection();", app)
 
     def test_dashboard_references_unique_existing_element_ids(self) -> None:
         index = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
@@ -51,8 +64,30 @@ class FrontendStructureTests(unittest.TestCase):
             "demo-series-count",
             "demo-node-legend",
             "demo-network-summary",
+            "demo-show-rays",
+            "demo-show-trajectory",
+            "demo-show-info",
+            "demo-show-boundary-nodes",
         ):
             self.assertIn(f'id="{element_id}"', index)
+
+    def test_diagnostic_workspace_exposes_robust_loading_and_plot_controls(self) -> None:
+        index = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
+        diagnostics = (WEB_ROOT / "diagnostics.js").read_text(encoding="utf-8")
+        app = (WEB_ROOT / "app.js").read_text(encoding="utf-8")
+
+        for element_id in (
+            "diagnostics-load-meta",
+            "diagnostics-load-warnings",
+            "diagnostics-history-chart",
+            "diagnostics-genome-chart",
+            "diagnostics-random-chart",
+            "diagnostics-sensitivity-chart",
+        ):
+            self.assertIn(f'id="{element_id}"', index)
+        self.assertIn("class DiagnosticLoader", diagnostics)
+        self.assertIn("controller?.abort()", diagnostics)
+        self.assertIn("waitForJob", app)
 
 
 if __name__ == "__main__":

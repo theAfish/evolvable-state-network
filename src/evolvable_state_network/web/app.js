@@ -14,16 +14,25 @@
     drawNodeHistoryChart,
     nearestOrganism,
   } = window.StateNetworkEcology;
+  const {
+    DiagnosticLoader,
+    waitForJob,
+    drawHistoryPlot,
+    drawGenomeHistogram,
+    drawReliabilityPlot,
+    drawSensitivityPlot,
+  } = window.StateNetworkDiagnostics;
   const ui = {
     run: $('run-select'), batch: $('batch-select'), coordinate: $('coordinate-select'), rate: $('rate-select'), slider: $('frame-slider'), label: $('frame-label'), play: $('play'), prev: $('previous'), next: $('next'), loop: $('loop'), svg: $('network'), status: $('load-status'), file: $('file-input'), frameInfo: $('frame-info'), selection: $('selection-info'), metrics: $('metrics'), events: $('events'),
     liveForm: $('live-form'), liveModel: $('live-model-select'), liveModelDetail: $('live-model-detail'), liveRefresh: $('refresh-live-models'), liveStatus: $('live-status'), livePlay: $('live-play'), liveStep: $('live-step'), liveRate: $('live-rate'), liveLabel: $('live-frame-label'), workspace: $('shared-workspace'), replayHost: $('replay-workspace-host'), liveHost: $('live-workspace-host'),
     asyncForm: $('async-form'), asyncSeed: $('async-seed'), asyncRun: $('async-run'), asyncDiagnostic: $('async-diagnostic'), asyncRefresh: $('async-refresh'), asyncStatus: $('async-status'), asyncProgress: $('async-progress'), asyncProgressLabel: $('async-progress-label'), asyncMetrics: $('async-metrics'), asyncValidation: $('async-validation'), asyncSlots: $('async-slots'), asyncCauses: $('async-causes'), asyncCurriculum: $('async-curriculum'), asyncCurriculumCopy: $('async-curriculum-copy'), asyncCandidates: $('async-candidates'), asyncDetail: $('async-detail'), asyncArtifacts: $('async-artifacts'), asyncLearningState: $('async-learning-state'), asyncLearningCopy: $('async-learning-copy'), asyncRunFacts: $('async-run-facts'), asyncEstimate: $('async-work-estimate'), asyncCandidateBudget: $('async-candidates-budget'), asyncSlotsInput: $('async-slots-input'), asyncReplicasInput: $('async-replicas-input'), asyncStablePopulation: $('async-stable-population'), asyncBatchInput: $('async-batch-input'), asyncStateWidth: $('async-state-width'), asyncInitialStateScale: $('async-initial-state-scale'), asyncTicksInput: $('async-ticks-input'), networkForm: $('network-form'), networkNodeLayers: $('network-node-layers'), networkNodeActivation: $('network-node-activation'), networkEdgeLayers: $('network-edge-layers'), networkEdgeActivation: $('network-edge-activation'), networkEdgeLatentWidth: $('network-edge-latent-width'), networkSummary: $('network-summary'),
-    embodiedForm: $('embodied-form'), embodiedModel: $('embodied-model'), embodiedContinueRun: $('embodied-continue-run'), embodiedRefresh: $('embodied-refresh'), embodiedAlgorithm: $('embodied-algorithm'), embodiedTrainingMode: $('embodied-training-mode'), embodiedBatchPopulationMode: $('embodied-batch-population-mode'), embodiedExecutionBackend: $('embodied-execution-backend'), embodiedDevice: $('embodied-device'), embodiedWorkers: $('embodied-workers'), embodiedPopulation: $('embodied-population'), embodiedMutationSigma: $('embodied-mutation-sigma'), embodiedEliteFraction: $('embodied-elite-fraction'), embodiedLocalMutationSigma: $('embodied-local-mutation-sigma'), embodiedRegionalFraction: $('embodied-regional-fraction'), embodiedRegionalScale: $('embodied-regional-scale'), embodiedRegionalMinStd: $('embodied-regional-min-std'), embodiedGlobalFraction: $('embodied-global-fraction'), embodiedGlobalParameterRange: $('embodied-global-parameter-range'), embodiedGlobalViabilityFilter: $('embodied-global-viability-filter'), embodiedGlobalMaxAttempts: $('embodied-global-max-attempts'), embodiedGaComposition: $('embodied-ga-composition'), embodiedImmigrantFraction: $('embodied-immigrant-fraction'), embodiedImmigrantMode: $('embodied-immigrant-mode'), embodiedImmigrantSigma: $('embodied-immigrant-sigma'), embodiedMaxGenomeNorm: $('embodied-max-genome-norm'), embodiedMaxParameterMagnitude: $('embodied-max-parameter-magnitude'), embodiedTicks: $('embodied-ticks'), embodiedBatchGenerations: $('embodied-batch-generations'), embodiedBatchSteps: $('embodied-batch-steps'), embodiedHorizonSuggestion: $('embodied-horizon-suggestion'), embodiedBatchTrials: $('embodied-batch-trials'), embodiedBatchValidationTrials: $('embodied-batch-validation-trials'), embodiedBatchTestTrials: $('embodied-batch-test-trials'), embodiedBatchOpponents: $('embodied-batch-opponents'), embodiedPreyCount: $('embodied-prey-count'), embodiedPredatorCount: $('embodied-predator-count'), embodiedMaxFood: $('embodied-max-food'), embodiedFoodGrowthRate: $('embodied-food-growth-rate'), embodiedMaxSpeed: $('embodied-max-speed'), embodiedMaxTurn: $('embodied-max-turn'), embodiedPlantClusters: $('embodied-plant-clusters'), embodiedPlantClusterRadius: $('embodied-plant-cluster-radius'), embodiedNodes: $('embodied-nodes'), embodiedStateWidth: $('embodied-state-width'), embodiedDegree: $('embodied-degree'), embodiedAllowInputOutputConnections: $('embodied-allow-input-output-connections'), embodiedStateScale: $('embodied-state-scale'), embodiedNetworkDt: $('embodied-network-dt'), embodiedRuleOutputScale: $('embodied-rule-output-scale'), embodiedMaxDelta: $('embodied-max-delta'), embodiedEdgeStepScale: $('embodied-edge-step-scale'), embodiedEnergyScale: $('embodied-energy-scale'), embodiedSurvivalPressure: $('embodied-survival-pressure'), embodiedSeed: $('embodied-seed'), embodiedRun: $('embodied-run'), embodiedTerminate: $('embodied-terminate'), embodiedStatus: $('embodied-status'), embodiedProgress: $('embodied-progress'), embodiedResult: $('embodied-result'), embodiedDeathsChart: $('embodied-deaths-chart'), embodiedMealsChart: $('embodied-meals-chart'), embodiedChartOneLabel: $('embodied-chart-one-label'), embodiedChartTwoLabel: $('embodied-chart-two-label'),
-    demoForm: $('demo-form'), demoRun: $('demo-run'), demoRefresh: $('demo-refresh'), demoSeed: $('demo-seed'), demoHiddenNodes: $('demo-hidden-nodes'), demoNetworkDegree: $('demo-network-degree'), demoPreyCount: $('demo-prey-count'), demoPredatorCount: $('demo-predator-count'), demoInitialFood: $('demo-initial-food'), demoMaxFood: $('demo-max-food'), demoFoodGrowthRate: $('demo-food-growth-rate'), demoRate: $('demo-rate'), demoStart: $('demo-start'), demoStatus: $('demo-status'), demoPlay: $('demo-play'), demoStep: $('demo-step'), demoRecord: $('demo-record'), demoLabel: $('demo-label'), demoCanvas: $('ecology-canvas'), demoEvents: $('demo-events'), demoTick: $('demo-tick'), demoPreyLive: $('demo-prey-live'), demoPredatorLive: $('demo-predator-live'), demoPlantsLive: $('demo-plants-live'), demoNetwork: $('demo-network'), demoColorChannel: $('demo-color-channel'), demoEdgeThreshold: $('demo-edge-threshold'), demoNetworkSummary: $('demo-network-summary'), demoChannel: $('demo-channel'), demoSeriesCount: $('demo-series-count'), demoNodeChart: $('demo-node-chart'), demoNodeLegend: $('demo-node-legend'), demoIndividualTitle: $('demo-individual-title'), demoIndividualSummary: $('demo-individual-summary'),
-    diagnosticsForm: $('diagnostics-form'), diagnosticsRunId: $('diagnostics-run-id'), diagnosticsLoadServer: $('diagnostics-load-server'), diagnosticsReportFile: $('diagnostics-report-file'), diagnosticsCheckpointFile: $('diagnostics-checkpoint-file'), diagnosticsLoadFiles: $('diagnostics-load-files'), diagnosticsSampleCount: $('diagnostics-sample-count'), diagnosticsSeed: $('diagnostics-seed'), diagnosticsRunRandomGraphs: $('diagnostics-run-random-graphs'), diagnosticsCoupledEpisodes: $('diagnostics-coupled-episodes'), diagnosticsCoupledSteps: $('diagnostics-coupled-steps'), diagnosticsCoupledChannelX: $('diagnostics-coupled-channel-x'), diagnosticsCoupledChannelY: $('diagnostics-coupled-channel-y'), diagnosticsRunCoupledState: $('diagnostics-run-coupled-state'), diagnosticsCoupledCondition: $('diagnostics-coupled-condition'), diagnosticsCoupledField: $('diagnostics-coupled-field'), diagnosticsCoupledCopy: $('diagnostics-coupled-copy'), diagnosticsCoupledSummary: $('diagnostics-coupled-summary'), diagnosticsCompareLeft: $('diagnostics-compare-left'), diagnosticsCompareRight: $('diagnostics-compare-right'), diagnosticsEvaluationSamples: $('diagnostics-evaluation-samples'), diagnosticsParameterScales: $('diagnostics-parameter-scales'), diagnosticsCompareRuns: $('diagnostics-compare-runs'), diagnosticsStatus: $('diagnostics-status'), diagnosticsTitle: $('diagnostics-title'), diagnosticsCopy: $('diagnostics-copy'), diagnosticsSummary: $('diagnostics-summary'), diagnosticsRandomGraphs: $('diagnostics-random-graphs'), diagnosticsComparison: $('diagnostics-comparison'), diagnosticsFlags: $('diagnostics-flags'), diagnosticsCoverage: $('diagnostics-coverage'), diagnosticsSpecies: $('diagnostics-species')
+    embodiedForm: $('embodied-form'), embodiedModel: $('embodied-model'), embodiedContinueRun: $('embodied-continue-run'), embodiedRefresh: $('embodied-refresh'), embodiedAlgorithm: $('embodied-algorithm'), embodiedTrainingMode: $('embodied-training-mode'), embodiedBatchPopulationMode: $('embodied-batch-population-mode'), embodiedDevice: $('embodied-device'), embodiedWorkers: $('embodied-workers'), embodiedPopulation: $('embodied-population'), embodiedMutationSigma: $('embodied-mutation-sigma'), embodiedEliteFraction: $('embodied-elite-fraction'), embodiedLocalMutationSigma: $('embodied-local-mutation-sigma'), embodiedRegionalFraction: $('embodied-regional-fraction'), embodiedRegionalScale: $('embodied-regional-scale'), embodiedRegionalMinStd: $('embodied-regional-min-std'), embodiedGlobalFraction: $('embodied-global-fraction'), embodiedGlobalParameterRange: $('embodied-global-parameter-range'), embodiedGlobalViabilityFilter: $('embodied-global-viability-filter'), embodiedGlobalMaxAttempts: $('embodied-global-max-attempts'), embodiedGaComposition: $('embodied-ga-composition'), embodiedImmigrantFraction: $('embodied-immigrant-fraction'), embodiedImmigrantMode: $('embodied-immigrant-mode'), embodiedImmigrantSigma: $('embodied-immigrant-sigma'), embodiedMaxGenomeNorm: $('embodied-max-genome-norm'), embodiedMaxParameterMagnitude: $('embodied-max-parameter-magnitude'), embodiedTicks: $('embodied-ticks'), embodiedBatchGenerations: $('embodied-batch-generations'), embodiedBatchSteps: $('embodied-batch-steps'), embodiedHorizonSuggestion: $('embodied-horizon-suggestion'), embodiedBatchTrials: $('embodied-batch-trials'), embodiedBatchValidationTrials: $('embodied-batch-validation-trials'), embodiedBatchTestTrials: $('embodied-batch-test-trials'), embodiedBatchOpponents: $('embodied-batch-opponents'), embodiedPreyCount: $('embodied-prey-count'), embodiedPredatorCount: $('embodied-predator-count'), embodiedMaxFood: $('embodied-max-food'), embodiedFoodGrowthRate: $('embodied-food-growth-rate'), embodiedMaxSpeed: $('embodied-max-speed'), embodiedMaxTurn: $('embodied-max-turn'), embodiedPlantClusters: $('embodied-plant-clusters'), embodiedPlantClusterRadius: $('embodied-plant-cluster-radius'), embodiedNodes: $('embodied-nodes'), embodiedStateWidth: $('embodied-state-width'), embodiedDegree: $('embodied-degree'), embodiedAllowInputOutputConnections: $('embodied-allow-input-output-connections'), embodiedStateScale: $('embodied-state-scale'), embodiedNetworkDt: $('embodied-network-dt'), embodiedRuleOutputScale: $('embodied-rule-output-scale'), embodiedMaxDelta: $('embodied-max-delta'), embodiedEdgeStepScale: $('embodied-edge-step-scale'), embodiedEnergyScale: $('embodied-energy-scale'), embodiedSurvivalPressure: $('embodied-survival-pressure'), embodiedSeed: $('embodied-seed'), embodiedRun: $('embodied-run'), embodiedTerminate: $('embodied-terminate'), embodiedStatus: $('embodied-status'), embodiedProgress: $('embodied-progress'), embodiedResult: $('embodied-result'), embodiedDeathsChart: $('embodied-deaths-chart'), embodiedMealsChart: $('embodied-meals-chart'), embodiedChartOneLabel: $('embodied-chart-one-label'), embodiedChartTwoLabel: $('embodied-chart-two-label'),
+    demoForm: $('demo-form'), demoRun: $('demo-run'), demoRefresh: $('demo-refresh'), demoSeed: $('demo-seed'), demoHiddenNodes: $('demo-hidden-nodes'), demoNetworkDegree: $('demo-network-degree'), demoPreyCount: $('demo-prey-count'), demoPredatorCount: $('demo-predator-count'), demoInitialFood: $('demo-initial-food'), demoMaxFood: $('demo-max-food'), demoFoodGrowthRate: $('demo-food-growth-rate'), demoRate: $('demo-rate'), demoStart: $('demo-start'), demoStatus: $('demo-status'), demoPlay: $('demo-play'), demoStep: $('demo-step'), demoRecord: $('demo-record'), demoShowRays: $('demo-show-rays'), demoShowTrajectory: $('demo-show-trajectory'), demoShowInfo: $('demo-show-info'), demoLabel: $('demo-label'), demoCanvas: $('ecology-canvas'), demoEvents: $('demo-events'), demoTick: $('demo-tick'), demoPreyLive: $('demo-prey-live'), demoPredatorLive: $('demo-predator-live'), demoPlantsLive: $('demo-plants-live'), demoNetwork: $('demo-network'), demoColorChannel: $('demo-color-channel'), demoEdgeThreshold: $('demo-edge-threshold'), demoNetworkSummary: $('demo-network-summary'), demoChannel: $('demo-channel'), demoSeriesCount: $('demo-series-count'), demoShowBoundaryNodes: $('demo-show-boundary-nodes'), demoNodeChart: $('demo-node-chart'), demoNodeLegend: $('demo-node-legend'), demoIndividualTitle: $('demo-individual-title'), demoIndividualSummary: $('demo-individual-summary'),
+    diagnosticsForm: $('diagnostics-form'), diagnosticsRunId: $('diagnostics-run-id'), diagnosticsLoadServer: $('diagnostics-load-server'), diagnosticsReportFile: $('diagnostics-report-file'), diagnosticsCheckpointFile: $('diagnostics-checkpoint-file'), diagnosticsLoadFiles: $('diagnostics-load-files'), diagnosticsLoadMeta: $('diagnostics-load-meta'), diagnosticsLoadWarnings: $('diagnostics-load-warnings'), diagnosticsSampleCount: $('diagnostics-sample-count'), diagnosticsSeed: $('diagnostics-seed'), diagnosticsRunRandomGraphs: $('diagnostics-run-random-graphs'), diagnosticsRandomChart: $('diagnostics-random-chart'), diagnosticsCoupledEpisodes: $('diagnostics-coupled-episodes'), diagnosticsCoupledSteps: $('diagnostics-coupled-steps'), diagnosticsCoupledChannelX: $('diagnostics-coupled-channel-x'), diagnosticsCoupledChannelY: $('diagnostics-coupled-channel-y'), diagnosticsRunCoupledState: $('diagnostics-run-coupled-state'), diagnosticsCoupledCondition: $('diagnostics-coupled-condition'), diagnosticsCoupledField: $('diagnostics-coupled-field'), diagnosticsCoupledCopy: $('diagnostics-coupled-copy'), diagnosticsCoupledSummary: $('diagnostics-coupled-summary'), diagnosticsCompareLeft: $('diagnostics-compare-left'), diagnosticsCompareRight: $('diagnostics-compare-right'), diagnosticsEvaluationSamples: $('diagnostics-evaluation-samples'), diagnosticsParameterScales: $('diagnostics-parameter-scales'), diagnosticsCompareRuns: $('diagnostics-compare-runs'), diagnosticsSensitivityChart: $('diagnostics-sensitivity-chart'), diagnosticsStatus: $('diagnostics-status'), diagnosticsTitle: $('diagnostics-title'), diagnosticsCopy: $('diagnostics-copy'), diagnosticsSummary: $('diagnostics-summary'), diagnosticsHistoryChart: $('diagnostics-history-chart'), diagnosticsHistoryMetric: $('diagnostics-history-metric'), diagnosticsGenomeChart: $('diagnostics-genome-chart'), diagnosticsRandomGraphs: $('diagnostics-random-graphs'), diagnosticsComparison: $('diagnostics-comparison'), diagnosticsFlags: $('diagnostics-flags'), diagnosticsCoverage: $('diagnostics-coverage'), diagnosticsSpecies: $('diagnostics-species')
   };
-  const state = { data: null, runName: '', frame: 0, batch: 0, coordinate: 0, selected: null, playing: false, lastTick: 0, layout: [], job: null, jobTimer: null, live: null, liveModels: [], demo: null, demoLastTick: 0, demoIndividual: null, demoHistory: new HistoryBuffer(360), demoRecorder: null, demoRecordingChunks: [], embodiedCheckpointVersion: '', embodiedJobId: '', embodiedModelWidths: {}, embodiedRunWidths: {}, coupledDiagnostic: null };
+  const state = { data: null, runName: '', frame: 0, batch: 0, coordinate: 0, selected: null, playing: false, lastTick: 0, layout: [], job: null, jobTimer: null, live: null, liveModels: [], demo: null, demoLastTick: 0, demoIndividual: null, demoHistory: new HistoryBuffer(360), demoTrajectories: new Map(), demoRecorder: null, demoRecordingChunks: [], embodiedCheckpointVersion: '', embodiedJobId: '', embodiedModelWidths: {}, embodiedRunWidths: {}, coupledDiagnostic: null, diagnosticBundle: null, randomGraphDiagnostic: null, checkpointComparison: null, diagnosticLoadToken: 0, diagnosticJobs: {} };
   const demoNetworkView = new NetworkView(ui.demoNetwork);
+  const diagnosticLoader = new DiagnosticLoader();
   const viewTitles = {
     survival: 'Survival training', network: 'Network architecture',
     embodied: 'Embodied learning',
@@ -60,6 +69,7 @@
       const form = $(formId);
       if (!form) return;
       [...form.elements].forEach((control) => {
+        if (control.type === 'file') return;
         if (!control.id && !control.name) return;
         try {
           const saved = localStorage.getItem(`state-network-lab:${formId}:${control.id || control.name}`);
@@ -69,6 +79,7 @@
         } catch (_) { /* Storage may be disabled; defaults remain usable. */ }
       });
       form.addEventListener('change', ({target}) => {
+        if (target.type === 'file') return;
         if (!target.matches('input, select') || (!target.id && !target.name)) return;
         try {
           localStorage.setItem(
@@ -624,7 +635,7 @@
     if (Number(ui.embodiedEliteFraction.value) + Number(ui.embodiedRegionalFraction.value) + Number(ui.embodiedGlobalFraction.value) > 1) {
       ui.embodiedStatus.textContent = 'Elite, regional, and global fractions must leave a non-negative local-offspring remainder.'; return;
     }
-    const payload = {training_mode:ui.embodiedTrainingMode.value, batch_population_mode:ui.embodiedBatchPopulationMode.value, algorithm:ui.embodiedAlgorithm.value, execution_backend:ui.embodiedExecutionBackend.value, device:ui.embodiedDevice.value, workers:Number(ui.embodiedWorkers.value), body_inputs:bodyInputs, population_size:Number(ui.embodiedPopulation.value), elite_fraction:Number(ui.embodiedEliteFraction.value), local_mutation_sigma:Number(ui.embodiedLocalMutationSigma.value), regional_fraction:Number(ui.embodiedRegionalFraction.value), regional_scale:Number(ui.embodiedRegionalScale.value), regional_min_std:Number(ui.embodiedRegionalMinStd.value), global_fraction:Number(ui.embodiedGlobalFraction.value), global_parameter_range:Number(ui.embodiedGlobalParameterRange.value), global_viability_filter:ui.embodiedGlobalViabilityFilter.checked, global_max_sampling_attempts:Number(ui.embodiedGlobalMaxAttempts.value), immigrant_fraction:Number(ui.embodiedImmigrantFraction.value), immigrant_mode:ui.embodiedImmigrantMode.value, ticks:Number(ui.embodiedTicks.value), batch_generations:Number(ui.embodiedBatchGenerations.value), batch_episode_steps:Number(ui.embodiedBatchSteps.value), batch_trials:Number(ui.embodiedBatchTrials.value), batch_validation_trials:Number(ui.embodiedBatchValidationTrials.value), batch_test_trials:Number(ui.embodiedBatchTestTrials.value), batch_opponents:Number(ui.embodiedBatchOpponents.value), prey_count:Number(ui.embodiedPreyCount.value), predator_count:Number(ui.embodiedPredatorCount.value), max_food:Number(ui.embodiedMaxFood.value), food_growth_rate:Number(ui.embodiedFoodGrowthRate.value), max_speed:Number(ui.embodiedMaxSpeed.value), max_turn:Number(ui.embodiedMaxTurn.value), plant_cluster_count:Number(ui.embodiedPlantClusters.value), plant_cluster_radius:Number(ui.embodiedPlantClusterRadius.value), hidden_nodes:Number(ui.embodiedNodes.value), state_width:Number(ui.embodiedStateWidth.value), mean_degree:Number(ui.embodiedDegree.value), allow_input_output_connections:ui.embodiedAllowInputOutputConnections.checked, initial_state_scale:Number(ui.embodiedStateScale.value), network_dt:Number(ui.embodiedNetworkDt.value), rule_output_scale:Number(ui.embodiedRuleOutputScale.value), max_delta:Number(ui.embodiedMaxDelta.value), edge_step_scale:Number(ui.embodiedEdgeStepScale.value), initial_energy_scale:Number(ui.embodiedEnergyScale.value), enforce_survival_pressure:ui.embodiedSurvivalPressure.checked};
+    const payload = {training_mode:ui.embodiedTrainingMode.value, batch_population_mode:ui.embodiedBatchPopulationMode.value, algorithm:ui.embodiedAlgorithm.value, execution_backend:'torch', device:ui.embodiedDevice.value, workers:Number(ui.embodiedWorkers.value), body_inputs:bodyInputs, population_size:Number(ui.embodiedPopulation.value), elite_fraction:Number(ui.embodiedEliteFraction.value), local_mutation_sigma:Number(ui.embodiedLocalMutationSigma.value), regional_fraction:Number(ui.embodiedRegionalFraction.value), regional_scale:Number(ui.embodiedRegionalScale.value), regional_min_std:Number(ui.embodiedRegionalMinStd.value), global_fraction:Number(ui.embodiedGlobalFraction.value), global_parameter_range:Number(ui.embodiedGlobalParameterRange.value), global_viability_filter:ui.embodiedGlobalViabilityFilter.checked, global_max_sampling_attempts:Number(ui.embodiedGlobalMaxAttempts.value), immigrant_fraction:Number(ui.embodiedImmigrantFraction.value), immigrant_mode:ui.embodiedImmigrantMode.value, ticks:Number(ui.embodiedTicks.value), batch_generations:Number(ui.embodiedBatchGenerations.value), batch_episode_steps:Number(ui.embodiedBatchSteps.value), batch_trials:Number(ui.embodiedBatchTrials.value), batch_validation_trials:Number(ui.embodiedBatchValidationTrials.value), batch_test_trials:Number(ui.embodiedBatchTestTrials.value), batch_opponents:Number(ui.embodiedBatchOpponents.value), prey_count:Number(ui.embodiedPreyCount.value), predator_count:Number(ui.embodiedPredatorCount.value), max_food:Number(ui.embodiedMaxFood.value), food_growth_rate:Number(ui.embodiedFoodGrowthRate.value), max_speed:Number(ui.embodiedMaxSpeed.value), max_turn:Number(ui.embodiedMaxTurn.value), plant_cluster_count:Number(ui.embodiedPlantClusters.value), plant_cluster_radius:Number(ui.embodiedPlantClusterRadius.value), hidden_nodes:Number(ui.embodiedNodes.value), state_width:Number(ui.embodiedStateWidth.value), mean_degree:Number(ui.embodiedDegree.value), allow_input_output_connections:ui.embodiedAllowInputOutputConnections.checked, initial_state_scale:Number(ui.embodiedStateScale.value), network_dt:Number(ui.embodiedNetworkDt.value), rule_output_scale:Number(ui.embodiedRuleOutputScale.value), max_delta:Number(ui.embodiedMaxDelta.value), edge_step_scale:Number(ui.embodiedEdgeStepScale.value), initial_energy_scale:Number(ui.embodiedEnergyScale.value), enforce_survival_pressure:ui.embodiedSurvivalPressure.checked};
     for (const [key, control] of Object.entries({mutation_sigma:ui.embodiedMutationSigma, immigrant_sigma:ui.embodiedImmigrantSigma, max_genome_norm:ui.embodiedMaxGenomeNorm, max_parameter_magnitude:ui.embodiedMaxParameterMagnitude})) if (control.value.trim()) payload[key] = Number(control.value);
     payload.node_hidden_layers = nodeLayers; payload.node_activation = ui.networkNodeActivation.value;
     payload.edge_hidden_layers = edgeLayers; payload.edge_activation = ui.networkEdgeActivation.value;
@@ -679,10 +690,14 @@
   function drawDemoNodeChart() {
     const channel = Number(ui.demoChannel.value) || 0;
     const seriesCount = Number(ui.demoSeriesCount.value) || 0;
+    const network = state.demo?.lastNetwork;
+    const excludedNodes = !ui.demoShowBoundaryNodes.checked && network
+      ? [...network.input_nodes, ...network.action_nodes]
+      : [];
     const series = drawNodeHistoryChart(
       ui.demoNodeChart,
       state.demoHistory.toArray(),
-      { channel, seriesCount },
+      { channel, seriesCount, excludedNodes },
     );
     ui.demoNodeLegend.replaceChildren(...series.map((item) => {
       const entry = document.createElement('span');
@@ -699,7 +714,10 @@
       demoNetworkView.reset();
     }
     state.demoIndividual = individual.id;
-    if (state.demo) state.demo.lastNetwork = network;
+    if (state.demo) {
+      state.demo.lastNetwork = network;
+      state.demo.inspection = snapshot;
+    }
     if (ui.demoColorChannel.options.length !== network.state_width) {
       const options = Array.from({length:network.state_width}, (_, index) => new Option(`channel ${index}`, String(index)));
       const priorColour = ui.demoColorChannel.value;
@@ -713,8 +731,9 @@
     ui.demoChannel.disabled = false;
     state.demoHistory.push({tick:snapshot.tick, node_state:network.node_state});
     ui.demoIndividualTitle.textContent = `${individual.species} ${individual.id} · ${network.nodes} nodes · ${network.edges.length} directed edges`;
-    ui.demoIndividualSummary.textContent = `Network tick ${network.step}; ray vision occupies channel 0, body/interoceptive signals occupy channel 1, and all other input coordinates are zero. The colour and history controls are independent; history retains ${state.demoHistory.length} observed ecology ticks.`;
+    ui.demoIndividualSummary.textContent = `Network tick ${network.step}; ray vision occupies channel 0, body/interoceptive signals occupy channel 1, and all other input coordinates are zero. The chart is a rolling window of the latest ${state.demoHistory.length} observed ecology ticks.`;
     drawDemoNetwork(network); drawDemoNodeChart();
+    if (state.demo?.snapshot) drawDemo(state.demo.snapshot);
   }
   async function refreshDemoIndividual(individualId = state.demoIndividual) {
     if (!state.demo || !individualId) return;
@@ -729,18 +748,36 @@
       if (individualId === state.demoIndividual) renderDemoIndividual(snapshot);
     } catch (error) {
       if (individualId === state.demoIndividual) {
-        state.demoIndividual = null;
-        state.demoHistory.clear();
-        demoNetworkView.reset();
-        ui.demoIndividualTitle.textContent = 'Selected organism is no longer alive';
-        ui.demoIndividualSummary.textContent = 'Choose another organism to inspect its newly sampled network.';
-        ui.demoColorChannel.disabled = true;
-        ui.demoChannel.disabled = true;
-        drawDemoNodeChart();
+        clearDemoIndividualSelection({
+          title: 'Selected organism is no longer alive',
+          summary: 'Choose another organism to inspect its newly sampled network.',
+        });
       }
     } finally {
       if (state.demo) state.demo.inspectionPending = false;
     }
+  }
+  function clearDemoIndividualSelection({
+    title = 'No organism selected',
+    summary = 'Click a prey or predator in the ecology to inspect its live recurrent state.',
+  } = {}) {
+    state.demoIndividual = null;
+    state.demoHistory.clear();
+    if (state.demo) {
+      state.demo.lastNetwork = null;
+      state.demo.inspection = null;
+    }
+    demoNetworkView.reset();
+    ui.demoColorChannel.replaceChildren();
+    ui.demoColorChannel.disabled = true;
+    ui.demoChannel.replaceChildren();
+    ui.demoChannel.disabled = true;
+    ui.demoNodeLegend.replaceChildren();
+    ui.demoNetworkSummary.textContent = 'Select an organism to inspect its graph.';
+    ui.demoIndividualTitle.textContent = title;
+    ui.demoIndividualSummary.textContent = summary;
+    drawDemoNodeChart();
+    if (state.demo?.snapshot) drawDemo(state.demo.snapshot);
   }
   function selectDemoIndividual(snapshot, event) {
     const rect = ui.demoCanvas.getBoundingClientRect();
@@ -749,14 +786,105 @@
     const worldY = (1 - (event.clientY - rect.top) / rect.height) * world.bounds.height;
     const chosen = nearestOrganism(world, worldX, worldY);
     const hitRadius = 28 / ui.demoCanvas.width * world.bounds.width;
-    if (!chosen || chosen.distance > hitRadius) return;
+    if (!chosen || chosen.distance > hitRadius) {
+      if (state.demoIndividual) clearDemoIndividualSelection();
+      return;
+    }
     if (state.demoIndividual !== chosen.organism.id) {
       state.demoHistory.clear();
       demoNetworkView.reset();
       state.demo.lastInspectionAt = 0;
+      state.demo.inspection = null;
     }
     state.demoIndividual = chosen.organism.id;
     refreshDemoIndividual(chosen.organism.id);
+  }
+  function recordDemoTrajectories(snapshot) {
+    if (!state.demo || state.demo.lastTrajectoryTick === snapshot.tick) return;
+    state.demo.lastTrajectoryTick = snapshot.tick;
+    const living = new Set();
+    snapshot.state.organisms.forEach((organism) => {
+      living.add(organism.id);
+      let trail = state.demoTrajectories.get(organism.id);
+      if (!trail) {
+        trail = new HistoryBuffer(180);
+        state.demoTrajectories.set(organism.id, trail);
+      }
+      const previous = trail.at(-1);
+      if (previous && previous.life !== organism.life) trail.clear();
+      trail.push({x: organism.x, y: organism.y, life: organism.life});
+    });
+    [...state.demoTrajectories.keys()].forEach((id) => {
+      if (!living.has(id)) state.demoTrajectories.delete(id);
+    });
+  }
+  function drawDemoTrajectory(context, organism, bounds, x, y) {
+    const trail = state.demoTrajectories.get(organism.id);
+    if (!trail || trail.length < 2) return;
+    context.save();
+    context.strokeStyle = organism.species === 'predator' ? '#ffb18f' : '#86f0df';
+    context.globalAlpha = .7;
+    context.lineWidth = 1.5;
+    context.setLineDash([5, 5]);
+    context.beginPath();
+    trail.forEach((point, index) => {
+      const previous = trail.at(index - 1);
+      const wrapped = previous && (
+        Math.abs(point.x - previous.x) > bounds.width / 2
+        || Math.abs(point.y - previous.y) > bounds.height / 2
+      );
+      if (index === 0 || wrapped) context.moveTo(x(point.x), y(point.y));
+      else context.lineTo(x(point.x), y(point.y));
+    });
+    context.stroke();
+    context.restore();
+  }
+  function drawDemoRays(context, organism, observation, x, y) {
+    const rays = observation?.vision;
+    if (!Array.isArray(rays) || !rays.length) return;
+    const colors = {plant:'#a8e87b', prey:'#7ff0dc', predator:'#ffae8c'};
+    context.save();
+    context.lineWidth = 1.2;
+    rays.forEach((ray) => {
+      const range = Number(ray.range);
+      const hasHitDistance = ray.distance !== null && ray.distance !== undefined && Number.isFinite(Number(ray.distance));
+      const distance = hasHitDistance ? Number(ray.distance) : range;
+      if (!Number.isFinite(range) || !Number.isFinite(distance)) return;
+      const hit = ray.kind && hasHitDistance;
+      context.strokeStyle = hit ? (colors[ray.kind] || '#e7eff6') : '#8da1b622';
+      context.setLineDash(hit ? [] : [4, 5]);
+      context.beginPath();
+      context.moveTo(x(organism.x), y(organism.y));
+      context.lineTo(x(organism.x + distance * Math.cos(Number(ray.angle))), y(organism.y + distance * Math.sin(Number(ray.angle))));
+      context.stroke();
+      if (hit) {
+        context.fillStyle = context.strokeStyle;
+        context.beginPath();
+        context.arc(x(organism.x + distance * Math.cos(Number(ray.angle))), y(organism.y + distance * Math.sin(Number(ray.angle))), 2.5, 0, 2 * Math.PI);
+        context.fill();
+      }
+    });
+    context.restore();
+  }
+  function drawDemoAgentInfo(context, organism, observation = null) {
+    const hasObservation = observation && typeof observation === 'object';
+    const value = (item, digits = 2) => Number.isFinite(Number(item)) ? Number(item).toFixed(digits) : '—';
+    const hits = Array.isArray(observation?.vision) ? observation.vision.filter((ray) => ray.kind).length : 0;
+    const lines = [
+      `${organism.id} · ${organism.species} · energy ${Number(organism.energy).toFixed(1)} · age ${organism.age}`,
+      `hunger ${hasObservation ? `${value(100 * observation.hunger)}%` : '—'} · Δenergy ${hasObservation ? `${value(100 * observation.energy_change)}%` : '—'} · ate ${hasObservation ? (observation.ate ? 'yes' : 'no') : '—'}`,
+      `vision ${hits}/${Array.isArray(observation?.vision) ? observation.vision.length : '—'} hits · heading ${((Number(organism.heading) * 180 / Math.PI % 360 + 360) % 360).toFixed(0)}°`,
+    ];
+    context.save();
+    context.font = '11px ui-monospace, monospace';
+    const panelWidth = Math.max(...lines.map((line) => context.measureText(line).width)) + 18;
+    context.fillStyle = '#09131ae8';
+    context.fillRect(12, 12, panelWidth, 62);
+    context.strokeStyle = organism.species === 'predator' ? '#ff966c88' : '#5fd9c188';
+    context.strokeRect(12.5, 12.5, panelWidth - 1, 61);
+    context.fillStyle = '#dce7ed';
+    lines.forEach((line, index) => context.fillText(line, 21, 31 + index * 17));
+    context.restore();
   }
   function drawDemo(snapshot) {
     const context = ui.demoCanvas.getContext('2d');
@@ -766,6 +894,9 @@
     const bounds = world.bounds;
     const x = (value) => value / bounds.width * width;
     const y = (value) => height - value / bounds.height * height;
+    recordDemoTrajectories(snapshot);
+    const selectedOrganism = world.organisms.find((organism) => organism.id === state.demoIndividual);
+    const selectedObservation = snapshot.observations?.[state.demoIndividual] || null;
 
     context.clearRect(0, 0, width, height);
     context.fillStyle = '#09131a';
@@ -789,6 +920,9 @@
       context.arc(x(plant.x), y(plant.y), radius, 0, 2 * Math.PI);
     });
     context.fill();
+
+    if (selectedOrganism && ui.demoShowTrajectory.checked) drawDemoTrajectory(context, selectedOrganism, bounds, x, y);
+    if (selectedOrganism && ui.demoShowRays.checked) drawDemoRays(context, selectedOrganism, selectedObservation, x, y);
 
     world.organisms.forEach((organism) => {
       const px = x(organism.x);
@@ -841,6 +975,8 @@
     context.fillStyle = '#5fd9c1'; context.fillText('● prey', 92, height - 11);
     context.fillStyle = '#ff966c'; context.fillText('▲ predator', 166, height - 11);
     context.fillStyle = '#93a6b6'; context.fillText('click an organism to inspect its live network', 270, height - 11);
+
+    if (selectedOrganism && ui.demoShowInfo.checked) drawDemoAgentInfo(context, selectedOrganism, selectedObservation);
 
     ui.demoTick.textContent = String(snapshot.tick);
     ui.demoPreyLive.textContent = String(world.population.prey);
@@ -927,6 +1063,7 @@
       };
       state.demoIndividual = null;
       state.demoHistory.clear();
+      state.demoTrajectories.clear();
       demoNetworkView.reset();
       ui.demoColorChannel.replaceChildren();
       ui.demoColorChannel.disabled = true;
@@ -1022,6 +1159,57 @@
     ui.diagnosticsSummary.replaceChildren(statCard('Recorded generations', historyLabel), statCard('Training mode', report.training_mode || 'not recorded'), statCard('Prey best lifetime', diagnosticNumber(report.prey?.best_lifetime)), statCard('Predator best lifetime', diagnosticNumber(report.predator?.best_lifetime)), statCard('Node / edge parameters', nodeCount && edgeCount ? `${nodeCount} / ${edgeCount}` : 'architecture incomplete'), statCard('Prey genome RMS', diagnosticNumber(genomeRms)));
     ui.diagnosticsFlags.replaceChildren(...flags); ui.diagnosticsCoverage.replaceChildren(...coverage);
     const speciesCards = [...prey.cards, ...predator.cards]; ui.diagnosticsSpecies.replaceChildren(...speciesCards);
+    drawHistoryPlot(ui.diagnosticsHistoryChart, history, ui.diagnosticsHistoryMetric.value);
+    drawGenomeHistogram(
+      ui.diagnosticsGenomeChart,
+      diagnosticGenome(source, 'prey'),
+      diagnosticGenome(source, 'predator'),
+    );
+  }
+  function renderDiagnosticBundle(bundle, label) {
+    state.diagnosticBundle = bundle;
+    renderDiagnostics(bundle.primary, bundle.checkpoint || {});
+    const parts = [
+      bundle.report ? 'completed report' : null,
+      bundle.checkpoint ? 'current checkpoint' : null,
+    ].filter(Boolean);
+    ui.diagnosticsLoadMeta.textContent = `${label} · ${parts.join(' + ')} · selected ${bundle.source.replaceAll('_', ' ')}`;
+    ui.diagnosticsLoadWarnings.replaceChildren(...bundle.warnings.map((warning) => diagnosticItem('LOAD WARNING', warning)));
+    ui.diagnosticsLoadWarnings.hidden = bundle.warnings.length === 0;
+    activate('diagnostics');
+  }
+  function redrawDiagnosticPlots() {
+    if (state.diagnosticBundle) {
+      const report = state.diagnosticBundle.primary;
+      const source = state.diagnosticBundle.checkpoint || report;
+      drawHistoryPlot(
+        ui.diagnosticsHistoryChart,
+        Array.isArray(report.history) ? report.history : [],
+        ui.diagnosticsHistoryMetric.value,
+      );
+      drawGenomeHistogram(
+        ui.diagnosticsGenomeChart,
+        diagnosticGenome(source, 'prey'),
+        diagnosticGenome(source, 'predator'),
+      );
+    }
+    drawReliabilityPlot(ui.diagnosticsRandomChart, state.randomGraphDiagnostic);
+    drawSensitivityPlot(ui.diagnosticsSensitivityChart, state.checkpointComparison);
+    drawCoupledStateField();
+  }
+  function setDiagnosticLoading(loading, status) {
+    ui.diagnosticsLoadServer.disabled = loading;
+    ui.diagnosticsLoadFiles.disabled = loading;
+    ui.diagnosticsStatus.textContent = status;
+    ui.diagnosticsStatus.classList.toggle('loading', loading);
+  }
+  function diagnosticLoadFailure(error) {
+    if (error.name === 'AbortError') return;
+    const details = Array.isArray(error.details) && error.details.length
+      ? ` ${error.details.join(' ')}`
+      : '';
+    ui.diagnosticsStatus.textContent = `Could not load artifacts: ${error.message}${details}`;
+    ui.diagnosticsLoadMeta.textContent = 'No new artifact was loaded.';
   }
   function drawCoupledStateField() {
     const report = state.coupledDiagnostic, canvas = ui.diagnosticsCoupledField;
@@ -1056,44 +1244,95 @@
     ui.diagnosticsCoupledSummary.replaceChildren(statCard(`Replay attractor (h${selected[0]}, h${selected[1]})`, Array.isArray(selectedState) ? `(${selectedState.map((value) => Number(value).toFixed(3)).join(', ')})` : '—'), statCard('Local stability', `${attractor.classification || '—'} · ρ ${diagnosticNumber(attractor.spectral_radius)}`), statCard('Transition eigenvalues', eigen || '—'), statCard('Hidden sync time', diagnosticNumber(sync.synchronization_time_state_variance)), statCard('State/message correlation', diagnosticNumber(sync.state_message_variance_correlation)), statCard('Diagnostic flags', (report.flags || []).join(' · ') || 'none'));
     drawCoupledStateField();
   }
+  async function executeDiagnosticJob(key, endpoint, payload, button, interval = 500) {
+    state.diagnosticJobs[key]?.abort();
+    const controller = new AbortController();
+    state.diagnosticJobs[key] = controller;
+    button.disabled = true;
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      const text = await response.text();
+      let data;
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        throw new Error(`Diagnostic start returned malformed JSON (HTTP ${response.status}).`);
+      }
+      if (!response.ok) throw new Error(apiError(data, 'could not start diagnostic job'));
+      if (!data.job_id) throw new Error('Diagnostic start response did not include a job ID.');
+      return await waitForJob(fetch, data.job_id, { signal: controller.signal, interval });
+    } finally {
+      if (state.diagnosticJobs[key] === controller) {
+        delete state.diagnosticJobs[key];
+        button.disabled = false;
+      }
+    }
+  }
   async function runCoupledStateDiagnostic() {
     const runId = ui.diagnosticsRunId.value.trim(), episodes = Number(ui.diagnosticsCoupledEpisodes.value), episodeSteps = Number(ui.diagnosticsCoupledSteps.value), channelX = Number(ui.diagnosticsCoupledChannelX.value), channelY = Number(ui.diagnosticsCoupledChannelY.value);
     if (!validDiagnosticRunId(runId)) { ui.diagnosticsStatus.textContent = 'Run ID may contain letters, digits, hyphens, and underscores.'; return; }
     if (!Number.isInteger(episodes) || episodes < 1 || episodes > 3 || !Number.isInteger(episodeSteps) || episodeSteps < 4 || episodeSteps > 512 || !Number.isInteger(channelX) || !Number.isInteger(channelY) || channelX < 0 || channelY < 0 || channelX === channelY) { ui.diagnosticsStatus.textContent = 'Use 1–3 episodes, 4–512 ticks, and two distinct non-negative state channels.'; return; }
     const payload = {episodes, episode_steps:episodeSteps, channel_x:channelX, channel_y:channelY}; if (ui.diagnosticsSeed.value.trim()) payload.seed = Number(ui.diagnosticsSeed.value);
-    ui.diagnosticsRunCoupledState.disabled = true; ui.diagnosticsStatus.textContent = `Mapping the 2D prey state field and ${episodes} matched replay${episodes === 1 ? '' : 's'}…`;
+    ui.diagnosticsStatus.textContent = `Mapping the 2D prey state field and ${episodes} matched replay${episodes === 1 ? '' : 's'}…`;
     try {
-      const response = await fetch(`/api/embodied/runs/${encodeURIComponent(runId)}/diagnostics/coupled-state`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}), data = await response.json();
-      if (!response.ok) throw new Error(apiError(data, 'could not start coupled-state diagnostic'));
-      const poll = async () => { const statusResponse = await fetch(`/api/jobs/${encodeURIComponent(data.job_id)}`), job = await statusResponse.json(); if (!statusResponse.ok) throw new Error(apiError(job, 'diagnostic job disappeared')); if (job.status === 'complete') { renderCoupledStateDiagnostic(job.result); ui.diagnosticsStatus.textContent = `2D prey-state diagnostic complete (${episodeSteps} ticks, ${episodes} matched episode${episodes === 1 ? '' : 's'}).`; ui.diagnosticsRunCoupledState.disabled = false; activate('diagnostics'); return; } if (job.status === 'failed') throw new Error(job.error || 'coupled-state diagnostic failed'); window.setTimeout(() => { poll().catch((error) => { ui.diagnosticsStatus.textContent = `Coupled-state diagnostic failed: ${error.message}`; ui.diagnosticsRunCoupledState.disabled = false; }); }, 500); };
-      await poll();
-    } catch (error) { ui.diagnosticsStatus.textContent = `Could not run coupled-state diagnostic: ${error.message}`; ui.diagnosticsRunCoupledState.disabled = false; }
+      const result = await executeDiagnosticJob(
+        'coupled',
+        `/api/embodied/runs/${encodeURIComponent(runId)}/diagnostics/coupled-state`,
+        payload,
+        ui.diagnosticsRunCoupledState,
+      );
+      renderCoupledStateDiagnostic(result);
+      ui.diagnosticsStatus.textContent = `2D prey-state diagnostic complete (${episodeSteps} ticks, ${episodes} matched episode${episodes === 1 ? '' : 's'}).`;
+      activate('diagnostics');
+    } catch (error) {
+      if (error.name !== 'AbortError') ui.diagnosticsStatus.textContent = `Could not run coupled-state diagnostic: ${error.message}`;
+    }
   }
   async function loadDiagnosticsFromServer() {
     const runId = ui.diagnosticsRunId.value.trim();
     if (!validDiagnosticRunId(runId)) { ui.diagnosticsStatus.textContent = 'Run ID may contain letters, digits, hyphens, and underscores.'; return; }
-    ui.diagnosticsLoadServer.disabled = true; ui.diagnosticsStatus.textContent = `Loading report and checkpoint for ${runId}…`;
+    const loadToken = ++state.diagnosticLoadToken;
+    setDiagnosticLoading(true, `Loading validated artifacts for ${runId}…`);
     try {
-      const base = `/artifacts/embodied_runs/${encodeURIComponent(runId)}`, responses = await Promise.all([fetch(`${base}/report.json`), fetch(`${base}/checkpoint.json`)]);
-      const parseArtifact = async (response) => { if (!response.ok) return null; try { return await response.json(); } catch { return null; } };
-      const [report, checkpoint] = await Promise.all(responses.map(parseArtifact));
-      if (!report && !checkpoint) throw new Error(`Neither usable report.json nor checkpoint.json could be loaded (${responses[0].status}/${responses[1].status})`);
-      renderDiagnostics(report || checkpoint, checkpoint || {}); ui.diagnosticsStatus.textContent = `Analyzed server run ${runId}${report ? (checkpoint ? ' with checkpoint' : ' (report only)') : ' from its current checkpoint'}.`; activate('diagnostics');
-    } catch (error) { ui.diagnosticsStatus.textContent = `Could not load artifacts: ${error.message}`; } finally { ui.diagnosticsLoadServer.disabled = false; }
+      const bundle = await diagnosticLoader.fromServer(runId);
+      renderDiagnosticBundle(bundle, `Server run ${runId}`);
+      ui.diagnosticsStatus.textContent = `Loaded and validated server run ${runId}.`;
+    } catch (error) {
+      if (loadToken === state.diagnosticLoadToken) diagnosticLoadFailure(error);
+    } finally {
+      if (loadToken === state.diagnosticLoadToken) setDiagnosticLoading(false, ui.diagnosticsStatus.textContent);
+    }
   }
   async function loadDiagnosticsFromFiles() {
     const reportFile = ui.diagnosticsReportFile.files[0], checkpointFile = ui.diagnosticsCheckpointFile.files[0];
     if (!reportFile && !checkpointFile) { ui.diagnosticsStatus.textContent = 'Choose a report.json or checkpoint.json file first.'; return; }
-    ui.diagnosticsLoadFiles.disabled = true;
-    try { const checkpoint = checkpointFile ? JSON.parse(await checkpointFile.text()) : {}, report = reportFile ? JSON.parse(await reportFile.text()) : checkpoint; renderDiagnostics(report, checkpoint); ui.diagnosticsStatus.textContent = reportFile ? `Analyzed ${reportFile.name}${checkpointFile ? ` with ${checkpointFile.name}` : ' (report only)'}.` : `Analyzed current checkpoint ${checkpointFile.name}.`; activate('diagnostics'); } catch (error) { ui.diagnosticsStatus.textContent = `Could not analyze files: ${error.message}`; } finally { ui.diagnosticsLoadFiles.disabled = false; }
+    const loadToken = ++state.diagnosticLoadToken;
+    setDiagnosticLoading(true, 'Reading and validating local artifacts…');
+    try {
+      const bundle = await diagnosticLoader.fromFiles(reportFile, checkpointFile);
+      const names = [reportFile?.name, checkpointFile?.name].filter(Boolean).join(' + ');
+      renderDiagnosticBundle(bundle, names);
+      ui.diagnosticsStatus.textContent = `Loaded and validated ${names}.`;
+    } catch (error) {
+      if (loadToken === state.diagnosticLoadToken) diagnosticLoadFailure(error);
+    } finally {
+      if (loadToken === state.diagnosticLoadToken) setDiagnosticLoading(false, ui.diagnosticsStatus.textContent);
+    }
   }
   function renderRandomGraphDiagnostic(result) {
+    state.randomGraphDiagnostic = result;
     const cards = [];
     ['prey', 'predator'].forEach((species) => {
       const data = result[species] || {}, fitness = data.fitness || {}, behavior = data.behavior || {}, prefix = species[0].toUpperCase() + species.slice(1);
       cards.push(statCard(`${prefix} fitness mean ± σ`, `${diagnosticNumber(fitness.mean)} ± ${diagnosticNumber(fitness.standard_deviation)}`), statCard(`${prefix} fitness p10 – p90`, `${diagnosticNumber(fitness.p10)} – ${diagnosticNumber(fitness.p90)}`), statCard(`${prefix} fitness range`, `${diagnosticNumber(fitness.minimum)} – ${diagnosticNumber(fitness.maximum)}`), statCard(`${prefix} mean action change`, diagnosticNumber(behavior.mean_action_change)), statCard(`${prefix} mean speed`, diagnosticNumber(behavior.mean_speed)));
     });
     ui.diagnosticsRandomGraphs.replaceChildren(...cards);
+    drawReliabilityPlot(ui.diagnosticsRandomChart, result);
     const prey = result.prey?.fitness || {}, predator = result.predator?.fitness || {};
     const unstable = (fitness) => Number(fitness.standard_deviation || 0) > .25 * Math.max(1, Math.abs(Number(fitness.mean || 0)));
     if (unstable(prey) || unstable(predator)) ui.diagnosticsFlags.prepend(diagnosticItem('RANDOM_BRAIN_FITNESS_VARIANCE_HIGH', 'At least one saved rule has large fitness variation across newly sampled graph/state instances. Inspect its p10–p90 interval before treating the mean as reliable.'));
@@ -1103,21 +1342,23 @@
     if (!validDiagnosticRunId(runId)) { ui.diagnosticsStatus.textContent = 'Run ID may contain letters, digits, hyphens, and underscores.'; return; }
     if (!Number.isInteger(sampleCount) || sampleCount < 1 || sampleCount > 256) { ui.diagnosticsStatus.textContent = 'Fresh graph samples must be an integer from 1 to 256.'; return; }
     const payload = {sample_count: sampleCount}; if (ui.diagnosticsSeed.value.trim()) payload.seed = Number(ui.diagnosticsSeed.value);
-    ui.diagnosticsRunRandomGraphs.disabled = true; ui.diagnosticsStatus.textContent = `Evaluating ${sampleCount} fresh graph/state instances…`;
+    ui.diagnosticsStatus.textContent = `Evaluating ${sampleCount} fresh graph/state instances…`;
     try {
-      const response = await fetch(`/api/embodied/runs/${encodeURIComponent(runId)}/diagnostics/random-graphs`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}), data = await response.json();
-      if (!response.ok) throw new Error(apiError(data, 'could not start random-graph diagnostics'));
-      const poll = async () => {
-        const statusResponse = await fetch(`/api/jobs/${data.job_id}`), job = await statusResponse.json();
-        if (!statusResponse.ok) throw new Error(apiError(job, 'diagnostic job disappeared'));
-        if (job.status === 'complete') { renderRandomGraphDiagnostic(job.result); ui.diagnosticsStatus.textContent = `Random-graph diagnostic complete: ${job.result.sample_count} matched fresh instances, seed ${job.result.seed}.`; ui.diagnosticsRunRandomGraphs.disabled = false; return; }
-        if (job.status === 'failed') throw new Error(job.error || 'random-graph diagnostic failed');
-        window.setTimeout(() => { poll().catch((error) => { ui.diagnosticsStatus.textContent = `Random-graph diagnostic failed: ${error.message}`; ui.diagnosticsRunRandomGraphs.disabled = false; }); }, 400);
-      };
-      await poll();
-    } catch (error) { ui.diagnosticsStatus.textContent = `Could not run random-graph diagnostics: ${error.message}`; ui.diagnosticsRunRandomGraphs.disabled = false; }
+      const result = await executeDiagnosticJob(
+        'random_graphs',
+        `/api/embodied/runs/${encodeURIComponent(runId)}/diagnostics/random-graphs`,
+        payload,
+        ui.diagnosticsRunRandomGraphs,
+        400,
+      );
+      renderRandomGraphDiagnostic(result);
+      ui.diagnosticsStatus.textContent = `Random-graph diagnostic complete: ${result.sample_count} matched fresh instances, seed ${result.seed}.`;
+    } catch (error) {
+      if (error.name !== 'AbortError') ui.diagnosticsStatus.textContent = `Could not run random-graph diagnostics: ${error.message}`;
+    }
   }
   function renderRunComparison(comparison) {
+    state.checkpointComparison = comparison;
     const cards = [];
     const left = comparison.checkpoint_a || {}, right = comparison.checkpoint_b || {}, differences = comparison.differences || {};
     cards.push(statCard('Fitness A / B', `${diagnosticNumber(left.fitness?.mean)} / ${diagnosticNumber(right.fitness?.mean)}`), statCard('Fitness difference B − A', diagnosticNumber(differences.fitness)), statCard('Speed difference B − A', diagnosticNumber(differences.mean_speed)), statCard('Turn difference B − A', diagnosticNumber(differences.mean_turn)), statCard('Action-change difference B − A', diagnosticNumber(differences.mean_action_change)), statCard('Mean / max action trajectory Δ', `${diagnosticNumber(differences.mean_absolute_action_difference)} / ${diagnosticNumber(differences.maximum_action_difference)}`));
@@ -1129,25 +1370,27 @@
     });
     Object.entries(comparison.parameter_scaling?.results || {}).forEach(([scale, data]) => cards.push(statCard(`B × ${scale} fitness`, diagnosticNumber(data.fitness?.mean)), statCard(`B × ${scale} node |x|>3`, `${(100 * Number(data.node_rule_raw_output?.abs_gt_3_fraction || 0)).toFixed(1)}%`)));
     ui.diagnosticsComparison.replaceChildren(...cards);
+    drawSensitivityPlot(ui.diagnosticsSensitivityChart, comparison);
   }
   async function compareSavedRuns() {
     const leftRunId = ui.diagnosticsCompareLeft.value.trim(), rightRunId = ui.diagnosticsCompareRight.value.trim(), evaluationSamples = Number(ui.diagnosticsEvaluationSamples.value), scales = ui.diagnosticsParameterScales.value.split(',').map((value) => Number(value.trim())).filter(Number.isFinite);
     if (!validDiagnosticRunId(leftRunId) || !validDiagnosticRunId(rightRunId)) { ui.diagnosticsStatus.textContent = 'Run IDs may contain letters, digits, hyphens, and underscores.'; return; }
     if (!Number.isInteger(evaluationSamples) || evaluationSamples < 1 || evaluationSamples > 32 || !scales.length || scales.some((scale) => scale <= 0 || scale > 10)) { ui.diagnosticsStatus.textContent = 'Use 1–32 matched episodes and comma-separated parameter scales in (0, 10].'; return; }
     const payload = {left_run_id: leftRunId, right_run_id: rightRunId, evaluation_samples: evaluationSamples, parameter_scales: scales}; if (ui.diagnosticsSeed.value.trim()) payload.seed = Number(ui.diagnosticsSeed.value);
-    ui.diagnosticsCompareRuns.disabled = true; ui.diagnosticsStatus.textContent = `Evaluating ${leftRunId} and ${rightRunId} on ${evaluationSamples} matched random worlds…`;
+    ui.diagnosticsStatus.textContent = `Evaluating ${leftRunId} and ${rightRunId} on ${evaluationSamples} matched random worlds…`;
     try {
-      const response = await fetch('/api/embodied/diagnostics/checkpoints/evaluate', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}), data = await response.json();
-      if (!response.ok) throw new Error(apiError(data, 'could not start checkpoint evaluation'));
-      const poll = async () => {
-        const statusResponse = await fetch(`/api/jobs/${data.job_id}`), job = await statusResponse.json();
-        if (!statusResponse.ok) throw new Error(apiError(job, 'checkpoint diagnostic disappeared'));
-        if (job.status === 'complete') { renderRunComparison(job.result); ui.diagnosticsStatus.textContent = `Checkpoint evaluation complete on ${job.result.evaluation_seeds.length} matched seeds. JSON report: ${job.result.output_url}`; ui.diagnosticsCompareRuns.disabled = false; activate('diagnostics'); return; }
-        if (job.status === 'failed') throw new Error(job.error || 'checkpoint evaluation failed');
-        window.setTimeout(() => { poll().catch((error) => { ui.diagnosticsStatus.textContent = `Checkpoint evaluation failed: ${error.message}`; ui.diagnosticsCompareRuns.disabled = false; }); }, 500);
-      };
-      await poll();
-    } catch (error) { ui.diagnosticsStatus.textContent = `Could not evaluate checkpoints: ${error.message}`; ui.diagnosticsCompareRuns.disabled = false; }
+      const result = await executeDiagnosticJob(
+        'comparison',
+        '/api/embodied/diagnostics/checkpoints/evaluate',
+        payload,
+        ui.diagnosticsCompareRuns,
+      );
+      renderRunComparison(result);
+      ui.diagnosticsStatus.textContent = `Checkpoint evaluation complete on ${result.evaluation_seeds.length} matched seeds. JSON report: ${result.output_url}`;
+      activate('diagnostics');
+    } catch (error) {
+      if (error.name !== 'AbortError') ui.diagnosticsStatus.textContent = `Could not evaluate checkpoints: ${error.message}`;
+    }
   }
 
   function updateNetworkSummary() {
@@ -1174,6 +1417,11 @@
   });
   ui.demoStep.addEventListener('click', () => advanceDemo());
   ui.demoRecord.addEventListener('click', toggleDemoRecording);
+  [ui.demoShowRays, ui.demoShowTrajectory, ui.demoShowInfo].forEach((control) => {
+    control.addEventListener('change', () => {
+      if (state.demo?.snapshot) drawDemo(state.demo.snapshot);
+    });
+  });
   ui.demoCanvas.addEventListener('click', (event) => {
     if (state.demo?.snapshot) selectDemoIndividual(state.demo.snapshot, event);
   });
@@ -1182,10 +1430,25 @@
       if (state.demo?.lastNetwork) drawDemoNetwork(state.demo.lastNetwork);
     });
   });
-  [ui.demoChannel, ui.demoSeriesCount].forEach((control) => {
+  [ui.demoChannel, ui.demoSeriesCount, ui.demoShowBoundaryNodes].forEach((control) => {
     control.addEventListener('change', drawDemoNodeChart);
   });
   refreshDemoRuns();
-  ui.diagnosticsLoadServer.addEventListener('click', loadDiagnosticsFromServer); ui.diagnosticsLoadFiles.addEventListener('click', loadDiagnosticsFromFiles); ui.diagnosticsRunRandomGraphs.addEventListener('click', runRandomGraphDiagnostic); ui.diagnosticsRunCoupledState.addEventListener('click', runCoupledStateDiagnostic); ui.diagnosticsCoupledCondition.addEventListener('change', drawCoupledStateField); ui.diagnosticsCompareRuns.addEventListener('click', compareSavedRuns);
+  ui.diagnosticsLoadServer.addEventListener('click', loadDiagnosticsFromServer);
+  ui.diagnosticsLoadFiles.addEventListener('click', loadDiagnosticsFromFiles);
+  ui.diagnosticsRunRandomGraphs.addEventListener('click', runRandomGraphDiagnostic);
+  ui.diagnosticsRunCoupledState.addEventListener('click', runCoupledStateDiagnostic);
+  ui.diagnosticsCoupledCondition.addEventListener('change', drawCoupledStateField);
+  ui.diagnosticsCompareRuns.addEventListener('click', compareSavedRuns);
+  ui.diagnosticsHistoryMetric.addEventListener('change', redrawDiagnosticPlots);
+  drawHistoryPlot(ui.diagnosticsHistoryChart, [], ui.diagnosticsHistoryMetric.value);
+  drawGenomeHistogram(ui.diagnosticsGenomeChart, [], []);
+  drawReliabilityPlot(ui.diagnosticsRandomChart, null);
+  drawSensitivityPlot(ui.diagnosticsSensitivityChart, null);
+  let diagnosticResizeTimer = null;
+  window.addEventListener('resize', () => {
+    window.clearTimeout(diagnosticResizeTimer);
+    diagnosticResizeTimer = window.setTimeout(redrawDiagnosticPlots, 120);
+  });
   ui.liveRefresh.addEventListener('click', refreshLiveModels); ui.liveModel.addEventListener('change', renderLiveModelDetail); ui.liveForm.addEventListener('submit', launchLive); ui.livePlay.addEventListener('click', () => { if (!state.live) return; state.playing = !state.playing; ui.livePlay.textContent = state.playing ? 'Pause' : 'Play'; state.lastTick = performance.now(); if (state.playing) requestAnimationFrame(animate); }); ui.liveStep.addEventListener('click', () => advanceLive()); refreshLiveModels();
 })();

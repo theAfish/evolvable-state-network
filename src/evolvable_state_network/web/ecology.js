@@ -31,6 +31,18 @@
       this.start = (this.start + 1) % this.capacity;
     }
 
+    at(index) {
+      const normalized = index < 0 ? this.length + index : index;
+      if (normalized < 0 || normalized >= this.length) return undefined;
+      return this.values[(this.start + normalized) % this.capacity];
+    }
+
+    forEach(callback) {
+      for (let index = 0; index < this.length; index += 1) {
+        callback(this.at(index), index, this);
+      }
+    }
+
     toArray(limit = this.length) {
       const count = Math.min(this.length, limit);
       const offset = this.length - count;
@@ -236,7 +248,7 @@
   function drawNodeHistoryChart(
     canvas,
     entries,
-    { channel = 0, seriesCount = 8 } = {},
+    { channel = 0, seriesCount = 8, excludedNodes = [] } = {},
   ) {
     const context = canvas.getContext('2d');
     const width = canvas.width;
@@ -254,15 +266,17 @@
     const nodeCount = entries.at(-1).node_state.length;
     const energy = new Array(nodeCount).fill(0);
     let scale = 0.1;
-    for (const entry of entries) {
+    entries.forEach((entry) => {
       for (let node = 0; node < nodeCount; node += 1) {
         const value = Number(entry.node_state[node]?.[channel] || 0);
         energy[node] += value * value;
         scale = Math.max(scale, Math.abs(value));
       }
-    }
+    });
     scale *= 1.12;
+    const excluded = new Set(excludedNodes);
     const rankedNodes = Array.from({ length: nodeCount }, (_, node) => node)
+      .filter((node) => !excluded.has(node))
       .sort((left, right) => energy[right] - energy[left]);
     const nodes = seriesCount > 0 ? rankedNodes.slice(0, seriesCount) : rankedNodes;
     const left = 54;
@@ -300,7 +314,7 @@
     });
     context.globalAlpha = 1;
     context.fillStyle = '#8391a5';
-    const firstTick = entries[0].tick;
+    const firstTick = entries.at(0).tick;
     const lastTick = entries.at(-1).tick;
     context.fillText(`tick ${firstTick}`, left, height - 14);
     context.textAlign = 'right';

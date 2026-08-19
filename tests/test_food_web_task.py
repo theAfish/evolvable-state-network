@@ -75,6 +75,21 @@ class FoodWebTaskTests(unittest.TestCase):
         self.assertFalse(body["ate"])
         self.assertGreater(body["time_since_meal"], 0.0)
 
+    def test_respawn_increments_the_life_marker_used_by_live_trajectories(self) -> None:
+        world = FoodWebEnvironment(FoodWebConfig(
+            initial_plants=0, max_plants=0, plant_regrowth=0.0,
+            prey_initial_energy=.1, respawn_on_death=True,
+        ), seed=3)
+        agent = make_reference_population(
+            prey_count=1, predator_count=0, prey_initial_energy=.1, seed=3,
+        )[0]
+        world.add(agent)
+        world.reset(seed=3)
+        world.step({agent.id: {"kind": "turn_move", "turn": 0.0, "speed": 0.0}})
+        snapshot = world.snapshot()["organisms"][0]
+        self.assertEqual(snapshot["life"], 1)
+        self.assertEqual(snapshot["age"], 0)
+
     def test_episode_reports_behavioral_adaptation_metrics(self) -> None:
         result = EpisodeRunner(FoodWebEnvironment(FoodWebConfig(initial_plants=0, max_plants=0), seed=4)).run(
             make_reference_population(prey_count=1, predator_count=0, seed=4), max_steps=8, seed=4

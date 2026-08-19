@@ -129,6 +129,22 @@ class ApplicationRuntime:
         return sorted(runs, key=lambda item: item["id"], reverse=True)
 
     def _load_embodied_document(self, run_id: str) -> tuple[dict[str, object], str]:
+        artifacts = self.load_embodied_artifacts(run_id)
+        report = artifacts.get("report")
+        if isinstance(report, dict):
+            return report, "completed_report"
+        checkpoint = artifacts.get("checkpoint")
+        if isinstance(checkpoint, dict):
+            return checkpoint, "current_checkpoint"
+        raise ValueError("selected embodied run is unavailable")
+
+    def load_embodied_artifacts(self, run_id: str) -> dict[str, object]:
+        """Load available report/checkpoint artifacts with explicit provenance.
+
+        Each artifact is read independently so a corrupt completed report can
+        fall back to a valid atomic checkpoint while still surfacing a warning
+        to diagnostic clients.
+        """
         # Run folders may be named by users (for example ``server-2``), but
         # never permit a path separator or traversal component.
         if not run_id or any(not (character.isalnum() or character in "_-") for character in run_id):
@@ -139,22 +155,40 @@ class ApplicationRuntime:
         root = (self.root / "embodied_runs").resolve()
         if root not in directory.parents:
             raise ValueError("selected embodied run is unavailable")
-        if report_path.is_file():
+
+        warnings: list[str] = []
+
+        def read_artifact(path: Path, label: str) -> dict[str, object] | None:
+            if not path.is_file():
+                return None
             try:
-                report = json.loads(report_path.read_text(encoding="utf-8"))
-            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-                report = None
-            if report is not None:
-                if report.get("task_config", {}).get("embodied_interface") != "ray_image_v3_sparse_multichannel_v1":
-                    raise ValueError("selected run uses the removed legacy embodied interface")
-                return report, "completed_report"
+                document = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+                warnings.append(f"{label} is unreadable: {error}")
+                return None
+            if not isinstance(document, dict):
+                warnings.append(f"{label} must contain a JSON object")
+                return None
+            task_config = document.get("task_config")
+            interface = task_config.get("embodied_interface") if isinstance(task_config, dict) else None
+            if interface != "ray_image_v3_sparse_multichannel_v1":
+                warnings.append(f"{label} uses an unsupported embodied interface")
+                return None
+            return document
+
+        report = read_artifact(report_path, "report.json")
         with self.embodied_checkpoint_lock:
-            if not checkpoint_path.is_file():
-                raise ValueError("selected embodied run is unavailable")
-            report = json.loads(checkpoint_path.read_text(encoding="utf-8"))
-            if report.get("task_config", {}).get("embodied_interface") != "ray_image_v3_sparse_multichannel_v1":
-                raise ValueError("selected run uses the removed legacy embodied interface")
-            return report, "current_checkpoint"
+            checkpoint = read_artifact(checkpoint_path, "checkpoint.json")
+        if report is None and checkpoint is None:
+            detail = "; ".join(warnings) or "no report.json or checkpoint.json exists"
+            raise ValueError(f"selected embodied run is unavailable: {detail}")
+        return {
+            "run_id": run_id,
+            "report": report,
+            "checkpoint": checkpoint,
+            "selected_source": "completed_report" if report is not None else "current_checkpoint",
+            "warnings": warnings,
+        }
 
     def load_embodied_report(self, run_id: str) -> dict[str, object]:
         """Load a completed report or the latest usable training checkpoint."""

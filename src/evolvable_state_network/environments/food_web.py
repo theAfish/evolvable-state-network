@@ -42,6 +42,7 @@ class Organism:
     viewport: Viewport = field(default_factory=Viewport)
     radius: float = 1.2
     age: int = 0
+    life: int = 0
     alive: bool = True
     traits: dict[str, float] = field(default_factory=dict)
     last_energy_change: float = 0.0
@@ -131,7 +132,7 @@ class FoodWebEnvironment(Environment):
         for _ in range(self.config.initial_plants):
             self._grow_plant()
         for organism in self._organisms.values():
-            organism.position, organism.energy, organism.alive, organism.age = organism.spawn_position, organism.spawn_energy, True, 0
+            organism.position, organism.energy, organism.alive, organism.age, organism.life = organism.spawn_position, organism.spawn_energy, True, 0, 0
             organism.last_energy_change, organism.ate_last_step = 0.0, False
         self._last_meal_time = {organism.id: 0.0 for organism in self._organisms.values()}
         return self._observations()
@@ -224,7 +225,7 @@ class FoodWebEnvironment(Environment):
         return {"time": round(self._elapsed_seconds, 3), "bounds": {"width": self.config.width, "height": self.config.height}, "plant_capacity": self.config.max_plants,
                 "plant_clusters": [{"x": round(center.x, 2), "y": round(center.y, 2), "radius": self.config.plant_cluster_radius} for center in self._plant_cluster_centers],
                 "plants": [{"id": plant.id, "x": round(plant.position.x, 2), "y": round(plant.position.y, 2), "radius": plant.radius} for plant in self._plants.values()],
-                "organisms": [{"id": str(organism.id), "species": str(organism.species), "x": round(organism.position.x, 2), "y": round(organism.position.y, 2), "heading": round(organism.heading, 3), "energy": round(organism.energy, 2), "age": organism.age} for organism in self._organisms.values() if organism.alive],
+                "organisms": [{"id": str(organism.id), "species": str(organism.species), "x": round(organism.position.x, 2), "y": round(organism.position.y, 2), "heading": round(organism.heading, 3), "energy": round(organism.energy, 2), "age": organism.age, "life": organism.life} for organism in self._organisms.values() if organism.alive],
                 "population": {species: sum(organism.alive and str(organism.species) == species for organism in self._organisms.values()) for species in (str(Species.PREY), str(Species.PREDATOR))}}
 
     def _grow_plant(self) -> None:
@@ -243,7 +244,7 @@ class FoodWebEnvironment(Environment):
 
     def _respawn(self, organism: Organism) -> None:
         organism.position = self._spawn_position(organism)
-        organism.heading, organism.energy, organism.age, organism.alive = self._random.uniform(-pi, pi), organism.spawn_energy, 0, True
+        organism.heading, organism.energy, organism.age, organism.alive, organism.life = self._random.uniform(-pi, pi), organism.spawn_energy, 0, True, organism.life + 1
         organism.last_energy_change, organism.ate_last_step = 0.0, False
         self._last_meal_time[organism.id] = self._elapsed_seconds + self.config.timestep_seconds
 

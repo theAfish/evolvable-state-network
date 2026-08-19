@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>State Network Lab</title>
-    <link rel="stylesheet" href="style.css?v=20260817" />
+    <link rel="stylesheet" href="style.css?v=20260820" />
     <link rel="stylesheet" href="shell.css?v=20260817" />
   </head>
   <body>
@@ -217,12 +217,11 @@
           <details class="settings-group settings-group--advanced" data-ga-settings>
             <summary><span class="settings-group-heading"><span>05</span><span class="settings-group-copy"><strong>GA exploration &amp; compute</strong><small>Optional tuning for genetic search, execution hardware, and safety bounds.</small></span></span><span class="settings-disclosure">Show advanced settings</span></summary>
             <div class="settings-group-body">
-              <div class="settings-grid settings-grid--three settings-grid--compute">
-                <label class="setting-field">Rule execution<select id="embodied-execution-backend"><option value="torch" selected>Vectorized Torch</option><option value="python">Reference Python</option></select><small>Torch avoids trajectory construction during training.</small></label>
+              <div class="settings-grid settings-grid--two settings-grid--compute">
                 <label class="setting-field">Compute device<select id="embodied-device"><option value="cpu" selected>CPU</option><option value="cuda">NVIDIA CUDA</option><option value="auto">Auto-detect</option></select><small>CUDA uses one worker to avoid GPU context contention.</small></label>
                 <label class="setting-field">CPU candidate workers<input id="embodied-workers" type="number" value="0" min="0" /><small>0 automatically chooses one worker per candidate, within available CPUs.</small></label>
               </div>
-              <fieldset class="ga-exploration"><legend>Genetic-algorithm exploration</legend><p>Local offspring refine selected parents; regional samples follow the current population; global samples use an independent bounded uniform prior.</p><div class="settings-grid settings-grid--four"><label class="setting-field">Elite fraction<input id="embodied-elite-fraction" type="number" value="0.10" min="0.01" step="0.01" /></label><label class="setting-field">Local mutation σ<input id="embodied-local-mutation-sigma" type="number" value="0.05" min="0.001" step="0.01" /></label><label class="setting-field">Regional fraction<input id="embodied-regional-fraction" type="number" value="0.15" min="0" step="0.01" /></label><label class="setting-field">Regional scale<input id="embodied-regional-scale" type="number" value="1" min="0.01" step="0.05" /></label><label class="setting-field">Regional minimum σ<input id="embodied-regional-min-std" type="number" value="0.02" min="0.001" step="0.01" /></label><label class="setting-field">Global fraction<input id="embodied-global-fraction" type="number" value="0.15" min="0" step="0.01" /></label><label class="setting-field">Global parameter range ±<input id="embodied-global-parameter-range" type="number" value="1" min="0.01" step="0.05" /></label><label class="setting-toggle">Functional global filter<input id="embodied-global-viability-filter" type="checkbox" checked /></label><label class="setting-field">Global resampling attempts<input id="embodied-global-max-attempts" type="number" value="20" min="1" /></label></div><output id="embodied-ga-composition" class="ga-composition">10% elite · 60% local · 15% regional · 15% global</output><small>Local is the remainder. Fractions are rounded deterministically to exactly fill the population.</small><details class="legacy-ga"><summary>Legacy comparison controls</summary><p>Only use when regional and global fractions are both 0.</p><div class="settings-grid settings-grid--four"><label class="setting-field">Legacy mutation σ<input id="embodied-mutation-sigma" type="number" placeholder="Default" min="0.001" step="0.01" /></label><label class="setting-field">Legacy immigrant fraction<input id="embodied-immigrant-fraction" type="number" value="0.25" min="0" step="0.01" /></label><label class="setting-field">Legacy immigrant mode<select id="embodied-immigrant-mode"><option value="zero" selected>Zero-centred Gaussian</option><option value="population">Population-centred Gaussian</option></select></label><label class="setting-field">Legacy immigrant σ<input id="embodied-immigrant-sigma" type="number" placeholder="Default" min="0.001" step="0.01" /></label></div></details></fieldset>
+              <fieldset class="ga-exploration"><legend>Genetic-algorithm exploration</legend><p>Local offspring refine selected parents; regional samples follow the current population; global samples use an independent bounded uniform prior.</p><div class="settings-grid settings-grid--four"><label class="setting-field">Elite fraction<input id="embodied-elite-fraction" type="number" value="0.10" min="0.01" step="0.01" /></label><label class="setting-field">Local mutation σ<input id="embodied-local-mutation-sigma" type="number" value="0.05" min="0.001" step="0.01" /></label><label class="setting-field">Regional fraction<input id="embodied-regional-fraction" type="number" value="0.15" min="0" step="0.01" /></label><label class="setting-field">Regional scale<input id="embodied-regional-scale" type="number" value="1" min="0.01" step="0.05" /></label><label class="setting-field">Regional minimum σ<input id="embodied-regional-min-std" type="number" value="0.02" min="0.001" step="0.01" /></label><label class="setting-field">Global fraction<input id="embodied-global-fraction" type="number" value="0.15" min="0" step="0.01" /></label><label class="setting-field">Global parameter range ±<input id="embodied-global-parameter-range" type="number" value="1" min="0.01" step="0.05" /></label><label class="setting-toggle">Functional global filter<input id="embodied-global-viability-filter" type="checkbox" checked /></label><label class="setting-field">Global resampling attempts<input id="embodied-global-max-attempts" type="number" value="20" min="1" /></label></div><output id="embodied-ga-composition" class="ga-composition">10% elite · 60% local · 15% regional · 15% global</output><small>Local is the remainder. Fractions are rounded deterministically to exactly fill the population.</small><input id="embodied-mutation-sigma" type="hidden" value="" /><input id="embodied-immigrant-fraction" type="hidden" value="0.25" /><input id="embodied-immigrant-mode" type="hidden" value="zero" /><input id="embodied-immigrant-sigma" type="hidden" value="" /></fieldset>
               <div class="settings-grid settings-grid--three settings-grid--safety"><label class="setting-field">Max genome L2 norm<input id="embodied-max-genome-norm" type="number" placeholder="Disabled" min="0.01" step="0.1" /><small>Numerical safety guard, separate from functional filtering.</small></label><label class="setting-field">Max parameter magnitude<input id="embodied-max-parameter-magnitude" type="number" placeholder="Disabled" min="0.01" step="0.1" /><small>Numerical safety guard, separate from functional filtering.</small></label></div>
             </div>
           </details>
@@ -276,6 +275,11 @@
             <button id="demo-step" class="quiet-button" type="button">Step</button>
             <button id="demo-record" class="quiet-button" type="button" disabled>Record</button>
           </div>
+          <div class="ecology-debug-controls" aria-label="Selected organism overlays">
+            <label><input id="demo-show-rays" type="checkbox" checked /> Raycasts</label>
+            <label><input id="demo-show-trajectory" type="checkbox" checked /> Trajectory</label>
+            <label><input id="demo-show-info" type="checkbox" checked /> Agent info</label>
+          </div>
           <span id="demo-label">Choose a run to begin.</span>
         </section>
 
@@ -319,6 +323,7 @@
                 <div class="demo-card-controls">
                   <label>Channel<select id="demo-channel" disabled></select></label>
                   <label>Lines<select id="demo-series-count"><option value="4">Top 4</option><option value="8" selected>Top 8</option><option value="12">Top 12</option><option value="0">All nodes</option></select></label>
+                  <label class="demo-toggle">Show I/O<input id="demo-show-boundary-nodes" type="checkbox" checked aria-label="Show input and output node values" /></label>
                 </div>
               </header>
               <canvas id="demo-node-chart" width="700" height="340" aria-label="Selected organism node-state history"></canvas>
@@ -328,43 +333,75 @@
         </section>
       </section>
 
-      <section class="view" data-view="diagnostics">
-        <div class="page-heading"><div><p class="eyebrow">POST-RUN DIAGNOSIS</p><h2>Locate the last observable source of behavioral collapse.</h2><p>Load a completed <code>report.json</code> and its matching <code>checkpoint.json</code> to inspect historical evidence locally. Server-backed controls run evaluation-only replays of saved rules, including the 2D local-state field; they never modify training, genomes, or checkpoints.</p></div></div>
-        <form id="diagnostics-form" class="form-panel panel">
-          <div><p class="eyebrow">ARTIFACT LOADER</p><h3>Completed run, active checkpoint, or local file</h3></div>
-          <label>Server run ID <input id="diagnostics-run-id" value="server" pattern="[A-Za-z0-9_-]+" /><small>Uses <code>report.json</code> when present, otherwise the current <code>checkpoint.json</code>.</small></label>
-          <button id="diagnostics-load-server" type="button">Load server artifacts</button>
-          <label class="diagnostics-file">Report JSON <input id="diagnostics-report-file" type="file" accept="application/json,.json" /></label>
-          <label class="diagnostics-file">Checkpoint JSON <input id="diagnostics-checkpoint-file" type="file" accept="application/json,.json" /></label>
-          <button id="diagnostics-load-files" type="button">Analyze selected artifact</button>
-          <label>Fresh graph samples <input id="diagnostics-sample-count" type="number" value="64" min="1" max="256" /><small>Same saved rules; new graph and state per sample.</small></label>
-          <label>Diagnostic seed <input id="diagnostics-seed" type="number" placeholder="random" min="0" max="4294967295" /></label>
-          <button id="diagnostics-run-random-graphs" type="button">Evaluate random graphs</button>
-          <label>Coupled-state episodes <input id="diagnostics-coupled-episodes" type="number" value="1" min="1" max="3" /><small>Matched post-training replay only; never changes the saved rule.</small></label>
-          <label>Coupled-state ticks <input id="diagnostics-coupled-steps" type="number" value="48" min="4" max="512" /><small>Longer replays give stronger synchronization evidence.</small></label>
-          <label>Field channel X <input id="diagnostics-coupled-channel-x" type="number" value="0" min="0" max="63" /><small>One coordinate of the saved node state.</small></label>
-          <label>Field channel Y <input id="diagnostics-coupled-channel-y" type="number" value="1" min="0" max="63" /><small>The other coordinate; all remaining coordinates are held at their replay mean.</small></label>
-          <button id="diagnostics-run-coupled-state" type="button">Map 2D prey state field</button>
-          <label>Compare run A <input id="diagnostics-compare-left" value="server" pattern="[A-Za-z0-9_-]+" /></label>
-          <label>Compare run B <input id="diagnostics-compare-right" value="server-2" pattern="[A-Za-z0-9_-]+" /></label>
-          <label>Matched episodes <input id="diagnostics-evaluation-samples" type="number" value="4" min="1" max="32" /><small>Same fresh graph and environment seeds for A and B.</small></label>
-          <label>Parameter scales <input id="diagnostics-parameter-scales" value="1, 0.5, 0.1" /><small>Evaluation-only sensitivity test for checkpoint B.</small></label>
-          <button id="diagnostics-compare-runs" type="button">Evaluate checkpoints</button>
-          <output id="diagnostics-status">Load the placed <code>server</code> artifacts or choose files from any completed run.</output>
+      <section class="view diagnostics-view" data-view="diagnostics">
+        <div class="page-heading diagnostics-heading">
+          <div><p class="eyebrow">DIAGNOSTIC WORKBENCH</p><h2>Trace failure from fitness back to dynamics.</h2><p>Load a validated run, inspect what its artifacts can establish, then run evaluation-only tests on fresh graphs, local state flow, and matched checkpoints. Diagnostic jobs never modify training state or saved genomes.</p></div>
+        </div>
+
+        <form id="diagnostics-form" class="diagnostic-control-stack">
+          <section class="diagnostic-loader panel">
+            <div class="diagnostic-source-card">
+              <span class="diagnostic-step">01 · SERVER RUN</span>
+              <label>Run identifier<input id="diagnostics-run-id" value="server" pattern="[A-Za-z0-9_-]+" /></label>
+              <p>Loads both artifacts through the validated runtime fallback. A corrupt report can safely fall back to its checkpoint.</p>
+              <button id="diagnostics-load-server" type="button">Load validated run</button>
+            </div>
+            <div class="diagnostic-source-card">
+              <span class="diagnostic-step">02 · LOCAL ARTIFACTS</span>
+              <div class="diagnostic-file-grid">
+                <label class="diagnostics-file">Report JSON<input id="diagnostics-report-file" type="file" accept="application/json,.json" /></label>
+                <label class="diagnostics-file">Checkpoint JSON<input id="diagnostics-checkpoint-file" type="file" accept="application/json,.json" /></label>
+              </div>
+              <p>Files are size-limited, schema-checked, and compared for architecture compatibility before analysis.</p>
+              <button id="diagnostics-load-files" class="quiet-button" type="button">Validate local files</button>
+            </div>
+            <aside class="diagnostic-load-state" aria-live="polite">
+              <span>ACTIVE SOURCE</span>
+              <strong id="diagnostics-load-meta">No artifact loaded</strong>
+              <output id="diagnostics-status">Choose a server run or local JSON artifact.</output>
+              <div id="diagnostics-load-warnings" class="diagnostic-list" hidden></div>
+            </aside>
+          </section>
+
+          <section class="diagnostic-test-suite">
+            <div class="section-heading"><div><p class="eyebrow">EVALUATION-ONLY TESTS</p><h3>Run the next useful experiment</h3></div><label>Shared seed<input id="diagnostics-seed" type="number" placeholder="random" min="0" max="4294967295" /></label></div>
+            <div class="diagnostic-test-grid">
+              <article>
+                <span class="diagnostic-step">A · ROBUSTNESS</span><h4>Fresh graph distribution</h4><p>Measure how much fitness changes when topology, initial state, and world seed are resampled.</p>
+                <label>Samples<input id="diagnostics-sample-count" type="number" value="64" min="1" max="256" /></label>
+                <button id="diagnostics-run-random-graphs" type="button">Run robustness test</button>
+              </article>
+              <article>
+                <span class="diagnostic-step">B · LOCAL DYNAMICS</span><h4>Coupled state field</h4><p>Map effective updates, fixed points, synchronization, and the empirical replay attractor.</p>
+                <div class="diagnostic-compact-fields"><label>Episodes<input id="diagnostics-coupled-episodes" type="number" value="1" min="1" max="3" /></label><label>Ticks<input id="diagnostics-coupled-steps" type="number" value="48" min="4" max="512" /></label><label>Channel X<input id="diagnostics-coupled-channel-x" type="number" value="0" min="0" max="63" /></label><label>Channel Y<input id="diagnostics-coupled-channel-y" type="number" value="1" min="0" max="63" /></label></div>
+                <button id="diagnostics-run-coupled-state" type="button">Map local state flow</button>
+              </article>
+              <article>
+                <span class="diagnostic-step">C · CAUSAL COMPARISON</span><h4>Matched checkpoints</h4><p>Compare behavior and raw dynamics on identical graphs, worlds, and parameter scales.</p>
+                <div class="diagnostic-compact-fields"><label>Run A<input id="diagnostics-compare-left" value="server" pattern="[A-Za-z0-9_-]+" /></label><label>Run B<input id="diagnostics-compare-right" value="server-2" pattern="[A-Za-z0-9_-]+" /></label><label>Episodes<input id="diagnostics-evaluation-samples" type="number" value="4" min="1" max="32" /></label><label>Scales<input id="diagnostics-parameter-scales" value="1, 0.5, 0.1" /></label></div>
+                <button id="diagnostics-compare-runs" type="button">Compare checkpoints</button>
+              </article>
+            </div>
+          </section>
         </form>
-        <section class="diagnostic-verdict" aria-live="polite">
-          <div><span>DIAGNOSTIC VERDICT</span><strong id="diagnostics-title">No artifacts loaded</strong></div>
-          <p id="diagnostics-copy">The analyzer will report what the historical files can establish and identify TODO metrics that were not recorded.</p>
+
+        <section class="diagnostic-verdict" aria-live="polite"><div><span>CURRENT VERDICT</span><strong id="diagnostics-title">No artifacts loaded</strong></div><p id="diagnostics-copy">Load a report or checkpoint to distinguish observed evidence from missing instrumentation.</p></section>
+
+        <section class="diagnostic-section"><div class="section-heading"><div><p class="eyebrow">ARTIFACT OVERVIEW</p><h3>Recorded evidence and final rules</h3></div><span>Values below are derived only from validated JSON fields.</span></div><div id="diagnostics-summary" class="summary-grid"><p class="empty-state">No report loaded.</p></div></section>
+
+        <section class="diagnostic-plot-grid diagnostic-section">
+          <article><header><div><span>TRAINING HISTORY</span><strong>Prey and predator trajectories</strong></div><label>Metric<select id="diagnostics-history-metric"><option value="best_lifetime">Best lifetime</option><option value="mean_action_change">Mean action change</option><option value="mean_speed">Mean speed</option><option value="mean_turn">Mean turn</option></select></label></header><canvas id="diagnostics-history-chart" width="720" height="340" aria-label="Prey and predator training history"></canvas></article>
+          <article><header><div><span>FINAL PARAMETERS</span><strong>Genome-value distribution</strong></div></header><canvas id="diagnostics-genome-chart" width="720" height="340" aria-label="Prey and predator genome parameter histogram"></canvas></article>
         </section>
-        <section class="flat-section"><div class="section-heading"><div><p class="eyebrow">OBSERVED EVIDENCE</p><h3>Generation and final-genome summary</h3></div><span>These values are derived only from fields recorded in the loaded JSON.</span></div><div id="diagnostics-summary" class="summary-grid"><p class="empty-state">No report loaded.</p></div></section>
-        <section class="flat-section"><div class="section-heading"><div><p class="eyebrow">FRESH RANDOM NETWORKS</p><h3>Performance variation of the saved rules</h3></div><span>Uses the server run ID, its saved environment, and matched newly sampled graph/state seeds.</span></div><div id="diagnostics-random-graphs" class="summary-grid"><p class="empty-state">Run the random-graph evaluation to measure reliability across newly created embodied networks.</p></div></section>
-        <section class="flat-section coupled-field-section"><div class="section-heading"><div><p class="eyebrow">COUPLED PREY STATE FIELD</p><h3>Local 2D flow and fixed-point map</h3></div><span>Arrow lengths are normalized for readability; direction is the effective node-state update.</span></div><div class="coupled-field-controls"><label>Incoming aggregate <select id="diagnostics-coupled-condition" disabled></select></label><span id="diagnostics-coupled-copy">Run the 2D prey diagnostic for a local-rule vector field.</span></div><canvas id="diagnostics-coupled-field" width="900" height="560" aria-label="2D prey node-state vector field"></canvas><div id="diagnostics-coupled-summary" class="summary-grid"><p class="empty-state">No coupled-state diagnostic has been run.</p></div></section>
-        <section class="flat-section"><div class="section-heading"><div><p class="eyebrow">TWO-RUN RULE COMPARISON</p><h3>Matched behavior, saturation, and effective dynamics</h3></div><span>Only two saved endpoints are available; this is a displacement comparison, not a complete genome trajectory.</span></div><div id="diagnostics-comparison" class="summary-grid"><p class="empty-state">Evaluate two saved runs to inspect matched behavior trajectories, raw saturation, updates, and parameter scaling.</p></div></section>
-        <section class="diagnostics-grid flat-section">
-          <article><div class="section-heading"><div><p class="eyebrow">FLAGS</p><h3>Likely failure modes</h3></div></div><div id="diagnostics-flags" class="diagnostic-list"><p class="empty-state">No flags yet.</p></div></article>
-          <article><div class="section-heading"><div><p class="eyebrow">COVERAGE</p><h3>Diagnostic-plan evidence</h3></div></div><div id="diagnostics-coverage" class="diagnostic-list"><p class="empty-state">Load artifacts to check coverage.</p></div></article>
-        </section>
-        <section class="flat-section"><div class="section-heading"><div><p class="eyebrow">SPECIES TRAJECTORIES</p><h3>Fitness and action evidence near the end of training</h3></div><span>Tail = final 10% of recorded generations (at least 10).</span></div><div id="diagnostics-species" class="summary-grid"><p class="empty-state">No species history loaded.</p></div></section>
+
+        <section class="diagnostic-section"><div class="section-heading"><div><p class="eyebrow">FRESH-GRAPH ROBUSTNESS</p><h3>Fitness distribution across new networks</h3></div><span>Every point is one newly sampled graph, state, and matched world seed.</span></div><canvas id="diagnostics-random-chart" class="diagnostic-wide-chart" width="1000" height="340" aria-label="Fresh graph fitness distributions"></canvas><div id="diagnostics-random-graphs" class="summary-grid"><p class="empty-state">Run the robustness test to measure topology sensitivity.</p></div></section>
+
+        <section class="diagnostic-section coupled-field-section"><div class="section-heading"><div><p class="eyebrow">COUPLED PREY STATE FIELD</p><h3>Local flow, fixed points, and replay attractor</h3></div><span>Arrow direction is the effective node-state update; length is normalized for legibility.</span></div><div class="coupled-field-controls"><label>Incoming aggregate<select id="diagnostics-coupled-condition" disabled></select></label><span id="diagnostics-coupled-copy">Run the local-dynamics test to map this field.</span></div><canvas id="diagnostics-coupled-field" width="900" height="560" aria-label="2D prey node-state vector field"></canvas><div id="diagnostics-coupled-summary" class="summary-grid"><p class="empty-state">No coupled-state diagnostic has been run.</p></div></section>
+
+        <section class="diagnostic-section"><div class="section-heading"><div><p class="eyebrow">MATCHED CHECKPOINTS</p><h3>Behavior, saturation, and scale sensitivity</h3></div><span>Endpoints are evaluated on identical graphs and worlds.</span></div><canvas id="diagnostics-sensitivity-chart" class="diagnostic-wide-chart" width="1000" height="400" aria-label="Checkpoint parameter sensitivity plot"></canvas><div id="diagnostics-comparison" class="summary-grid"><p class="empty-state">Compare two checkpoints to inspect matched behavior and parameter scaling.</p></div></section>
+
+        <section class="diagnostics-grid diagnostic-section"><article><div class="section-heading"><div><p class="eyebrow">FLAGS</p><h3>Likely failure modes</h3></div></div><div id="diagnostics-flags" class="diagnostic-list"><p class="empty-state">No flags yet.</p></div></article><article><div class="section-heading"><div><p class="eyebrow">COVERAGE</p><h3>What remains unobserved</h3></div></div><div id="diagnostics-coverage" class="diagnostic-list"><p class="empty-state">Load artifacts to check coverage.</p></div></article></section>
+        <section class="diagnostic-section"><div class="section-heading"><div><p class="eyebrow">SPECIES SUMMARY</p><h3>Tail stability and action evidence</h3></div><span>Tail = final 10% of recorded generations, with at least 10 samples.</span></div><div id="diagnostics-species" class="summary-grid"><p class="empty-state">No species history loaded.</p></div></section>
       </section>
 
       <section class="view" data-view="replay" hidden>
@@ -397,7 +434,8 @@
       </section>
     </main>
     <script src="ui.js?v=20260819"></script>
-    <script src="ecology.js?v=20260819"></script>
-    <script src="app.js?v=20260819"></script>
+    <script src="ecology.js?v=20260822"></script>
+    <script src="diagnostics.js?v=20260819"></script>
+    <script src="app.js?v=20260823"></script>
   </body>
 </html>
