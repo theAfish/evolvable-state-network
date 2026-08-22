@@ -61,6 +61,18 @@ def _evaluate_focal_worker(
     )
 
 
+def _evaluate_shared_worker(
+    job: tuple[tuple[float, ...], tuple[int, ...], Literal["none", "vision"]],
+) -> "FoodWebCoevolutionEvaluation":
+    """Evaluate one shared-rule world bank in a persistent worker process."""
+    if _WORKER_EVALUATOR is None:
+        raise RuntimeError("embodied evaluation worker was not initialized")
+    genome, seeds, observation_mask = job
+    return _WORKER_EVALUATOR.evaluate_shared(
+        genome, seeds=seeds, observation_mask=observation_mask,
+    )
+
+
 def _evaluate_population_group_worker(
     job: tuple[
         BatchPopulationMode, tuple[tuple[float, ...], ...],
@@ -758,11 +770,24 @@ class BatchFoodWebCoevolutionRunner:
         self, progress: Callable[[dict[str, object]], None] | None = None,
         should_stop: Callable[[], bool] | None = None,
     ) -> dict[str, object]:
-        return self._run_shared(progress=progress, should_stop=should_stop)
+        workers = self._resolved_workers()
+        executor_context = (
+            ProcessPoolExecutor(
+                max_workers=workers, mp_context=get_context("spawn"),
+                initializer=_initialize_evaluation_worker, initargs=(self.evaluator,),
+            )
+            if workers > 1 else nullcontext(None)
+        )
+        with executor_context as executor:
+            return self._run_shared(
+                progress=progress, should_stop=should_stop,
+                executor=executor, workers=workers,
+            )
 
     def _run_shared(
         self, *, progress: Callable[[dict[str, object]], None] | None,
         should_stop: Callable[[], bool] | None,
+        executor: ProcessPoolExecutor | None, workers: int,
     ) -> dict[str, object]:
         """Evolve one update rule across prey and predator embodiments.
 
@@ -804,13 +829,17 @@ class BatchFoodWebCoevolutionRunner:
                 for trial in range(self.config.trials)
             )
             population = optimizer.ask()
-            rows = tuple(self.evaluator.evaluate_shared(genome, seeds=seeds) for genome in population)
+            rows = self._evaluate_shared_jobs(
+                executor, tuple((genome, seeds, "none") for genome in population),
+            )
             scores = tuple(self.evaluator.shared_score(row) for row in rows)
             optimizer.tell(population, scores)
             winner_index = max(range(len(population)), key=lambda index: scores[index])
             winner = rows[winner_index]
             evaluations += len(population) * len(seeds)
-            validation = self.evaluator.evaluate_shared(population[winner_index], seeds=validation_seeds)
+            validation = self._evaluate_shared_jobs(
+                executor, ((population[winner_index], validation_seeds, "none"),),
+            )[0]
             validation_score = self.evaluator.shared_score(validation)
             validation_evaluations += len(validation_seeds)
             if validation_score > best[0]:
@@ -853,7 +882,7 @@ class BatchFoodWebCoevolutionRunner:
                     "phase": "batch_food_web_shared_rule", "training_mode": "batch",
                     "algorithm": self.evolution.algorithm, "objective": "mean_role_lifetime",
                     "objective_units": "ticks", "generation": generation,
-                    "generations": self.config.generations, "workers": 1,
+                    "generations": self.config.generations, "workers": workers,
                     "execution_backend": self.evaluator.config.network.execution_backend,
                     "device": _execution_device(self.evaluator.config.network),
                     "shared": shared_snapshot, "prey": prey_snapshot,
@@ -861,9 +890,14 @@ class BatchFoodWebCoevolutionRunner:
                 })
         if should_stop and should_stop():
             raise EvolutionTerminated()
-        selected = self.evaluator.evaluate_shared(best[1], seeds=test_seeds)
-        zero = self.evaluator.evaluate_shared((0.0,) * self.evaluator.codec.dimension, seeds=test_seeds)
-        vision_masked = self.evaluator.evaluate_shared(best[1], seeds=test_seeds, observation_mask="vision")
+        selected, zero, vision_masked = self._evaluate_shared_jobs(
+            executor,
+            (
+                (best[1], test_seeds, "none"),
+                ((0.0,) * self.evaluator.codec.dimension, test_seeds, "none"),
+                (best[1], test_seeds, "vision"),
+            ),
+        )
         shared_snapshot = self._snapshot(
             optimizer, (best[0], best[1], {"prey": best[2], "predator": best[3]}),
             evaluations, validation_evaluations,
@@ -905,7 +939,7 @@ class BatchFoodWebCoevolutionRunner:
             "generations": self.config.generations, "episode_steps": self.config.episode_steps,
             "trials": self.config.trials, "validation_trials": self.config.validation_trials,
             "test_trials": self.config.test_trials, "test_seeds": list(test_seeds),
-            "execution": {"workers": 1, "backend": self.evaluator.config.network.execution_backend, "device": _execution_device(self.evaluator.config.network)},
+            "execution": {"workers": workers, "backend": self.evaluator.config.network.execution_backend, "device": _execution_device(self.evaluator.config.network)},
             "shared": shared_snapshot, "prey": prey_snapshot, "predator": predator_snapshot,
             "history": history, "shared_best_genome": list(best[1]),
             # Compatibility aliases; both deliberately reference the one rule.
@@ -1214,6 +1248,20 @@ class BatchFoodWebCoevolutionRunner:
                 genome, opponents, species, seeds, observation_mask=observation_mask,
             )
             for genome, opponents, species, seeds, observation_mask in jobs
+        )
+
+    def _evaluate_shared_jobs(
+        self, executor: ProcessPoolExecutor | None,
+        jobs: Sequence[tuple[tuple[float, ...], tuple[int, ...], Literal["none", "vision"]]],
+    ) -> tuple[FoodWebCoevolutionEvaluation, ...]:
+        """Run independent shared-rule world banks concurrently when permitted."""
+        if executor is not None:
+            return tuple(executor.map(_evaluate_shared_worker, jobs, chunksize=1))
+        return tuple(
+            self.evaluator.evaluate_shared(
+                genome, seeds=seeds, observation_mask=observation_mask,
+            )
+            for genome, seeds, observation_mask in jobs
         )
 
     @staticmethod
