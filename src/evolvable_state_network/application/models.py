@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from math import ceil, pi
+from math import ceil
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -64,7 +64,7 @@ class AsyncTrainingPayload(StrictModel):
 
 
 class EmbodiedFoodWebTrainingPayload(StrictModel):
-    """One species-specific evolutionary run in the predator–prey–plant task."""
+    """One shared-rule evolutionary run in the predator–prey–plant task."""
 
     model_id: str | None = None
     continue_run_id: str | None = None
@@ -114,8 +114,8 @@ class EmbodiedFoodWebTrainingPayload(StrictModel):
     initial_energy_scale: float = Field(1.0, gt=0)
     max_food: int = Field(80, ge=0)
     food_growth_rate: float = Field(24.0, ge=0)
-    max_speed: float = Field(20.0, gt=0)
-    max_turn: float = Field(2 * pi, gt=0)
+    max_speed: float = Field(10.0, gt=0)
+    max_turn: float = Field(9.0, gt=0)
     plant_cluster_count: int = Field(4, ge=0)
     plant_cluster_radius: float = Field(5.0, ge=0)
     ticks: int = Field(600, ge=1)

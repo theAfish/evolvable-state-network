@@ -255,7 +255,8 @@ class ApplicationRuntime:
             max_steps=1, trials=1, seed=payload.seed,
         )
         evaluator = FoodWebCoevolutionEvaluator(RuleArchitecture(**report["architecture"]), EdgeArchitecture(**report["edge_architecture"]), task)
-        session = FoodWebDemonstration(evaluator, report["prey_best_genome"], report["predator_best_genome"], seed=payload.seed)
+        shared_genome = report.get("shared_best_genome", report["prey_best_genome"])
+        session = FoodWebDemonstration(evaluator, shared_genome, seed=payload.seed)
         session_id = uuid4().hex
         with self.embodied_lock:
             self.embodied_sessions[session_id] = session

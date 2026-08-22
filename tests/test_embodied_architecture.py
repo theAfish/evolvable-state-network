@@ -273,19 +273,21 @@ class EmbodiedArchitectureTests(unittest.TestCase):
         self.assertEqual(len(report["best_genome"]), evaluator.codec.dimension)
         self.assertEqual(report["focal_species"], "prey")
 
-    def test_prey_and_predator_coevolve_in_matched_episodes(self) -> None:
+    def test_one_rule_is_shared_by_prey_and_predator_in_matched_episodes(self) -> None:
         task = EmbodiedFoodWebTaskConfig(
             network=self.config, environment=FoodWebConfig(initial_plants=3, max_plants=5),
             prey_count=2, predator_count=1, max_steps=8, trials=1, seed=8,
         )
         evaluator = FoodWebCoevolutionEvaluator(self.architecture, self.edge_architecture, task)
         genome = (0.0,) * evaluator.codec.dimension
-        result = evaluator.evaluate(genome, genome)
+        result = evaluator.evaluate_shared(genome)
         self.assertEqual(len(result.prey_trial_lifetimes), 1)
         self.assertEqual(len(result.predator_trial_lifetimes), 1)
         report = FoodWebCoevolutionRunner(evaluator, EmbodiedRuleEvolutionConfig(generations=1, population_size=2, seed=2, initial_genome=genome)).run()
         self.assertEqual(len(report["prey_best_genome"]), evaluator.codec.dimension)
         self.assertEqual(len(report["predator_best_genome"]), evaluator.codec.dimension)
+        self.assertEqual(report["shared_best_genome"], report["prey_best_genome"])
+        self.assertEqual(report["prey_best_genome"], report["predator_best_genome"])
 
     def test_batch_coevolution_uses_complete_common_seed_generations(self) -> None:
         task = EmbodiedFoodWebTaskConfig(
@@ -320,7 +322,7 @@ class EmbodiedArchitectureTests(unittest.TestCase):
         self.assertIn("zero_rule_lifetime", report["prey"]["baselines"])
         self.assertIn("vision_masked_lifetime", report["prey"]["baselines"])
         self.assertIn("vision_lifetime_delta", report["prey"]["baselines"])
-        self.assertEqual(report["objective"], "restricted_mean_lifetime")
+        self.assertEqual(report["objective"], "mean_role_lifetime")
         self.assertEqual(report["objective_units"], "ticks")
         self.assertIn("abs_turn_drift", report["prey"]["test_behavior"])
         self.assertIn("plant_steering_alignment", report["prey"]["test_behavior"])
@@ -378,7 +380,7 @@ class EmbodiedArchitectureTests(unittest.TestCase):
         self.assertEqual(report["prey"]["evaluation_replicates"], 2)
         self.assertIn("prey_energy_supply_ratio", report["ecology"])
 
-    def test_continuous_coevolution_can_seed_each_species_independently(self) -> None:
+    def test_continuous_shared_rule_rejects_role_specific_warm_starts(self) -> None:
         task = EmbodiedFoodWebTaskConfig(
             network=self.config, environment=FoodWebConfig(initial_plants=0, plant_regrowth=0.0),
             prey_count=2, predator_count=1, max_steps=1, trials=1, seed=3,
@@ -386,12 +388,11 @@ class EmbodiedArchitectureTests(unittest.TestCase):
         evaluator = FoodWebCoevolutionEvaluator(self.architecture, self.edge_architecture, task)
         prey = (0.0,) * evaluator.codec.dimension
         predator = (0.1,) * evaluator.codec.dimension
-        report = ContinuousFoodWebCoevolutionRunner(
-            evaluator, EmbodiedRuleEvolutionConfig(generations=1, population_size=2, seed=3),
-            ContinuousFoodWebConfig(ticks=1, seed=3, initial_prey_genome=prey, initial_predator_genome=predator),
-        ).run()
-        self.assertEqual(report["prey_best_genome"], list(prey))
-        self.assertEqual(report["predator_best_genome"], list(predator))
+        with self.assertRaisesRegex(ValueError, "shared-rule evolution"):
+            ContinuousFoodWebCoevolutionRunner(
+                evaluator, EmbodiedRuleEvolutionConfig(generations=1, population_size=2, seed=3),
+                ContinuousFoodWebConfig(ticks=1, seed=3, initial_prey_genome=prey, initial_predator_genome=predator),
+            ).run()
 
     def test_continuous_coevolution_supports_prey_only_worlds(self) -> None:
         task = EmbodiedFoodWebTaskConfig(

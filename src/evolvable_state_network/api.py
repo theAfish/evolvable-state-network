@@ -142,12 +142,10 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     def start_embodied_food_web_training(
         payload: EmbodiedFoodWebTrainingPayload, background_tasks: BackgroundTasks
     ) -> dict[str, str]:
-        """Co-evolve prey and predator rules in matched random food-web episodes."""
+        """Evolve one local rule that adapts random graphs to both food-web roles."""
         runtime.ensure_root()
         seed = _seed(payload.seed)
         initial_genome: tuple[float, ...] | None = None
-        initial_prey_genome: tuple[float, ...] | None = None
-        initial_predator_genome: tuple[float, ...] | None = None
         initialization: dict[str, str] = {"kind": "fresh"}
         architecture = RuleArchitecture(
             state_width=payload.state_width, hidden_layers=payload.node_hidden_layers,
@@ -170,8 +168,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 previous = runtime.load_embodied_report(payload.continue_run_id)
                 architecture = RuleArchitecture(**previous["architecture"])
                 edge_architecture = EdgeArchitecture(**previous["edge_architecture"])
-                initial_prey_genome = tuple(float(value) for value in previous["prey_best_genome"])
-                initial_predator_genome = tuple(float(value) for value in previous["predator_best_genome"])
+                initial_genome = tuple(float(value) for value in previous.get("shared_best_genome", previous["prey_best_genome"]))
             except (KeyError, TypeError, ValueError) as error:
                 raise HTTPException(400, "selected embodied run cannot be continued") from error
             initialization = {"kind": "embodied_run", "run_id": payload.continue_run_id}
@@ -235,13 +232,12 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             runner = BatchFoodWebCoevolutionRunner(
                 evaluator, evolution,
                 BatchFoodWebConfig(
-                    population_mode=payload.batch_population_mode,
+                    population_mode="shared_rule_cohort",
                     generations=payload.batch_generations, episode_steps=payload.batch_episode_steps,
                     trials=payload.batch_trials, validation_trials=payload.batch_validation_trials,
                     test_trials=payload.batch_test_trials,
                     opponent_pool_size=payload.batch_opponents,
                     seed=seed, initial_genome=initial_genome,
-                    initial_prey_genome=initial_prey_genome, initial_predator_genome=initial_predator_genome,
                     workers=payload.workers,
                 ),
             )
@@ -251,16 +247,16 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 evaluator, evolution,
                 ContinuousFoodWebConfig(
                     ticks=payload.ticks, seed=seed, initial_genome=initial_genome,
-                    initial_prey_genome=initial_prey_genome, initial_predator_genome=initial_predator_genome,
                 ),
             )
             job_total = payload.ticks
         job_id = runtime.new_job("embodied_food_web", seed, job_total)
         task_config = {
-            "training_mode": payload.training_mode, "batch_population_mode": payload.batch_population_mode,
+            "training_mode": payload.training_mode, "batch_population_mode": "shared_rule_cohort",
             "algorithm": payload.algorithm,
-            "objective": "restricted_mean_lifetime" if payload.training_mode == "batch" else "completed_lifetime",
+            "objective": "mean_role_lifetime" if payload.training_mode == "batch" else "completed_lifetime",
             "objective_units": "ticks", "reward_shaping": False,
+            "rule_sharing": "one_genome_for_prey_and_predator",
             "seed": seed, "population_size": payload.population_size,
             "initial_sigma": evolution.initial_sigma,
             "mutation_sigma": evolution.mutation_sigma or evolution.initial_sigma,
@@ -303,7 +299,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                     (payload.food_growth_rate * task.environment.plant_energy if payload.max_food > 0 else 0.0)
                     >= payload.prey_count * task.environment.prey_metabolism
                 ),
-                "selection_objective": "first_life_restricted_mean_lifetime",
+                "selection_objective": "mean_role_first_life_lifetime",
                 "common_validation_bank_for_model_selection": True,
                 "final_test_touched_only_after_selection": payload.training_mode == "batch",
                 "causal_baselines": ["zero_rule", "vision_masked"] if payload.training_mode == "batch" else [],
@@ -314,13 +310,14 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             prey, predator = dict(event["prey"]), dict(event["predator"])
             if payload.training_mode == "batch":
                 progress_fields = {"generations": payload.batch_generations, "checkpoint_generation": event["generation"]}
-                task_name = "batch_food_web_coevolution_checkpoint"
+                task_name = "batch_food_web_shared_rule_checkpoint"
             else:
                 progress_fields = {"ticks": payload.ticks, "checkpoint_tick": event["tick"]}
-                task_name = "continuous_food_web_coevolution_checkpoint"
+                task_name = "continuous_food_web_shared_rule_checkpoint"
             snapshot = {
                 "task": task_name, "training_mode": payload.training_mode, "algorithm": payload.algorithm,
                 **progress_fields, "prey": prey, "predator": predator,
+                "shared_best_genome": dict(event.get("shared", prey))["best_genome"],
                 "prey_best_genome": prey["best_genome"], "predator_best_genome": predator["best_genome"],
                 "architecture": asdict(architecture), "edge_architecture": asdict(edge_architecture),
                 "task_config": task_config, "initialization": initialization,
@@ -354,7 +351,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     def diagnose_embodied_random_graphs(
         run_id: str, payload: EmbodiedRandomGraphDiagnosticPayload, background_tasks: BackgroundTasks,
     ) -> dict[str, str]:
-        """Evaluate saved prey/predator rules on matched fresh graph/state samples.
+        """Evaluate the saved shared rule on matched fresh graph/state samples.
 
         This is strictly post-training: it does not mutate a checkpoint,
         consume evolution RNG, or affect the optimizer's stored results.
@@ -366,8 +363,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             task_data = report["task_config"]
             network = EmbodiedNetworkConfig(**task_data["network"])
             environment = FoodWebConfig(**task_data["environment"])
-            prey_genome = tuple(float(value) for value in report["prey_best_genome"])
-            predator_genome = tuple(float(value) for value in report["predator_best_genome"])
+            shared_genome = tuple(float(value) for value in report.get("shared_best_genome", report["prey_best_genome"]))
         except (KeyError, TypeError, ValueError) as error:
             raise HTTPException(404, "selected embodied run is unavailable or incomplete") from error
         seed = _seed(payload.seed)
@@ -381,7 +377,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                     max_steps=int(report.get("episode_steps", task_data.get("max_steps", 200))),
                     trials=payload.sample_count, seed=seed,
                 )
-                evaluation = FoodWebCoevolutionEvaluator(architecture, edge_architecture, task).evaluate(prey_genome, predator_genome)
+                evaluation = FoodWebCoevolutionEvaluator(architecture, edge_architecture, task).evaluate_shared(shared_genome)
                 result = {
                     "mode": "random_graph_random_state", "run_id": run_id, "seed": seed,
                     "sample_count": payload.sample_count,
@@ -408,8 +404,8 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             task_data = report["task_config"]
             network = EmbodiedNetworkConfig(**task_data["network"])
             environment = FoodWebConfig(**task_data["environment"])
-            prey_genome = tuple(float(value) for value in report["prey_best_genome"])
-            predator_genome = tuple(float(value) for value in report.get("predator_best_genome", ()))
+            prey_genome = tuple(float(value) for value in report.get("shared_best_genome", report["prey_best_genome"]))
+            predator_genome = prey_genome
         except (KeyError, TypeError, ValueError) as error:
             raise HTTPException(404, "selected embodied run is unavailable or incomplete") from error
         if max(payload.channel_x, payload.channel_y) >= architecture.state_width:
@@ -513,8 +509,8 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             task_data = left["task_config"]
             network = EmbodiedNetworkConfig(**task_data["network"])
             environment = FoodWebConfig(**task_data["environment"])
-            left_genome = tuple(float(value) for value in left["prey_best_genome"])
-            right_genome = tuple(float(value) for value in right["prey_best_genome"])
+            left_genome = tuple(float(value) for value in left.get("shared_best_genome", left["prey_best_genome"]))
+            right_genome = tuple(float(value) for value in right.get("shared_best_genome", right["prey_best_genome"]))
         except (KeyError, TypeError, ValueError) as error:
             raise HTTPException(422, "checkpoints are unavailable or not architecture-compatible") from error
         seed = _seed(payload.seed)

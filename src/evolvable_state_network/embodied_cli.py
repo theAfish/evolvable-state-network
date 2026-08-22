@@ -75,8 +75,8 @@ global_max_sampling_attempts: 20
 initial_energy_scale: 1.0
 max_food: 80
 food_growth_rate: 24.0
-max_speed: 20.0
-max_turn: 6.283185307179586
+max_speed: 10.0
+max_turn: 9.0
 plant_cluster_count: 4
 plant_cluster_radius: 5.0
 # Used only by continuous mode.
@@ -140,8 +140,6 @@ def _load_network_config(path: Path) -> dict[str, Any]:
 
 def _build_runner(payload: EmbodiedFoodWebTrainingPayload, runtime: ApplicationRuntime, seed: int):
     initial_genome: tuple[float, ...] | None = None
-    initial_prey_genome: tuple[float, ...] | None = None
-    initial_predator_genome: tuple[float, ...] | None = None
     initialization: dict[str, str] = {"kind": "fresh"}
     architecture = RuleArchitecture(
         state_width=payload.state_width, hidden_layers=payload.node_hidden_layers,
@@ -163,8 +161,7 @@ def _build_runner(payload: EmbodiedFoodWebTrainingPayload, runtime: ApplicationR
         previous = runtime.load_embodied_report(payload.continue_run_id)
         architecture = RuleArchitecture(**previous["architecture"])
         edge_architecture = EdgeArchitecture(**previous["edge_architecture"])
-        initial_prey_genome = tuple(float(value) for value in previous["prey_best_genome"])
-        initial_predator_genome = tuple(float(value) for value in previous["predator_best_genome"])
+        initial_genome = tuple(float(value) for value in previous.get("shared_best_genome", previous["prey_best_genome"]))
         initialization = {"kind": "embodied_run", "run_id": payload.continue_run_id}
     if architecture.state_width != payload.state_width:
         raise ValueError(f"selected rule uses {architecture.state_width} node-state channels; set state_width to {architecture.state_width}")
@@ -176,9 +173,9 @@ def _build_runner(payload: EmbodiedFoodWebTrainingPayload, runtime: ApplicationR
     evaluator = FoodWebCoevolutionEvaluator(architecture, edge_architecture, task)
     evolution = EmbodiedRuleEvolutionConfig(generations=payload.batch_generations if payload.training_mode == "batch" else 1, population_size=payload.population_size, seed=seed, initial_genome=initial_genome, algorithm=payload.algorithm, mutation_sigma=payload.mutation_sigma, elite_fraction=payload.elite_fraction, immigrant_fraction=payload.immigrant_fraction, immigrant_sigma=payload.immigrant_sigma, immigrant_mode=payload.immigrant_mode, local_mutation_sigma=payload.local_mutation_sigma, local_offspring_fraction=payload.local_offspring_fraction, regional_fraction=payload.regional_fraction, regional_scale=payload.regional_scale, regional_min_std=payload.regional_min_std, global_fraction=payload.global_fraction, global_parameter_range=payload.global_parameter_range, global_viability_filter=payload.global_viability_filter, global_max_sampling_attempts=payload.global_max_sampling_attempts, max_genome_norm=payload.max_genome_norm, max_parameter_magnitude=payload.max_parameter_magnitude)
     if payload.training_mode == "batch":
-        runner = BatchFoodWebCoevolutionRunner(evaluator, evolution, BatchFoodWebConfig(population_mode=payload.batch_population_mode, generations=payload.batch_generations, episode_steps=payload.batch_episode_steps, trials=payload.batch_trials, validation_trials=payload.batch_validation_trials, test_trials=payload.batch_test_trials, opponent_pool_size=payload.batch_opponents, seed=seed, initial_genome=initial_genome, initial_prey_genome=initial_prey_genome, initial_predator_genome=initial_predator_genome, workers=payload.workers))
+        runner = BatchFoodWebCoevolutionRunner(evaluator, evolution, BatchFoodWebConfig(population_mode="shared_rule_cohort", generations=payload.batch_generations, episode_steps=payload.batch_episode_steps, trials=payload.batch_trials, validation_trials=payload.batch_validation_trials, test_trials=payload.batch_test_trials, opponent_pool_size=payload.batch_opponents, seed=seed, initial_genome=initial_genome, workers=payload.workers))
     else:
-        runner = ContinuousFoodWebCoevolutionRunner(evaluator, evolution, ContinuousFoodWebConfig(ticks=payload.ticks, seed=seed, initial_genome=initial_genome, initial_prey_genome=initial_prey_genome, initial_predator_genome=initial_predator_genome))
+        runner = ContinuousFoodWebCoevolutionRunner(evaluator, evolution, ContinuousFoodWebConfig(ticks=payload.ticks, seed=seed, initial_genome=initial_genome))
     return runner, architecture, edge_architecture, network, task, evolution, initialization, boundary_nodes
 
 
@@ -224,12 +221,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         runner, architecture, edge_architecture, network, task, evolution, initialization, boundary_nodes = _build_runner(payload, runtime, seed)
     except (KeyError, TypeError, ValueError) as error:
         parser.error(str(error))
-    task_config = {"training_mode": payload.training_mode, "batch_population_mode": payload.batch_population_mode, "algorithm": payload.algorithm, "objective": "restricted_mean_lifetime" if payload.training_mode == "batch" else "completed_lifetime", "objective_units": "ticks", "reward_shaping": False, "seed": seed, "population_size": payload.population_size, "initial_sigma": evolution.initial_sigma, "mutation_sigma": evolution.mutation_sigma or evolution.initial_sigma, "elite_fraction": evolution.elite_fraction, "immigrant_fraction": evolution.immigrant_fraction, "immigrant_sigma": evolution.immigrant_sigma or max(.05, evolution.initial_sigma * 3.0), "immigrant_mode": evolution.immigrant_mode, "local_mutation_sigma": evolution.local_mutation_sigma or evolution.mutation_sigma or evolution.initial_sigma, "local_offspring_fraction": evolution.local_offspring_fraction, "regional_fraction": evolution.regional_fraction, "regional_scale": evolution.regional_scale, "regional_min_std": evolution.regional_min_std, "global_fraction": evolution.global_fraction, "global_parameter_range": evolution.global_parameter_range, "global_viability_filter": evolution.global_viability_filter, "global_max_sampling_attempts": evolution.global_max_sampling_attempts, "max_genome_norm": evolution.max_genome_norm, "max_parameter_magnitude": evolution.max_parameter_magnitude, "execution_backend": payload.execution_backend, "device": payload.device, "workers": payload.workers, "body_inputs": list(payload.body_inputs), "embodied_interface": "ray_image_v3_sparse_multichannel_v1", "network": asdict(network), "environment": asdict(task.environment), "prey_count": task.prey_count, "predator_count": task.predator_count, "batch_generations": payload.batch_generations, "batch_episode_steps": payload.batch_episode_steps, "batch_trials": payload.batch_trials, "batch_validation_trials": payload.batch_validation_trials, "batch_test_trials": payload.batch_test_trials, "batch_opponents": payload.batch_opponents, "enforce_survival_pressure": payload.enforce_survival_pressure, "diagnostics": {"boundary_nodes": boundary_nodes, "body_inputs": list(payload.body_inputs), "hidden_nodes": payload.hidden_nodes, "total_nodes": network.nodes, "selection_objective": "first_life_restricted_mean_lifetime"}}
+    task_config = {"training_mode": payload.training_mode, "batch_population_mode": "shared_rule_cohort", "algorithm": payload.algorithm, "objective": "mean_role_lifetime" if payload.training_mode == "batch" else "completed_lifetime", "objective_units": "ticks", "reward_shaping": False, "rule_sharing": "one_genome_for_prey_and_predator", "seed": seed, "population_size": payload.population_size, "initial_sigma": evolution.initial_sigma, "mutation_sigma": evolution.mutation_sigma or evolution.initial_sigma, "elite_fraction": evolution.elite_fraction, "immigrant_fraction": evolution.immigrant_fraction, "immigrant_sigma": evolution.immigrant_sigma or max(.05, evolution.initial_sigma * 3.0), "immigrant_mode": evolution.immigrant_mode, "local_mutation_sigma": evolution.local_mutation_sigma or evolution.mutation_sigma or evolution.initial_sigma, "local_offspring_fraction": evolution.local_offspring_fraction, "regional_fraction": evolution.regional_fraction, "regional_scale": evolution.regional_scale, "regional_min_std": evolution.regional_min_std, "global_fraction": evolution.global_fraction, "global_parameter_range": evolution.global_parameter_range, "global_viability_filter": evolution.global_viability_filter, "global_max_sampling_attempts": evolution.global_max_sampling_attempts, "max_genome_norm": evolution.max_genome_norm, "max_parameter_magnitude": evolution.max_parameter_magnitude, "execution_backend": payload.execution_backend, "device": payload.device, "workers": payload.workers, "body_inputs": list(payload.body_inputs), "embodied_interface": "ray_image_v3_sparse_multichannel_v1", "network": asdict(network), "environment": asdict(task.environment), "prey_count": task.prey_count, "predator_count": task.predator_count, "batch_generations": payload.batch_generations, "batch_episode_steps": payload.batch_episode_steps, "batch_trials": payload.batch_trials, "batch_validation_trials": payload.batch_validation_trials, "batch_test_trials": payload.batch_test_trials, "batch_opponents": payload.batch_opponents, "enforce_survival_pressure": payload.enforce_survival_pressure, "diagnostics": {"boundary_nodes": boundary_nodes, "body_inputs": list(payload.body_inputs), "hidden_nodes": payload.hidden_nodes, "total_nodes": network.nodes, "selection_objective": "mean_role_first_life_lifetime"}}
 
     def checkpoint(event: dict[str, object]) -> None:
         prey, predator = dict(event["prey"]), dict(event["predator"])
         progress = ({"generations": payload.batch_generations, "checkpoint_generation": event["generation"]} if payload.training_mode == "batch" else {"ticks": payload.ticks, "checkpoint_tick": event["tick"]})
-        snapshot = {"task": "batch_food_web_coevolution_checkpoint" if payload.training_mode == "batch" else "continuous_food_web_coevolution_checkpoint", "training_mode": payload.training_mode, "algorithm": payload.algorithm, **progress, "prey": prey, "predator": predator, "prey_best_genome": prey["best_genome"], "predator_best_genome": predator["best_genome"], "architecture": asdict(architecture), "edge_architecture": asdict(edge_architecture), "task_config": task_config, "initialization": initialization}
+        snapshot = {"task": "batch_food_web_shared_rule_checkpoint" if payload.training_mode == "batch" else "continuous_food_web_shared_rule_checkpoint", "training_mode": payload.training_mode, "algorithm": payload.algorithm, **progress, "prey": prey, "predator": predator, "shared_best_genome": dict(event.get("shared", prey))["best_genome"], "prey_best_genome": prey["best_genome"], "predator_best_genome": predator["best_genome"], "architecture": asdict(architecture), "edge_architecture": asdict(edge_architecture), "task_config": task_config, "initialization": initialization}
         runtime.write_embodied_checkpoint(run_id, snapshot)
         print(f"Checkpoint saved: {root / 'embodied_runs' / run_id / 'checkpoint.json'}", flush=True)
 

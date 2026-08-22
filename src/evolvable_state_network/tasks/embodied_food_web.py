@@ -220,7 +220,7 @@ class EmbodiedFoodWebControllerBlueprint(ControllerBlueprint):
 
 @dataclass(frozen=True, slots=True)
 class EmbodiedFoodWebTaskConfig:
-    """One species-specific task; predator and prey receive separate runs."""
+    """One food-web task whose shared rule is exercised in both roles."""
 
     network: EmbodiedNetworkConfig = EmbodiedNetworkConfig()
     environment: FoodWebConfig = FoodWebConfig()
@@ -316,7 +316,12 @@ class FoodWebCoevolutionEvaluation:
 
 
 class FoodWebCoevolutionEvaluator:
-    """Evaluate two independent rule genomes in the *same* food-web episode."""
+    """Evaluate food-web rules in matched episodes.
+
+    ``evaluate`` remains available for reading legacy two-genome experiments.
+    New evolution uses :meth:`evaluate_shared`, which installs one decoded
+    node/edge rule in every organism regardless of species.
+    """
 
     def __init__(
         self, architecture: RuleArchitecture | None = None, edge_architecture: EdgeArchitecture | None = None,
@@ -342,6 +347,46 @@ class FoodWebCoevolutionEvaluator:
             _public_behavior(_mean_behavior([item[2] for item in trial_lifetimes])),
             _public_behavior(_mean_behavior([item[3] for item in trial_lifetimes])),
         )
+
+    def evaluate_shared(
+        self, genome: Sequence[float], *, seeds: Sequence[int] | None = None,
+        observation_mask: Literal["none", "vision"] = "none",
+    ) -> FoodWebCoevolutionEvaluation:
+        """Score one rule after it adapts separate random graphs to both roles.
+
+        The rule parameters are deliberately identical for prey and predators.
+        Their different sensory/body streams, graph samples, and recurrent
+        state are the only sources of role-specific behaviour.
+        """
+        shared = tuple(float(value) for value in genome)
+        trial_seeds = (
+            tuple(int(seed) for seed in seeds)
+            if seeds is not None
+            else tuple(self.config.seed + 10_007 * index for index in range(self.config.trials))
+        )
+        if not trial_seeds:
+            raise ValueError("shared evaluation needs at least one seed")
+        trials = tuple(
+            self._trial(
+                shared, shared, seed,
+                prey_observation_mask=observation_mask,
+                predator_observation_mask=observation_mask,
+            )
+            for seed in trial_seeds
+        )
+        return FoodWebCoevolutionEvaluation(
+            shared, shared,
+            tuple(item[0] for item in trials), tuple(item[1] for item in trials),
+            _public_behavior(_mean_behavior([item[2] for item in trials])),
+            _public_behavior(_mean_behavior([item[3] for item in trials])),
+        )
+
+    def shared_score(self, evaluation: FoodWebCoevolutionEvaluation) -> float:
+        """Balance the selection pressure across the roles that are present."""
+        scores = [evaluation.prey_mean_lifetime]
+        if self.config.predator_count:
+            scores.append(evaluation.predator_mean_lifetime)
+        return fmean(scores)
 
     def evaluate_focal(
         self, genome: Sequence[float], opponents: Sequence[Sequence[float]],
@@ -567,6 +612,26 @@ def _make_optimizer(
     )
 
 
+def _shared_initial_genome(
+    dimension: int, *, initial: Sequence[float] | None,
+    prey_initial: Sequence[float] | None = None,
+    predator_initial: Sequence[float] | None = None,
+) -> tuple[float, ...]:
+    """Resolve a warm start without silently retaining role-specific rules."""
+    candidates = [
+        tuple(float(value) for value in genome)
+        for genome in (initial, prey_initial, predator_initial) if genome is not None
+    ]
+    if any(len(genome) != dimension for genome in candidates):
+        raise ValueError("initial genome does not match the joint rule architecture")
+    if len(set(candidates)) > 1:
+        raise ValueError(
+            "shared-rule evolution cannot warm start from different prey and predator genomes; "
+            "select one shared genome or a shared-rule run"
+        )
+    return candidates[0] if candidates else (0.0,) * dimension
+
+
 class EmbodiedRuleEvolutionRunner:
     """Optimises only rule genomes; every evaluation rebuilds random agents."""
 
@@ -599,7 +664,7 @@ class EmbodiedRuleEvolutionRunner:
 
 
 class FoodWebCoevolutionRunner:
-    """Run prey and predator optimizer populations in matched world episodes."""
+    """Legacy entry point for evolving one shared rule in matched episodes."""
 
     def __init__(self, evaluator: FoodWebCoevolutionEvaluator, config: EmbodiedRuleEvolutionConfig) -> None:
         self.evaluator, self.config = evaluator, config
@@ -607,41 +672,38 @@ class FoodWebCoevolutionRunner:
             raise ValueError("initial genome does not match the joint rule architecture")
 
     def run(self, progress: Callable[[dict[str, object]], None] | None = None) -> dict[str, object]:
-        prey_optimizer = _make_optimizer(self.evaluator.codec.dimension, self.config, codec=self.evaluator.codec)
-        predator_optimizer = _make_optimizer(self.evaluator.codec.dimension, self.config, seed=self.config.seed + 1, codec=self.evaluator.codec)
+        optimizer = _make_optimizer(self.evaluator.codec.dimension, self.config, codec=self.evaluator.codec)
         history: list[dict[str, object]] = []
-        best_prey: FoodWebCoevolutionEvaluation | None = None
-        best_predator: FoodWebCoevolutionEvaluation | None = None
+        best: FoodWebCoevolutionEvaluation | None = None
         for _ in range(self.config.generations):
-            prey_population, predator_population = prey_optimizer.ask(), predator_optimizer.ask()
-            evaluations = tuple(self.evaluator.evaluate(prey, predator) for prey, predator in zip(prey_population, predator_population, strict=True))
-            prey_winner = max(evaluations, key=lambda item: item.prey_mean_lifetime)
-            predator_winner = max(evaluations, key=lambda item: item.predator_mean_lifetime)
-            if best_prey is None or prey_winner.prey_mean_lifetime > best_prey.prey_mean_lifetime:
-                best_prey = prey_winner
-            if best_predator is None or predator_winner.predator_mean_lifetime > best_predator.predator_mean_lifetime:
-                best_predator = predator_winner
-            prey_optimizer.tell(prey_population, [item.prey_mean_lifetime for item in evaluations])
-            predator_optimizer.tell(predator_population, [item.predator_mean_lifetime for item in evaluations])
+            population = optimizer.ask()
+            evaluations = tuple(self.evaluator.evaluate_shared(genome) for genome in population)
+            scores = [self.evaluator.shared_score(item) for item in evaluations]
+            winner = max(evaluations, key=self.evaluator.shared_score)
+            if best is None or self.evaluator.shared_score(winner) > self.evaluator.shared_score(best):
+                best = winner
+            optimizer.tell(population, scores)
             row = {
-                "generation": prey_optimizer.generation,
-                "prey_best_lifetime": prey_winner.prey_mean_lifetime,
+                "generation": optimizer.generation,
+                "shared_best_lifetime": self.evaluator.shared_score(winner),
+                "prey_best_lifetime": winner.prey_mean_lifetime,
                 "prey_mean_lifetime": fmean(item.prey_mean_lifetime for item in evaluations),
-                "predator_best_lifetime": predator_winner.predator_mean_lifetime,
-                "prey_sampling": getattr(prey_optimizer, "last_sampling_telemetry", {}),
-                "predator_sampling": getattr(predator_optimizer, "last_sampling_telemetry", {}),
+                "predator_best_lifetime": winner.predator_mean_lifetime,
+                "shared_sampling": getattr(optimizer, "last_sampling_telemetry", {}),
                 "predator_mean_lifetime": fmean(item.predator_mean_lifetime for item in evaluations),
-                "prey_sigma": prey_optimizer.sigma, "predator_sigma": predator_optimizer.sigma,
+                "shared_sigma": optimizer.sigma,
             }
             history.append(row)
             if progress:
                 progress(row)
-        assert best_prey is not None and best_predator is not None
+        assert best is not None
         return {
-            "task": "food_web_coevolution",
-            "algorithm": self.config.algorithm, "objective": "restricted_mean_lifetime", "objective_units": "ticks",
-            "prey_best_genome": list(best_prey.prey_genome), "prey_best_lifetime": best_prey.prey_mean_lifetime,
-            "predator_best_genome": list(best_predator.predator_genome), "predator_best_lifetime": best_predator.predator_mean_lifetime,
+            "task": "food_web_shared_rule_evolution",
+            "algorithm": self.config.algorithm, "objective": "mean_role_lifetime", "objective_units": "ticks",
+            "rule_sharing": "one_genome_for_prey_and_predator",
+            "shared_best_genome": list(best.prey_genome),
+            "prey_best_genome": list(best.prey_genome), "prey_best_lifetime": best.prey_mean_lifetime,
+            "predator_best_genome": list(best.prey_genome), "predator_best_lifetime": best.predator_mean_lifetime,
             "history": history,
         }
 
@@ -673,7 +735,7 @@ class BatchFoodWebConfig:
 
 
 class BatchFoodWebCoevolutionRunner:
-    """Alternately optimize each species in complete, directly comparable batches."""
+    """Evolve one local update rule in complete, directly comparable batches."""
 
     def __init__(
         self, evaluator: FoodWebCoevolutionEvaluator, evolution: EmbodiedRuleEvolutionConfig,
@@ -696,6 +758,162 @@ class BatchFoodWebCoevolutionRunner:
         self, progress: Callable[[dict[str, object]], None] | None = None,
         should_stop: Callable[[], bool] | None = None,
     ) -> dict[str, object]:
+        return self._run_shared(progress=progress, should_stop=should_stop)
+
+    def _run_shared(
+        self, *, progress: Callable[[dict[str, object]], None] | None,
+        should_stop: Callable[[], bool] | None,
+    ) -> dict[str, object]:
+        """Evolve one update rule across prey and predator embodiments.
+
+        A candidate is evaluated in complete worlds, never against a separate
+        role-specific opponent population.  This makes the genome's fitness
+        reflect how well its local dynamics adapt fresh random graphs to both
+        body roles.
+        """
+        initial = _shared_initial_genome(
+            self.evaluator.codec.dimension,
+            initial=(self.config.initial_genome or self.evolution.initial_genome),
+            prey_initial=self.config.initial_prey_genome,
+            predator_initial=self.config.initial_predator_genome,
+        )
+        optimizer_config = replace(
+            self.evolution, generations=self.config.generations,
+            population_size=self.evolution.population_size,
+            seed=self.config.seed, initial_genome=initial,
+        )
+        optimizer = _make_optimizer(
+            self.evaluator.codec.dimension, optimizer_config, codec=self.evaluator.codec,
+        )
+        best = (float("-inf"), initial, _public_behavior(_mean_behavior([])), _public_behavior(_mean_behavior([])))
+        history: list[dict[str, object]] = []
+        evaluations = validation_evaluations = 0
+        validation_seeds = tuple(
+            self.config.seed + 90_000_019 + trial * 10_007
+            for trial in range(self.config.validation_trials)
+        )
+        test_seeds = tuple(
+            self.config.seed + 190_000_033 + trial * 10_007
+            for trial in range(self.config.test_trials)
+        )
+        for generation in range(1, self.config.generations + 1):
+            if should_stop and should_stop():
+                raise EvolutionTerminated()
+            seeds = tuple(
+                self.config.seed + generation * 1_000_003 + trial * 10_007
+                for trial in range(self.config.trials)
+            )
+            population = optimizer.ask()
+            rows = tuple(self.evaluator.evaluate_shared(genome, seeds=seeds) for genome in population)
+            scores = tuple(self.evaluator.shared_score(row) for row in rows)
+            optimizer.tell(population, scores)
+            winner_index = max(range(len(population)), key=lambda index: scores[index])
+            winner = rows[winner_index]
+            evaluations += len(population) * len(seeds)
+            validation = self.evaluator.evaluate_shared(population[winner_index], seeds=validation_seeds)
+            validation_score = self.evaluator.shared_score(validation)
+            validation_evaluations += len(validation_seeds)
+            if validation_score > best[0]:
+                best = (
+                    validation_score, tuple(population[winner_index]),
+                    dict(validation.prey_behavior), dict(validation.predator_behavior),
+                )
+            row = {
+                "generation": generation,
+                "shared_best_lifetime": scores[winner_index],
+                "shared_mean_lifetime": fmean(scores),
+                "shared_validation_lifetime": validation_score,
+                "prey_best_lifetime": winner.prey_mean_lifetime,
+                "prey_mean_lifetime": fmean(item.prey_mean_lifetime for item in rows),
+                "prey_validation_lifetime": validation.prey_mean_lifetime,
+                "predator_best_lifetime": winner.predator_mean_lifetime if self.evaluator.config.predator_count else 0.0,
+                "predator_mean_lifetime": (
+                    fmean(item.predator_mean_lifetime for item in rows)
+                    if self.evaluator.config.predator_count else 0.0
+                ),
+                "predator_validation_lifetime": (
+                    validation.predator_mean_lifetime if self.evaluator.config.predator_count else 0.0
+                ),
+                "shared_genotype": population_statistics(
+                    population, node_dimension=self.evaluator.architecture.parameter_count,
+                ),
+                "shared_sampling": getattr(optimizer, "last_sampling_telemetry", {}),
+                "shared_normalizations": getattr(optimizer, "last_ask_normalizations", 0),
+                "episode_seeds": list(seeds), "validation_seeds": list(validation_seeds),
+            }
+            history.append(row)
+            shared_snapshot = self._snapshot(
+                optimizer, (best[0], best[1], {"prey": best[2], "predator": best[3]}),
+                evaluations, validation_evaluations,
+            )
+            prey_snapshot = {**shared_snapshot, "best_lifetime": validation.prey_mean_lifetime, "behavior": best[2]}
+            predator_snapshot = {**shared_snapshot, "best_lifetime": validation.predator_mean_lifetime if self.evaluator.config.predator_count else 0.0, "behavior": best[3]}
+            if progress:
+                progress({
+                    "phase": "batch_food_web_shared_rule", "training_mode": "batch",
+                    "algorithm": self.evolution.algorithm, "objective": "mean_role_lifetime",
+                    "objective_units": "ticks", "generation": generation,
+                    "generations": self.config.generations, "workers": 1,
+                    "execution_backend": self.evaluator.config.network.execution_backend,
+                    "device": _execution_device(self.evaluator.config.network),
+                    "shared": shared_snapshot, "prey": prey_snapshot,
+                    "predator": predator_snapshot, "history": list(history),
+                })
+        if should_stop and should_stop():
+            raise EvolutionTerminated()
+        selected = self.evaluator.evaluate_shared(best[1], seeds=test_seeds)
+        zero = self.evaluator.evaluate_shared((0.0,) * self.evaluator.codec.dimension, seeds=test_seeds)
+        vision_masked = self.evaluator.evaluate_shared(best[1], seeds=test_seeds, observation_mask="vision")
+        shared_snapshot = self._snapshot(
+            optimizer, (best[0], best[1], {"prey": best[2], "predator": best[3]}),
+            evaluations, validation_evaluations,
+        )
+        shared_snapshot.update({
+            "selection_validation_lifetime": best[0],
+            "test_lifetime": self.evaluator.shared_score(selected),
+            "test_evaluations": 3 * len(test_seeds),
+            "baselines": {
+                "zero_rule_lifetime": self.evaluator.shared_score(zero),
+                "vision_masked_lifetime": self.evaluator.shared_score(vision_masked),
+            },
+        })
+
+        def role_snapshot(role: Species) -> dict[str, object]:
+            is_prey = role is Species.PREY
+            role_selected = selected.prey_mean_lifetime if is_prey else selected.predator_mean_lifetime
+            role_zero = zero.prey_mean_lifetime if is_prey else zero.predator_mean_lifetime
+            role_masked = vision_masked.prey_mean_lifetime if is_prey else vision_masked.predator_mean_lifetime
+            return {
+                **shared_snapshot, "best_lifetime": best[0], "behavior": best[2] if is_prey else best[3],
+                "test_lifetime": role_selected,
+                "test_behavior": dict(selected.prey_behavior if is_prey else selected.predator_behavior),
+                "baselines": {
+                    "zero_rule_lifetime": role_zero,
+                    "vision_masked_lifetime": role_masked,
+                    "lifetime_gain_over_zero_rule": role_selected - role_zero,
+                    "vision_lifetime_delta": role_selected - role_masked,
+                },
+            }
+
+        prey_snapshot, predator_snapshot = role_snapshot(Species.PREY), role_snapshot(Species.PREDATOR)
+        return {
+            "task": "batch_food_web_shared_rule_evolution", "training_mode": "batch",
+            "algorithm": self.evolution.algorithm, "objective": "mean_role_lifetime",
+            "objective_units": "ticks", "rule_sharing": "one_genome_for_prey_and_predator",
+            "population_size": self.evolution.population_size,
+            "population_mode": "shared_rule_cohort", "world_count": self.evolution.population_size,
+            "generations": self.config.generations, "episode_steps": self.config.episode_steps,
+            "trials": self.config.trials, "validation_trials": self.config.validation_trials,
+            "test_trials": self.config.test_trials, "test_seeds": list(test_seeds),
+            "execution": {"workers": 1, "backend": self.evaluator.config.network.execution_backend, "device": _execution_device(self.evaluator.config.network)},
+            "shared": shared_snapshot, "prey": prey_snapshot, "predator": predator_snapshot,
+            "history": history, "shared_best_genome": list(best[1]),
+            # Compatibility aliases; both deliberately reference the one rule.
+            "prey_best_genome": list(best[1]), "predator_best_genome": list(best[1]),
+        }
+
+        # Legacy independent-species implementation retained below only to
+        # make historical checkpoints readable; it is unreachable for new runs.
         initial = self.config.initial_genome if self.config.initial_genome is not None else self.evolution.initial_genome
         zero = (0.0,) * self.evaluator.codec.dimension
         prey_initial = self.config.initial_prey_genome if self.config.initial_prey_genome is not None else (initial or zero)
@@ -1154,7 +1372,7 @@ class ContinuousFoodWebConfig:
 
 
 class ContinuousFoodWebCoevolutionRunner:
-    """Keep one food web alive while each death replaces exactly one organism."""
+    """Keep one food web alive while one rule library serves every species."""
 
     def __init__(
         self, evaluator: FoodWebCoevolutionEvaluator, evolution: EmbodiedRuleEvolutionConfig,
@@ -1169,12 +1387,15 @@ class ContinuousFoodWebCoevolutionRunner:
         self, progress: Callable[[dict[str, object]], None] | None = None,
         should_stop: Callable[[], bool] | None = None,
     ) -> dict[str, object]:
-        initial = self.config.initial_genome if self.config.initial_genome is not None else self.evolution.initial_genome
-        prey_initial = self.config.initial_prey_genome if self.config.initial_prey_genome is not None else initial
-        predator_initial = self.config.initial_predator_genome if self.config.initial_predator_genome is not None else initial
-        prey_config = EmbodiedRuleEvolutionConfig(
+        initial = _shared_initial_genome(
+            self.evaluator.codec.dimension,
+            initial=(self.config.initial_genome or self.evolution.initial_genome),
+            prey_initial=self.config.initial_prey_genome,
+            predator_initial=self.config.initial_predator_genome,
+        )
+        shared_config = EmbodiedRuleEvolutionConfig(
             generations=1, population_size=self.evolution.population_size,
-            initial_sigma=self.evolution.initial_sigma, seed=self.config.seed, initial_genome=prey_initial,
+            initial_sigma=self.evolution.initial_sigma, seed=self.config.seed, initial_genome=initial,
             algorithm=self.evolution.algorithm,
             mutation_sigma=self.evolution.mutation_sigma, elite_fraction=self.evolution.elite_fraction,
             immigrant_fraction=self.evolution.immigrant_fraction, immigrant_sigma=self.evolution.immigrant_sigma,
@@ -1182,25 +1403,17 @@ class ContinuousFoodWebCoevolutionRunner:
             max_parameter_magnitude=self.evolution.max_parameter_magnitude,
             **_multiscale_kwargs(self.evolution),
         )
-        predator_config = EmbodiedRuleEvolutionConfig(
-            generations=1, population_size=self.evolution.population_size,
-            initial_sigma=self.evolution.initial_sigma, seed=self.config.seed, initial_genome=predator_initial,
-            algorithm=self.evolution.algorithm,
-            mutation_sigma=self.evolution.mutation_sigma, elite_fraction=self.evolution.elite_fraction,
-            immigrant_fraction=self.evolution.immigrant_fraction, immigrant_sigma=self.evolution.immigrant_sigma,
-            immigrant_mode=self.evolution.immigrant_mode, max_genome_norm=self.evolution.max_genome_norm,
-            max_parameter_magnitude=self.evolution.max_parameter_magnitude,
-            **_multiscale_kwargs(self.evolution),
+        shared_library = OnlineRuleLibrary(
+            self.evaluator.codec, shared_config, self.evaluator.config.network, seed=self.config.seed + 101,
         )
-        prey_library = OnlineRuleLibrary(self.evaluator.codec, prey_config, self.evaluator.config.network, seed=self.config.seed + 101)
-        predator_library = OnlineRuleLibrary(self.evaluator.codec, predator_config, self.evaluator.config.network, seed=self.config.seed + 202)
         world = FoodWebEnvironment(self.evaluator.config.environment, seed=self.config.seed)
         agents = make_reference_population(
             prey_count=self.evaluator.config.prey_count, predator_count=self.evaluator.config.predator_count,
             width=self.evaluator.config.environment.width, height=self.evaluator.config.environment.height,
             prey_initial_energy=self.evaluator.config.environment.prey_initial_energy, predator_initial_energy=self.evaluator.config.environment.predator_initial_energy, controller=RandomControllerBlueprint(), seed=self.config.seed,
         )
-        libraries = {Species.PREY: prey_library, Species.PREDATOR: predator_library}
+        # A birth selects from the same optimizer cohort for either species.
+        libraries = {Species.PREY: shared_library, Species.PREDATOR: shared_library}
         for organism in agents:
             organism.controller = libraries[organism.species].birth()
             world.add(organism)
@@ -1221,6 +1434,10 @@ class ContinuousFoodWebCoevolutionRunner:
         def library_snapshot(species: Species) -> dict[str, object]:
             name = str(species)
             snapshot = libraries[species].snapshot()
+            # The optimizer statistics are shared, while the ecology counters
+            # remain role-specific for inspection and plotting.
+            snapshot["shared_deaths"] = snapshot["deaths"]
+            snapshot["deaths"] = cumulative_deaths[name]
             samples = max(1, int(body_totals[name]["samples"]))
             snapshot["behavior"] = {
                 "meals": cumulative_meals[name],
@@ -1300,23 +1517,25 @@ class ContinuousFoodWebCoevolutionRunner:
                 ),
             })
             if progress and (tick == 1 or tick % 4 == 0 or tick == self.config.ticks):
-                progress({"tick": tick, "ticks": self.config.ticks, "phase": "continuous_food_web", "objective": "completed_lifetime", "objective_units": "ticks", "population": world.snapshot()["population"], "ecology": ecology, "execution_backend": self.evaluator.config.network.execution_backend, "device": _execution_device(self.evaluator.config.network), "prey": library_snapshot(Species.PREY), "predator": library_snapshot(Species.PREDATOR), "telemetry": list(telemetry)})
+                progress({"tick": tick, "ticks": self.config.ticks, "phase": "continuous_food_web_shared_rule", "objective": "completed_lifetime", "objective_units": "ticks", "population": world.snapshot()["population"], "ecology": ecology, "execution_backend": self.evaluator.config.network.execution_backend, "device": _execution_device(self.evaluator.config.network), "shared": shared_library.snapshot(), "prey": library_snapshot(Species.PREY), "predator": library_snapshot(Species.PREDATOR), "telemetry": list(telemetry)})
         for controller in controllers.values():
             controller.end_episode()
-        return {"task": "continuous_food_web_coevolution", "algorithm": self.evolution.algorithm, "objective": "completed_lifetime", "objective_units": "ticks", "population_size": self.evolution.population_size, "initial_sigma": self.evolution.initial_sigma, "ticks": self.config.ticks, "execution": {"workers": 1, "backend": self.evaluator.config.network.execution_backend, "device": _execution_device(self.evaluator.config.network)}, "population": world.snapshot()["population"], "ecology": ecology, "prey": library_snapshot(Species.PREY), "predator": library_snapshot(Species.PREDATOR), "telemetry": list(telemetry), "prey_best_genome": list(prey_library.archive[0][1]), "predator_best_genome": list(predator_library.archive[0][1])}
+        shared_snapshot = shared_library.snapshot()
+        return {"task": "continuous_food_web_shared_rule_evolution", "algorithm": self.evolution.algorithm, "objective": "completed_lifetime", "objective_units": "ticks", "rule_sharing": "one_genome_for_prey_and_predator", "population_size": self.evolution.population_size, "initial_sigma": self.evolution.initial_sigma, "ticks": self.config.ticks, "execution": {"workers": 1, "backend": self.evaluator.config.network.execution_backend, "device": _execution_device(self.evaluator.config.network)}, "population": world.snapshot()["population"], "ecology": ecology, "shared": shared_snapshot, "prey": library_snapshot(Species.PREY), "predator": library_snapshot(Species.PREDATOR), "telemetry": list(telemetry), "shared_best_genome": list(shared_library.archive[0][1]), "prey_best_genome": list(shared_library.archive[0][1]), "predator_best_genome": list(shared_library.archive[0][1])}
 
 
 class FoodWebDemonstration:
-    """Mutable visual replay of the two best rule genomes in a fresh ecology."""
+    """Mutable visual replay of one shared rule in a fresh ecology."""
 
     def __init__(
-        self, evaluator: FoodWebCoevolutionEvaluator, prey_genome: Sequence[float], predator_genome: Sequence[float],
+        self, evaluator: FoodWebCoevolutionEvaluator, shared_genome: Sequence[float],
         *, seed: int,
     ) -> None:
         self.evaluator, self.random, self.tick = evaluator, Random(seed + 41), 0
         self.world = FoodWebEnvironment(evaluator.config.environment, seed=seed)
-        prey = evaluator._blueprint(tuple(float(value) for value in prey_genome), seed, Species.PREY)
-        predator = evaluator._blueprint(tuple(float(value) for value in predator_genome), seed, Species.PREDATOR)
+        genome = tuple(float(value) for value in shared_genome)
+        prey = evaluator._blueprint(genome, seed, Species.PREY)
+        predator = evaluator._blueprint(genome, seed, Species.PREDATOR)
         agents = make_reference_population(
             prey_count=evaluator.config.prey_count, predator_count=evaluator.config.predator_count,
             width=evaluator.config.environment.width, height=evaluator.config.environment.height,

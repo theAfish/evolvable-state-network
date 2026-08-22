@@ -25,8 +25,10 @@ nodes and maps one `[-1, 1]` output per action node into the environment's
 action space. `EmbodiedNetwork` then creates a fresh random graph and fresh
 random node states for every agent/episode; only the node and edge update-rule
 genome is inherited. The food-web implementation in
-`tasks.embodied_food_web` evaluates prey and predator update rules on matched
-random worlds, and
+`tasks.embodied_food_web` evaluates one shared node-and-edge update-rule genome
+on matched random worlds. The same rule is installed in prey and predator
+networks, so evolution favors local dynamics that adapt fresh random graphs
+and state samples to both body roles, rather than task-specific controllers.
 can start CMA-ES from an exported joint rule genome via
 `EmbodiedRuleEvolutionConfig(initial_genome=...)`.
 
@@ -65,20 +67,20 @@ execution backend keeps agent node/edge state in persistent tensors and can
 run on `cpu`, `cuda`, or `auto`; the reference `python` backend remains
 available for comparisons. Batch evolution can also evaluate candidate
 genomes in reusable spawned processes with `workers=0` selecting up to eight
-CPU workers automatically. CPU workers preserve candidate order, common seed
-banks, and frozen opponents. CUDA intentionally uses one process to avoid
+CPU workers automatically. CPU workers preserve candidate order and common
+seed banks. CUDA intentionally uses one process to avoid
 duplicating GPU contexts; for the default small 64-node agents, vectorized
 Torch CPU plus several candidate workers is normally faster than CUDA.
 
 In the web UI, a completed embodied run can also be selected as a continuation
-starting point. Its prey and predator best genomes seed their respective new
-online libraries; the newly chosen population, world, and network settings are
-then used for the new run. This restarts optimization from the learned rules;
+starting point. Its shared best genome seeds the new shared online library; the
+newly chosen population, world, and network settings are then used for the new
+run. This restarts optimization from the learned rule;
 it does not restore an in-progress CMA-ES optimizer state.
 
 Each embodied run writes an atomic `checkpoint.json` when live progress is
 reported (the first tick, then every four ticks, and the final tick). It holds
-the current best genome for each species and can be selected as a continuation
+the current shared best genome and can be selected as a continuation
 source even if the original run has not completed.
 
 A minimal, deterministic experimental foundation for evolving **generic local

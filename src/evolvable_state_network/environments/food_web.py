@@ -76,8 +76,8 @@ class FoodWebConfig:
     prey_energy: float = 4.0
     prey_initial_energy: float = 9.0
     predator_initial_energy: float = 14.0
-    max_turn: float = 2 * pi
-    max_speed: float = 20.0
+    max_turn: float = 9.0
+    max_speed: float = 10.0
     interaction_range: float = 2.0
     spawn_cluster_radius: float = 12.0
     spawn_candidate_count: int = 48
